@@ -1,4 +1,5 @@
 *.pdf
+*.png
 *.npy
 *.npz
 *.eqx
