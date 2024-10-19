@@ -1,0 +1,10 @@
+*.pdf
+*.npy
+*.npz
+*.eqx
+
+tests/
+scripts/
+__pycache__/
+
+affine.py

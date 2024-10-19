@@ -1,0 +1,54 @@
+[project]
+name = "sbiax"
+version = "0.0.0"
+description = "Fast, parallel and lightweight simulation-based inference in JAX."
+readme = "README.md"
+requires-python ="~=3.12"
+license = {file = "LICENSE"}
+authors = [
+  {name = "Jed Homer", email = "jedhmr@gmail.com"},
+]
+keywords = [
+    "simulation-based-inference",
+    "likelihood-free-inference",
+    "jax", 
+    "deep-learning", 
+    "bayesian-inference",
+    "generative-models", 
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+urls = {repository = "https://github.com/homerjed/sbi1pdf"}
+
+dependencies = [
+    'jax==0.4.33',
+    'equinox',
+    'diffrax',
+    'optax',
+    'beartype',
+    'ml_collections',
+    'blackjax',
+    'numpy',
+    'matplotlib',
+    'einops',
+    'cloudpickle',
+    'tqdm',
+    'scikit-learn',
+    'chainconsumer',
+    'tensorflow_probability',
+    'flowjax',
+    'optuna'
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["*"]
