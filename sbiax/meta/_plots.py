@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from chainconsumer import Chain, ChainConfig, ChainConsumer, PlotConfig, Truth
 
-from utils import make_df
+from ..utils import make_df
 
 """
     Posterior plotting etc

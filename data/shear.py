@@ -11,7 +11,7 @@ def get_shear_experiment():
 
     covariance   = np.loadtxt(data_dir + "covariance_cosmic_shear_PMEpaper.dat")
     precision    = np.linalg.inv(np.matrix(covariance))
-    fiducial_dv  = np.loadtxt(data_dir + "DES_shear-shear_a1.0_b0.5_data_vector")[:, 1]
+    mu           = np.loadtxt(data_dir + "DES_shear-shear_a1.0_b0.5_data_vector")[:, 1]
     derivatives  = np.loadtxt(data_dir + "derivatives.dat").T
     param_names  = [r"$\Omega_m$", r"$\sigma_8$", r"$w_0$"]
     alpha        = np.array([0.3156, 0.831, -1.0]) # prior parameters (DES prior) # Om, s8, w0
@@ -23,7 +23,7 @@ def get_shear_experiment():
     returns = (
         alpha,
         param_names,
-        fiducial_dv,
+        mu,
         covariance,
         precision,
         derivatives,
@@ -38,17 +38,17 @@ def get_shear_experiment():
     ]
 
 
-def linearized_model(_alpha, fiducial_dv, alpha, derivatives):
+def linearized_model(_alpha, mu, alpha, derivatives):
     """ Linearised model always uses true mu_0, C """
-    return fiducial_dv + jnp.dot(_alpha - alpha, derivatives)
+    return mu + jnp.dot(_alpha - alpha, derivatives)
 
 
-def simulator(key, parameters, alpha, fiducial_dv, derivatives, covariance):
+def simulator(key, parameters, alpha, mu, derivatives, covariance):
     d = jr.multivariate_normal(
         key=key, 
         mean=linearized_model(
             _alpha=parameters, 
-            fiducial_dv=fiducial_dv, 
+            mu=mu, 
             alpha=alpha, 
             derivatives=derivatives
         ),
@@ -67,7 +67,7 @@ def get_estimated_objects(key, n_sims):
     (
         alpha,
         param_names,
-        fiducial_dv,
+        mu,
         covariance,
         precision,
         derivatives,
@@ -79,14 +79,14 @@ def get_estimated_objects(key, n_sims):
 
     # Draw from true data-generating likelihood
     fiducials = jr.multivariate_normal(
-        key, mean=fiducial_dv, cov=covariance, shape=(n_sims,)
+        key, mean=mu, cov=covariance, shape=(n_sims,)
     )
 
     # Estimated expectation and covariance
     S = jnp.cov(fiducials, rowvar=False)
 
     # Calculate estimated precision matrix
-    H = (n_sims - fiducial_dv.size - 2.) / (n_sims - 1.) # Hartlap de-bias for data covariance (=h^-1)
+    H = (n_sims - mu.size - 2.) / (n_sims - 1.) # Hartlap de-bias for data covariance (=h^-1)
     S_ = H * jnp.linalg.inv(S) # Hartlap on Cov. in Fisher + Cov.
 
     # Calculate estimated Fisher information 
@@ -108,7 +108,7 @@ def get_experiment_data(key, good, n_sims, n_obs, *, results_dir):
     (
         alpha,
         param_names,
-        fiducial_dv,
+        mu,
         covariance,
         precision,
         derivatives,
@@ -130,7 +130,7 @@ def get_experiment_data(key, good, n_sims, n_obs, *, results_dir):
     _simulator = partial(
         simulator, 
         alpha=alpha, 
-        fiducial_dv=fiducial_dv, 
+        mu=mu, 
         derivatives=derivatives,
         covariance=covariance
     )
@@ -148,14 +148,9 @@ def get_experiment_data(key, good, n_sims, n_obs, *, results_dir):
     keys = jr.split(key_simulate, n_sims)
     D = jax.vmap(_simulator)(keys, Y)
 
-    # Mock observations
-    D_s = jr.multivariate_normal(
-        key_obs, fiducial_dv, covariance, (n_obs,)
-    )
-
     # Compress latins, observations and expectation
     mus = jax.vmap(linearized_model, in_axes=(0, None, None, None))(
-        Y, fiducial_dv, alpha, derivatives
+        Y, mu, alpha, derivatives
     )
     X = jax.vmap(_mle, in_axes=(0, 0, None, 0, None, None))(
         D, 

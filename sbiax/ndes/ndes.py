@@ -1,19 +1,16 @@
-from typing import Callable, Sequence, Any, Tuple
+from typing import Callable, Sequence, Tuple, Any
 import jax
 import jax.numpy as jnp
 import jax.random as jr 
 import equinox as eqx
+from jaxtyping import Key, Array
+from tensorflow_probability.substrates.jax.distributions import Distribution
 
-# from .naming import Ensemble, NeuralDensityEstimator, Array, Prior, Key
-Prior = Ensemble = NeuralDensityEstimator = Array = Key = Any
-
-"""
-    State sampling could be one function... check if nde is fisher trained
-"""
+Prior = Distribution 
 
 
 def nde_log_prob(
-    nde: NeuralDensityEstimator, 
+    nde: eqx.Module, 
     data: Array, 
     theta: Array, 
     preprocess_fn: Callable | None = None, 
@@ -26,7 +23,7 @@ def nde_log_prob(
 
 
 def nde_log_prob_posterior(
-    nde: NeuralDensityEstimator, 
+    nde: eqx.Module, 
     data: Array, 
     theta: Array, 
     prior: Prior, 
@@ -42,7 +39,7 @@ def nde_log_prob_posterior(
 
 
 def joint_log_prob_posterior(
-    ndes: Sequence[NeuralDensityEstimator], 
+    ndes: Sequence[eqx.Module], 
     data: Array, 
     theta: Array, 
     prior: Prior, 
@@ -61,7 +58,7 @@ def joint_log_prob_posterior(
 
 
 def get_nde_log_prob_fn(
-    nde: NeuralDensityEstimator, 
+    nde: eqx.Module, 
     data: Array, 
     prior: Prior, 
     preprocess_fn: Callable | None = None, 
@@ -76,14 +73,6 @@ def get_nde_log_prob_fn(
             **kwargs
         )
     return eqx.filter_jit(nde_log_prob_fn)
-
-
-def get_ensemble_log_prob_prior_fn(nde_list):
-    """
-        Get ensemble as an object to use for inference
-        so that loading it is easier...
-    """
-    pass
 
 
 def sample_state(
@@ -140,15 +129,11 @@ def _sample_initial_state(
 
 def sample_nde_state(
     key: Key, 
-    nde: NeuralDensityEstimator, 
+    nde: eqx.Module, 
     asymptotic: Any, 
     n_walkers: int, 
     chain_length: int
 ) -> Array:
-    """ 
-        Sample posterior samples / weights for state from Fisher results
-        or a new walkers state
-    """
     if nde.fisher_posterior is not None:
         samples = nde.fisher_posterior.samples 
         weights = nde.fisher_posterior.weights
@@ -162,17 +147,3 @@ def sample_nde_state(
     state = samples[ix]
 
     return state
-
-
-# class NDE(eqx.Module):
-#     """ Abstract base class for NDEs """
-#     def __init__(self):
-
-#     def log_prob(self):
-
-#     def loss(self):
-
-#     def __repr__(self):
-#         return nde.name
-
-# class CNF(NDE):

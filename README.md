@@ -18,7 +18,7 @@ The design puts the neural density estimator (NDE) models at the centre of the c
 
 A typical inference with SBI occurs with  
 
-* fitting a density estimator to a set of simulations and parameters $\{\xi, \pi\}$ that may be compressed to summary statistics,
+* fitting a density estimator to a set of simulations and parameters $(\xi, \pi)$ that may be compressed to summary statistics,
 * the measurement of a datavector $\hat{\xi}$,
 * the sampling of a posterior $p(\pi|\hat{\xi})$ conditioned on the measurement $\hat{\xi}$.
 

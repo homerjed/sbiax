@@ -280,10 +280,9 @@ def train_nde(
             # Break training for any broken NDEs
             if not jnp.isfinite(stats["valid_losses"][-1]) or not jnp.isfinite(stats["train_losses"][-1]):
                 if show_tqdm:
-                    tqdm.close(epochs)
-                    tqdm.write(
+                    epochs.set_description_str(
                         f"\nTraining terminated early at epoch {epoch + 1} (NaN loss).", 
-                        end="\n\n"
+                        # end="\n\n"
                     )
                 break
 
@@ -313,11 +312,10 @@ def train_nde(
 
                     if stats["stopping_count"] > patience: 
                         if show_tqdm:
-                            tqdm.write(
+                            epochs.set_description_str(
                                 f"Training terminated early at epoch {epoch + 1}; " + 
                                 f"valid={stats["valid_losses"][-1]:.3E}, " + 
                                 f"train={stats["train_losses"][-1]:.3E}.", 
-                                end="\n"
                             )
 
                         # NOTE: question of 'best' vs 'last' nde parameters to use (last => converged)
@@ -331,11 +329,11 @@ def train_nde(
 
     plt.figure()
     plt.title("NDE losses")
-    plt.plot(epochs, train_losses, label="CNF (train)")
+    plt.plot(epochs, train_losses, label="train")
     plt.plot(
         epochs,
         valid_losses, 
-        label="CNF (valid)", 
+        label="valid", 
         color=plt.gca().lines[-1].get_color(),
         linestyle=":"
     )

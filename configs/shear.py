@@ -12,8 +12,7 @@ def shear():
     # Data
     config.dataset_name    = "shear" 
     config.compression     = "linear"
-    config.linearised      = True
-    config.n_linear_sims   = 2_000
+    config.n_s             = 2_000
 
     # NDEs
     config.model = model = ml_collections.ConfigDict()
@@ -28,12 +27,6 @@ def shear():
     model.exact_log_prob   = True
     model.use_scaling      = False
 
-    # Multiple NDEs
-    # config.ndes = ndes = ml_collections.ConfigDict()
-    # ndes.maf0 = maf0 = ml_collections.ConfigDict()
-    # maf0.name = "maf0"
-    # maf0.width_size = 8 
-
     # Posterior sampling
     config.use_ema         = True
     config.n_steps         = 200
@@ -44,7 +37,7 @@ def shear():
     config.start_step      = 0
     config.n_epochs        = 10_000
     config.n_batch         = 50
-    config.patience        = 20 # 128
+    config.patience        = 20
     config.lr              = 1e-4
     config.opt             = "adamw" 
     config.opt_kwargs      = {}

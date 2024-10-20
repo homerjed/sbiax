@@ -12,7 +12,6 @@ TimeArray = Float[Array, ""]
 
 
 def get_timestep_embedding(timesteps, embedding_dim: int):
-    """Build sinusoidal embeddings (from Fairseq)."""
     # Convert scalar timesteps to an array
     assert embedding_dim % 2 == 0
     if jnp.isscalar(timesteps):
@@ -22,7 +21,7 @@ def get_timestep_embedding(timesteps, embedding_dim: int):
     emb = jnp.log(10_000.) / (half_dim - 1.)
     emb = jnp.exp(jnp.arange(half_dim) * -emb)
     emb = timesteps * emb
-    emb = jnp.concatenate([jnp.sin(emb), jnp.cos(emb)], axis=0)
+    emb = jnp.concatenate([jnp.sin(emb), jnp.cos(emb)])
     return emb
 
 
@@ -75,7 +74,6 @@ def _log_prob_approx(
 
 
 def _get_solver() -> dfx.AbstractSolver:
-    # return dfx.Tsit5()
     return dfx.Heun()
 
 
@@ -192,6 +190,7 @@ class MLP(eqx.nn.MLP):
 class SquashMLP(eqx.Module):
     layers: list[eqx.nn.Linear]
     norms: list[eqx.nn.LayerNorm]
+    activation: Callable
 
     def __init__(
         self, 
@@ -200,6 +199,7 @@ class SquashMLP(eqx.Module):
         depth: int, 
         y_dim: int, 
         dropout_rate: float = 0.,
+        activation: Callable = jax.nn.tanh,
         *, 
         key: Key
     ):
@@ -226,7 +226,6 @@ class SquashMLP(eqx.Module):
                     key=keys[0]
                 )
             )
-            # norms.append()#eqx.nn.LayerNorm((width_size,)))
             for i in range(depth - 1):
                 layers.append(
                     ConcatSquash(
@@ -237,7 +236,6 @@ class SquashMLP(eqx.Module):
                         key=keys[i + 1]
                     )
                 )
-                # norms.append()#eqx.nn.LayerNorm((width_size,)))
             layers.append(
                 ConcatSquash(
                     in_size=width_size, 
@@ -249,16 +247,15 @@ class SquashMLP(eqx.Module):
             )
         self.layers = layers
         self.norms = norms 
+        self.activation = activation
 
     def __call__(self, x, t, y, key=None):
         t = jnp.atleast_1d(t)
-        # for layer, norm in zip(self.layers[:-1], self.norms):
         for layer in self.layers[:-1]:
             if key is not None:
                 key, _ = jr.split(key)
             x = layer(x, t, y, key=key)
-            # x = norm(x)
-            x = jax.nn.tanh(x)
+            x = self.activation(x)
         if key is not None:
             key, _ = jr.split(key)
         x = self.layers[-1](x, t, y, key=key)
@@ -330,6 +327,7 @@ class CNF(eqx.Module):
             depth=depth,
             y_dim=y_dim,
             dropout_rate=dropout_rate,
+            activation=activation,
             key=key
         )
         self.x_dim = event_dim
@@ -457,101 +455,3 @@ class CNF(eqx.Module):
 
     def loss(self, x: Array, y: Array, key: Optional[Key] = None) -> Array:
         return -self.log_prob(x, y, key=key)
-
-
-if __name__ == "__main__":
-    from typing import Any
-    import jax, jax.numpy as jnp, jax.random as jr 
-    import equinox as eqx
-    import optax
-    from sklearn.datasets import make_moons
-    import matplotlib.pyplot as plt
-
-    NeuralDensityEstimator = PyTree = Optimiser = Module = OptState = Any
-
-    key = jr.key(0)
-    
-
-    @eqx.filter_jit
-    def batch_loss_fn(
-        nde: eqx.Module, 
-        simulations: Array, 
-        parameters: Array,
-        key: jr.PRNGKey
-    ) -> Array:
-        nde = eqx.tree_inference(nde, False)
-        keys = jr.split(key, len(simulations))
-        loss = jax.vmap(nde.loss)(x=simulations, y=parameters, key=keys).mean()
-        return loss
-
-
-    @eqx.filter_jit
-    def make_step(
-        nde: eqx.Module, 
-        simulations: Array, 
-        parameters: Array, 
-        opt_state: PyTree,
-        opt,
-        key: jr.PRNGKey
-    ) -> Tuple[eqx.Module, OptState, Array]:
-        _fn = eqx.filter_value_and_grad(batch_loss_fn)
-        L, grads = _fn(nde, simulations, parameters, key=key)
-        updates, opt_state = opt.update(grads, opt_state, nde)
-        nde = eqx.apply_updates(nde, updates)
-        return nde, opt_state, L 
-
-
-    # @eqx.filter_jit
-    def batch_eval_fn(
-        nde: eqx.Module, 
-        simulations: Array, 
-        parameters: Array,
-        key: Key
-    ) -> Array:
-        nde = eqx.tree_inference(nde, True)
-        keys = jr.split(key, len(simulations))
-        loss = jax.vmap(nde.loss)(x=simulations, y=parameters, key=keys).mean()
-        return loss
-
-
-    X, Y = make_moons(2000, noise=0.05)
-    X, Y = jnp.asarray(X), jnp.asarray(Y)[:, jnp.newaxis]
-    X = (X - X.mean()) / X.std()
-
-    cnf = CNF(
-        X.shape[-1], 
-        Y.shape[-1], 
-        width_size=8, 
-        depth=1, 
-        dt=0.01,
-        t1=1.,
-        activation=jax.nn.tanh, 
-        exact_log_prob=False,
-        key=key
-    )
-
-    opt = optax.adam(2e-4)
-    opt_state = opt.init(eqx.filter(cnf, eqx.is_array))
-    
-    losses = []
-    for i in range(10_000):
-        key = jr.fold_in(key, i)
-        cnf, opt_state, loss = make_step(cnf, X, Y, opt_state, opt, key)
-        losses += [loss]
-        print(f"\r{i=}, {loss=:.3f}", end="")
-        
-        if i % 1000 == 0:
-            keys = jr.split(key, 10_000)
-            Q = jr.choice(key, jnp.array([0., 1.]), (len(keys),))[:, jnp.newaxis]
-            sampler = partial(cnf.sample_and_log_prob, exact_log_prob=True)
-            samples, _ = jax.vmap(sampler)(keys, Q)
-
-            plt.figure(dpi=200)
-            plt.hist2d(*samples.T, bins=200, cmap="PuOr")
-            plt.savefig("samples.png")
-            plt.close()
-
-            plt.figure(dpi=200)
-            plt.plot(losses)
-            plt.savefig("loss.png")
-            plt.close()
