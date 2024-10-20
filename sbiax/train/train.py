@@ -220,107 +220,110 @@ def train_nde(
     # Stats for training and NDE
     stats = get_initial_stats()
 
-    bar = trange(
-        n_epochs, desc=tqdm_description, colour="green", unit="epoch"
-    )
-    with bar as epochs:
-        for epoch in epochs:
+    if show_tqdm:
+        epochs = trange(
+            n_epochs, desc=tqdm_description, colour="green", unit="epoch"
+        )
+    else:
+        epochs = range(n_epochs)
 
-            # Loop through D={d_i} once per epoch, using same validation set
-            key, key_loaders = jr.split(key)
-            train_dataloader, valid_dataloader = get_loaders(
-                key_loaders, data_train, data_valid, train_mode=train_mode
+    for epoch in epochs:
+
+        # Loop through D={d_i} once per epoch, using same validation set
+        key, key_loaders = jr.split(key)
+        train_dataloader, valid_dataloader = get_loaders(
+            key_loaders, data_train, data_valid, train_mode=train_mode
+        )
+
+        # Train 
+        epoch_train_loss = 0.
+        for s, xy in zip(
+            range(n_train_batches), train_dataloader.loop(n_batch)
+        ):
+            key = jr.fold_in(key, s)
+            
+            if sharding is not None:
+                xy = eqx.filter_shard(xy, sharding)
+
+            model, opt_state, train_loss = make_step(
+                model, xy.x, xy.y, opt_state, opt, clip_max_norm, key
             )
 
-            # Train 
-            epoch_train_loss = 0.
-            for s, xy in zip(
-                range(n_train_batches), train_dataloader.loop(n_batch)
-            ):
-                key = jr.fold_in(key, s)
-                
-                if sharding is not None:
-                    xy = eqx.filter_shard(xy, sharding)
+            epoch_train_loss += train_loss 
 
-                model, opt_state, train_loss = make_step(
-                    model, xy.x, xy.y, opt_state, opt, clip_max_norm, key
-                )
+        stats["train_losses"].append(epoch_train_loss / (s + 1)) 
 
-                epoch_train_loss += train_loss 
+        # Validate 
+        epoch_valid_loss = 0.
+        for s, xy in zip(
+            range(n_valid_batches), valid_dataloader.loop(n_batch)
+        ):
+            key = jr.fold_in(key, s)
 
-            stats["train_losses"].append(epoch_train_loss / (s + 1)) 
+            if sharding is not None:
+                xy = eqx.filter_shard(xy, sharding)
 
-            # Validate 
-            epoch_valid_loss = 0.
-            for s, xy in zip(
-                range(n_valid_batches), valid_dataloader.loop(n_batch)
-            ):
-                key = jr.fold_in(key, s)
+            valid_loss = batch_eval_fn(model, xy.x, xy.y, key=key)
 
-                if sharding is not None:
-                    xy = eqx.filter_shard(xy, sharding)
+            epoch_valid_loss += valid_loss
 
-                valid_loss = batch_eval_fn(model, xy.x, xy.y, key=key)
+        stats["valid_losses"].append(epoch_valid_loss / (s + 1))
 
-                epoch_valid_loss += valid_loss
+        if show_tqdm:
+            epochs.set_postfix(
+                ordered_dict={
+                    "train" : f"{stats["train_losses"][-1]:.3E}",
+                    "valid" : f"{stats["valid_losses"][-1]:.3E}",
+                    "best_valid" : f"{stats["best_loss"]:.3E}",
+                    "stop" : f"{(patience - stats["stopping_count"] if patience is not None else 0):04d}"
+                },
+                refresh=True
+            )
 
-            stats["valid_losses"].append(epoch_valid_loss / (s + 1))
-
+        # Break training for any broken NDEs
+        if not jnp.isfinite(stats["valid_losses"][-1]) or not jnp.isfinite(stats["train_losses"][-1]):
             if show_tqdm:
-                epochs.set_postfix(
-                    ordered_dict={
-                        "train" : f"{stats["train_losses"][-1]:.3E}",
-                        "valid" : f"{stats["valid_losses"][-1]:.3E}",
-                        "best_valid" : f"{stats["best_loss"]:.3E}",
-                        "stop" : f"{(patience - stats["stopping_count"] if patience is not None else 0):04d}"
-                    },
-                    refresh=True
+                epochs.set_description_str(
+                    f"\nTraining terminated early at epoch {epoch + 1} (NaN loss).", 
+                    # end="\n\n"
                 )
+            break
 
-            # Break training for any broken NDEs
-            if not jnp.isfinite(stats["valid_losses"][-1]) or not jnp.isfinite(stats["train_losses"][-1]):
-                if show_tqdm:
-                    epochs.set_description_str(
-                        f"\nTraining terminated early at epoch {epoch + 1} (NaN loss).", 
-                        # end="\n\n"
-                    )
-                break
+        # Optuna can cut this run early 
+        if trial is not None:
+            # No pruning with multi-objectives
+            if len(trial.study.directions) > 1:
+                pass
+            else:
+                trial.report(stats["best_loss"], epoch)
+                if trial.should_prune():
+                    raise optuna.exceptions.TrialPruned()
 
-            # Optuna can cut this run early 
-            if trial is not None:
-                # No pruning with multi-objectives
-                if len(trial.study.directions) > 1:
-                    pass
-                else:
-                    trial.report(stats["best_loss"], epoch)
-                    if trial.should_prune():
-                        raise optuna.exceptions.TrialPruned()
+        # Early stopping for NDE training; return best NDE
+        if patience is not None:
+            better_loss = stats["valid_losses"][-1] < stats["best_loss"]
 
-            # Early stopping for NDE training; return best NDE
-            if patience is not None:
-                better_loss = stats["valid_losses"][-1] < stats["best_loss"]
+            # count_epochs_since_best(stats["valid_losses"])
 
-                # count_epochs_since_best(stats["valid_losses"])
+            if better_loss:
+                stats["best_loss"] = stats["valid_losses"][-1]
+                stats["best_nde"] = deepcopy(model) # Save model with best loss, not just the one at the end of training
+                stats["best_epoch"] = epoch - 1 # NOTE: check this
+                stats["stopping_count"] = 0
+            else:
+                stats["stopping_count"] += 1
 
-                if better_loss:
-                    stats["best_loss"] = stats["valid_losses"][-1]
-                    stats["best_nde"] = deepcopy(model) # Save model with best loss, not just the one at the end of training
-                    stats["best_epoch"] = epoch - 1 # NOTE: check this
-                    stats["stopping_count"] = 0
-                else:
-                    stats["stopping_count"] += 1
+                if stats["stopping_count"] > patience: 
+                    if show_tqdm:
+                        epochs.set_description_str(
+                            f"Training terminated early at epoch {epoch + 1}; " + 
+                            f"valid={stats["valid_losses"][-1]:.3E}, " + 
+                            f"train={stats["train_losses"][-1]:.3E}.", 
+                        )
 
-                    if stats["stopping_count"] > patience: 
-                        if show_tqdm:
-                            epochs.set_description_str(
-                                f"Training terminated early at epoch {epoch + 1}; " + 
-                                f"valid={stats["valid_losses"][-1]:.3E}, " + 
-                                f"train={stats["train_losses"][-1]:.3E}.", 
-                            )
-
-                        # NOTE: question of 'best' vs 'last' nde parameters to use (last => converged)
-                        # model = stats["best_nde"] # Use best model when quitting, from some better epoch
-                        break
+                    # NOTE: question of 'best' vs 'last' nde parameters to use (last => converged)
+                    # model = stats["best_nde"] # Use best model when quitting, from some better epoch
+                    break
 
     # Plot losses
     epochs = np.arange(0, epoch)
@@ -362,7 +365,6 @@ def train_nde(
 
     xy = sort_sample(train_mode, X, Y) # Arrange for NLE or NPE
 
-    # keys = jr.split(key, len(X))
     all_valid_loss = batch_eval_fn(model, x=xy.x, y=xy.y, key=key)
     stats["all_valid_loss"] = all_valid_loss
 

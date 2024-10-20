@@ -3,9 +3,11 @@
 *.npy
 *.npz
 *.eqx
+*.log
 
 tests/
 scripts/
+results/
 __pycache__/
 
 affine.py
