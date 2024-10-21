@@ -5,7 +5,7 @@
 *.eqx
 *.log
 
-tests/
+scripts/tests/
 scripts/
 results/
 __pycache__/
