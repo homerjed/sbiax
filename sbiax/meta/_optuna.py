@@ -66,6 +66,6 @@ def callback(
         fig.write_image(os.path.join(figs_dir, "timeline.pdf"))
 
         df = study.trials_dataframe()
-        df.to_pickle(os.path.join(arch_search_dir, "arch_search_df.pkl")) # Where to save it, usually as a .pkl
+        df.to_pickle(os.path.join(arch_search_dir, "arch_search_df.pkl")) 
     except ValueError:
         pass # Not enough trials to plot yet

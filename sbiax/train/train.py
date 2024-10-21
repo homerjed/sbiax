@@ -15,7 +15,7 @@ from tqdm.auto import tqdm, trange
 import matplotlib.pyplot as plt
 import optuna
 
-from .loss import pdf_mse_loss, batch_loss_fn, batch_eval_fn
+from .loss import batch_loss_fn, batch_eval_fn
 from .loader import _InMemoryDataLoader, sort_sample
 from ..ndes import Ensemble
 
@@ -154,9 +154,11 @@ def train_nde(
     clip_max_norm: Optional[float] = None,
     # Sharding
     sharding: Optional[NamedSharding] = None,
+    # Optuna
+    trial: Optional[optuna.trial.Trial] = None,
     # Saving
     results_dir: Optional[str] = None,
-    trial: Optional[optuna.trial.Trial] = None,
+    # Progress bar
     tqdm_description: str = "Training",
     show_tqdm: bool = False,
 ) -> Tuple[eqx.Module, dict]:
@@ -198,9 +200,9 @@ def train_nde(
     Raises:
         optuna.exceptions.TrialPruned: If the Optuna trial is pruned based on validation loss.
     """
-
-    if not os.path.exists(results_dir):
-        os.mkdir(results_dir) 
+    if results_dir is not None:
+        if not os.path.exists(results_dir):
+            os.mkdir(results_dir) 
 
     # Get training / validation data (frozen per training per NDE)
     key, key_data = jr.split(key)
@@ -349,13 +351,15 @@ def train_nde(
         linestyle=""
     )
     plt.legend()
-    plt.savefig(os.path.join(results_dir, "losses.png"))
+    if results_dir is not None:
+        plt.savefig(os.path.join(results_dir, "losses.png"))
     plt.close()
 
     # Save NDE model
-    eqx.tree_serialise_leaves(
-        os.path.join(results_dir, "models/", "cnf.eqx"), model
-    )
+    if results_dir is not None:
+        eqx.tree_serialise_leaves(
+            os.path.join(results_dir, "models/", "cnf.eqx"), model
+        )
 
     # Use test data for validation else just validation set
     if test_data is not None:
@@ -416,8 +420,11 @@ def train_ensemble(
     clip_max_norm: Optional[float] = None,
     # Sharding
     sharding: Optional[NamedSharding] = None,
+    # Optuna
+    trial: Optional[optuna.trial.Trial] = None,
     # Saving
     results_dir: Optional[str] = None,
+    # Progress bar
     tqdm_description: str = "Training",
     show_tqdm: bool = True,
 ) -> Tuple[eqx.Module, dict]:
@@ -442,6 +449,7 @@ def train_ensemble(
         `patience` (int, optional): Number of epochs to wait before early stopping if no improvement is seen. Defaults to `50`.
         `clip_max_norm` (float, optional): Maximum norm for gradient clipping. If `None`, no clipping is applied.
         `sharding` (Optional[NamedSharding], optional): Sharding strategy to partition data across devices. Defaults to `None`.
+        `trial` (optuna.trial.Trial, optional): Optuna trial for hyperparameter optimization. Can be used to prune unpromising runs. Defaults to `None`.
         `results_dir` (str, optional): Directory to save training results (e.g., model checkpoints and loss plots). Defaults to `None`.
         `tqdm_description` (str, optional): Description to show in the progress bar for the training loop. Defaults to `"Training"`.
         `show_tqdm` (bool, optional): Whether to display a progress bar for the training loop. Defaults to `False`.
@@ -458,6 +466,10 @@ def train_ensemble(
         4. Returns the trained ensemble and training statistics.
 
     """
+    if trial is not None:
+        assert len(ensemble.ndes) == 1, (
+            "Can only optimise hyperparameters for single NDE ensembles."
+        )
 
     stats = []
     ndes = []
@@ -478,7 +490,7 @@ def train_ensemble(
             clip_max_norm,
             sharding=sharding,
             results_dir=results_dir,
-            trial=None,
+            trial=trial,
             tqdm_description=tqdm_description,
             show_tqdm=show_tqdm
         )

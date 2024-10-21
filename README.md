@@ -7,12 +7,13 @@
 
 `sbiax` is a lightweight library for simulation-based inference (SBI) with a fixed-grid of simulations. 
 
-The design puts the neural density estimator (NDE) models at the centre of the code, allowing for flexible combinations of different models. 
+<!-- The design puts the neural density estimator (NDE) models at the centre of the code, allowing for flexible combinations of different models.  -->
 
------
 
 > [!WARNING]
 > :building_construction: Note this repository is under construction, expect changes. :building_construction:
+
+-----
 
 ### Design
 
