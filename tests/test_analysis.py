@@ -18,7 +18,7 @@ def get_data(key):
 
     def _simulator(key, p):
         mu, sigma = p
-        return mu + jr.normal(key) * sigma
+        return mu + jr.normal(key, (2,)) * sigma
 
     keys = jr.split(key, 100)
     Y = jnp.stack(
