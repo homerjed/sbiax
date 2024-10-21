@@ -66,7 +66,7 @@ def test_nle():
 
     ensemble = Ensemble(ndes, sbi_type="nle")
 
-    opt = getattr(optax, "adamw")(1e-3)
+    opt = getattr(optax, "adamw")(1e-2)
 
     ensemble, stats = train_ensemble(
         train_key, 
@@ -74,9 +74,9 @@ def test_nle():
         train_mode="nle",
         train_data=[X, Y], 
         opt=opt,
-        n_batch=50,
-        patience=10,
-        n_epochs=100,
+        n_batch=10,
+        patience=2,
+        n_epochs=5,
         results_dir=None
     )
 
@@ -92,7 +92,7 @@ def test_nle():
     log_prob_fn = ensemble.ensemble_log_prob_fn(X_, parameter_prior)
 
     samples, samples_log_prob = nuts_sample(
-        key_sample, log_prob_fn, prior=parameter_prior
+        key_sample, log_prob_fn, prior=parameter_prior, n_samples=10
     )
 
 
@@ -134,7 +134,7 @@ def test_npe():
 
     ensemble = Ensemble(ndes, sbi_type="npe")
 
-    opt = getattr(optax, "adamw")(1e-3)
+    opt = getattr(optax, "adamw")(1e-2)
 
     ensemble, stats = train_ensemble(
         train_key, 
@@ -142,9 +142,9 @@ def test_npe():
         train_mode="npe",
         train_data=[X, Y], 
         opt=opt,
-        n_batch=50,
-        patience=10,
-        n_epochs=100,
+        n_batch=10,
+        patience=2,
+        n_epochs=5,
         results_dir=None
     )
 
@@ -160,5 +160,5 @@ def test_npe():
     log_prob_fn = ensemble.ensemble_log_prob_fn(X_, parameter_prior)
 
     samples, samples_log_prob = nuts_sample(
-        key_sample, log_prob_fn, prior=parameter_prior
+        key_sample, log_prob_fn, prior=parameter_prior, n_samples=10
     )

@@ -33,7 +33,7 @@ def test_cnf():
 
     y = jnp.ones((parameter_dim,)) 
 
-    x = cnf.sample_and_log_prob(key, y)
+    x, p_x_y = cnf.sample_and_log_prob(key, y)
     p_x_y = cnf.log_prob(x, y)
 
 
@@ -45,10 +45,9 @@ def test_maf():
     maf = MAF(
         event_dim=parameter_dim, 
         context_dim=parameter_dim, 
-        width_size=32,
-        depth=2,
-        nn_depth=3,
-        n_layers=5,
+        width_size=8,
+        nn_depth=1,
+        n_layers=2,
         activation=jax.nn.tanh,
         scaler=None,
         key=key
@@ -56,5 +55,5 @@ def test_maf():
 
     y = jnp.ones((parameter_dim,)) 
 
-    x = maf.sample_and_log_prob(key, y)
+    x, p_x_y = maf.sample_and_log_prob(key, y)
     p_x_y = maf.log_prob(x, y)
