@@ -39,44 +39,13 @@ In a typical Bayesian inference problem, the data likelihood is not known. Howev
 
 As shown in Homer 2024, SBI is shown to successfully obtain the correct posterior widths and coverages given enough simulations which agree with the analytic solution.
 
-<!--  
-    What the code does
-    - Large / parallel training of big diffusion models on multiple accelerators
-    - Speeding up MCMC, LFI, field-level, inverse problems
--->
-
 # Statement of need
-
-<!--  
-    - Diffusion models are theoretically complex generative models. 
-      Need fast sampling and likleihood methods built on GPU-parallel
-      ODE solvers (diffrax). Subclass of energy-based generative models.
-
-    - Given this dataset, the goal of generative modeling is to fit a model 
-      to the data distribution such that we can synthesize new data points 
-      at will by sampling from the distribution.
-
-    - Significant limitations of implicit and likelihood-based ML models
-      e.g. modelling normalised probability distributions, likelihood calculations
-      and sampling speed. Score matching avoids this. Diffusion scales to large
-      datasets of high dimension better than other approaches.
-
-    - Score-based models have achieved SOTA results on many tasks and applications
-      e.g. LDMs, ...
-
-    - Given the new avenues of research fast and large generative models offer,
-      a code that carefully implements them is valuable.
-
-    - Memory efficiency compared to normalising flows for the same tasks (one network conditioned on 't' compared to many sub-flows + faster than CNFs)
-
-    - implemented in JAX, equinox and diffrax
--->
 
 Simulation-based inference (SBI) covers a broad class of statistical techniques such as Approximate Bayesian Computation (ABC), Neural Ratio Estimation (NRE), Neural Likelihood Estimation (NLE) and Neural Posterior Estimation (NPE). These techniques can derive posterior distributions conditioned of noisy data vectors in a rigorous and efficient manner. In particular, density-estimation methods have emerged as a promising method, given their efficiency, using generative models to fit likelihoods or posteriors directly using simulations.
 
 In the field of cosmology, SBI is of particular interest due to complexity and non-linearity of models for the expectations of non-standard summary statistics of the large-scale structure, as well as the non-Gaussian noise distributions for these statistics. The assumptions required for the complex analytic modelling of these statistics as well as the increasing dimensionality of data returned by spectroscopic and photometric galaxy surveys limits the amount of information that can be obtained on fundamental physical parameters. Therefore, the study and research into current and future statistical methods for Bayesian inference is of paramount importance for the field of cosmology.
 
-The software we present, `sbiax`, is designed to be used by machine learning and physics researchers for running Bayesian inferences using density-estimation SBI techniques. These models can be fit easily with multi-accelerator training and inference within the code. This code - written in `jax` [@jax] - allows for seemless integration of cutting edge generative models to SBI, including continuous normalising flows [@ffjord], matched flows [@flowmatching] and masked autoregressive flows [@mafs; @flowjax]. The code features integration with the `optuna` [@optuna] hyperparameter optimisation framework which would be used to ensure consistent analyses, `blackjax` [@blackjax] for fast MCMC sampling and neural network compression methods with `equinox` [@equinox]. The design of `sbiax` allows for new density estimation algorithms to be trained and sampled from. 
+The software we present, `sbiax`, is designed to be used by machine learning and physics researchers for running Bayesian inferences using density-estimation SBI techniques. These models can be fit easily with multi-accelerator training and inference within the code. This code - written in `jax` [@jax] - allows for seemless integration of cutting edge generative models to SBI, including continuous normalising flows [@ffjord], matched flows [@flowmatching], masked autoregressive flows [@mafs; @flowjax] and Gaussian mixture models - all of which are implemented in the code. The code features integration with the `optuna` [@optuna] hyperparameter optimisation framework which would be used to ensure consistent analyses, `blackjax` [@blackjax] for fast MCMC sampling and `equinox` [@equinox] for neural network compression methods. The design of `sbiax` allows for new density estimation algorithms to be trained and sampled from. 
 
 <!-- BlackJAX integrated for MCMC sampling -->
 
@@ -109,23 +78,37 @@ This density estimate is fit to a set of $N$ simulation-parameter pairs $\{(\bol
 
 where $q(\boldsymbol{x}|\boldsymbol{\pi})$ is the unknown likelihood from which the simulations $\boldsymbol{x}$ are drawn. This applies similarly for an estimator of the posterior (instead of the likelihood as shown here) and is the basis of being able to estimate the likelihood or posterior directly when an analytic form is not available. If the likelihood is fit from simulations, a prior is required and the posterior is sampled via an MCMC given some measurement. This is implemented within the code.
 
-An ensemble of density estimators has a likelihood which is written as
+An ensemble of density estimators (with parameters - e.g. the weights and biases of the networks - denoted by $\{ \phi_0, ..., \phi_J\}$) has a likelihood which is written as
 
 
 $$
-    p_{\text{ensemble}}(\boldsymbol{\xi}|\boldsymbol{\pi}) = \sum_i \alpha_i p_{\phi_i}(\hat{\boldsymbol{\xi}}|\boldsymbol{\pi})
+    p_{\text{ensemble}}(\boldsymbol{\xi}|\boldsymbol{\pi}) = \sum_{j=1}^J \alpha_i p_{\phi_i}(\hat{\boldsymbol{\xi}}|\boldsymbol{\pi})
 $$
 
 where
 
 $$
-    \alpha_i = \frac{\exp(p_{\phi_i}(\hat{\boldsymbol{\xi}}|\boldsymbol{\pi}))}{\sum_j\exp(p_{\phi_j}(\hat{\boldsymbol{\xi}}|\boldsymbol{\pi}))}
+    \alpha_i = \frac{\exp(p_{\phi_i}(\hat{\boldsymbol{\xi}}|\boldsymbol{\pi}))}{\sum_{j=1}^J\exp(p_{\phi_j}(\hat{\boldsymbol{\xi}}|\boldsymbol{\pi}))}
 $$
 
-are the weights of each density estimator in the ensemble. This ensemble likelihood can be easily sampled with an MCMC sampler.
+are the weights of each density estimator in the ensemble. This ensemble likelihood can be easily sampled with an MCMC sampler. In Figure 
+\ref{fig:sbi_example} we show an example posterior from applying SBI, with our code, using two compression methods separately. 
 
-![An example of posteriors derived with `sbiax`. We fit a continuous normalising flow to a set of simulations of cosmic shear two-point functions. The expectation $\xi[\pi]$ is linearised with respect to $\pi$ and a theoretical data covariance model $\Sigma$ allows for easy sampling of many simulations - an ideal test arena for SBI methods. We derive two posteriors, from separate experiments, where a linear (red) or neural network compression (blue) is used. In black, the true analytic posterior is shown (note that for a finite set of simulations the posteriors will not overlap completely).\label{fig:sbi_example}](sbi_example.png)
-\autoref{fig:sbi_example}.
+![An example of posteriors derived with `sbiax`. We fit a ensemble of two continuous normalising flows to a set of simulations of cosmic shear two-point functions. The expectation $\xi[\pi]$ is linearised with respect to $\pi$ and a theoretical data covariance model $\Sigma$ allows for easy sampling of many simulations - an ideal test arena for SBI methods. We derive two posteriors, from separate experiments, where a linear (red) or neural network compression (blue) is used. In black, the true analytic posterior is shown (note that for a finite set of simulations the posteriors will not overlap completely).\label{fig:sbi_example}](sbi_example.png)
+
+
+<!-- # Compression
+
+Maximum likelihood estimators for the parameters of a model $\xi[\pi]$ for the data $\hat{\xi}$ are derived by $\chi^2$ minimisation with respect to $\pi$
+
+\begin{align}
+    \hat{\pi} &= \text{min}_\pi \chi^2(\pi, \hat{\xi}, \xi[\pi], \Sigma) \nonumber \\
+    & = \pi + F_{\Sigma}^{-1}E^T\Sigma^{-1}(\hat{\xi} - \xi[\pi]).
+\end{align}
+
+where $\Sigma$ is the data covariance, $E$ is a $\text{dim}(\pi) \times \text{\dim}(\xi)$ dimensional matrix and $F_{\Sigma}^{-1}$ is the Fisher information matrix.
+
+Estimators for the model parameters can also be derived using neural networks that minimise the mean-squared error loss $ -->
 
 <!-- # Citations
 
@@ -143,6 +126,6 @@ For a quick reference, the following citation commands can be used:
 
 # Acknowledgements
 
-We thank the developers of these packages for their work and for making their code available to the community.
+We thank the developers of the packages `jax` [@jax], `blackjax` [@blackjax],`optax` [@optax], `equinox` [@equinox] and `diffrax` [@kidger] for their work and for making their code available to the community.
 
 # References
