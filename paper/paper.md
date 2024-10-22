@@ -124,7 +124,7 @@ $$
 
 are the weights of each density estimator in the ensemble. This ensemble likelihood can be easily sampled with an MCMC sampler.
 
-![An example of posteriors derived with `sbiax`. We fit a continuous normalising flow to a set of simulations of cosmic shear two-point functions. The expectation $\xi[\pi]$ is linearised with respect to $\pi$ and a theoretical data covariance model $\Sigma$ allows for easy sampling of many simulations - an ideal test arena for SBI methods. We derive two posteriors, from separate experiments, where a linear (red) or neural network compression (blue) is used. In black, the true analytic posterior is shown (note that for a finite set of simulations the posteriors will not overlap completely).\label{fig:sbi_example}](sbi_example.png){ width=20% }
+![An example of posteriors derived with `sbiax`. We fit a continuous normalising flow to a set of simulations of cosmic shear two-point functions. The expectation $\xi[\pi]$ is linearised with respect to $\pi$ and a theoretical data covariance model $\Sigma$ allows for easy sampling of many simulations - an ideal test arena for SBI methods. We derive two posteriors, from separate experiments, where a linear (red) or neural network compression (blue) is used. In black, the true analytic posterior is shown (note that for a finite set of simulations the posteriors will not overlap completely).\label{fig:sbi_example}](sbi_example.png){ width=80% }
 \autoref{fig:sbi_example}.
 
 <!-- # Citations
