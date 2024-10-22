@@ -4,6 +4,7 @@
 *.npz
 *.eqx
 *.log
+!paper/sbi_example.png
 
 scripts/tests/
 scripts/
