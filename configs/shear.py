@@ -12,7 +12,7 @@ def shear():
     # Data
     config.dataset_name    = "shear" 
     config.compression     = "linear"
-    config.n_s             = 2_000
+    config.n_s             = 20_000
 
     # NDEs
     config.model = model = ml_collections.ConfigDict()

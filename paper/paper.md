@@ -26,9 +26,9 @@ aas-journal: Astrophysical Journal <- The name of the AAS journal.
 
 # Summary
 
-Bayesian analyses where the likelihood function is unknown can proceed with density-estimation simulation-based inference methods, which typically involve
+In a typical Bayesian inference problem, the data likelihood is not known. In such analyses, density-estimation simulation-based inference methods can derive a posterior, which typically involves
 
-* synthesising a set of simulated data and model parameters $\{(\boldsymbol{\xi}, \boldsymbol{\pi})_0, ..., (\boldsymbol{\xi}, \boldsymbol{\pi})_N\}$,
+* simulating a set of data and model parameters $\{(\boldsymbol{\xi}, \boldsymbol{\pi})_0, ..., (\boldsymbol{\xi}, \boldsymbol{\pi})_N\}$,
 * obtaining a measurement $\hat{\boldsymbol{\xi}}$,
 * compressing the simulations and the measurements - usually with a neural network or linear compression - to a set of summaries $\{(\boldsymbol{x}, \boldsymbol{\pi})_0, ..., (\boldsymbol{x}, \boldsymbol{\pi})_N\}$ and $\hat{\boldsymbol{x}}$, 
 * fitting an ensemble of normalising flow or similar density estimation algorithms (e.g. a Gaussian mixture model),
@@ -76,7 +76,7 @@ Simulation-based inference (SBI) covers a broad class of statistical techniques 
 
 In the field of cosmology, SBI is of particular interest due to complexity and non-linearity of models for the expectations of non-standard summary statistics of the large-scale structure, as well as the non-Gaussian noise distributions for these statistics. The assumptions required for the complex analytic modelling of these statistics as well as the increasing dimensionality of data returned by spectroscopic and photometric galaxy surveys limits the amount of information that can be obtained on fundamental physical parameters. Therefore, the study and research into current and future statistical methods for Bayesian inference is of paramount importance for the field of cosmology.
 
-The software we present, `sbiax`, is designed to be used by machine learning and physics researchers for running Bayesian inferences using density-estimation SBI techniques. These models can be fit easily with multi-accelerator training and inference within the code. This code - written in `jax` [@jax] - allows for seemless integration of cutting edge generative models to SBI, including continuous normalising flows [@ffjord], matched flows [@flowmatching] and masked autoregressive flows [@mafs; @flowjax]. The code features integration with the `optuna` [@optuna] hyperparameter optimisation framework which would be used to ensure consistent analyses, `blackjax` [@blackjax] for fast MCMC sampling and neural network compression methods with `equinox` [@equinox].  
+The software we present, `sbiax`, is designed to be used by machine learning and physics researchers for running Bayesian inferences using density-estimation SBI techniques. These models can be fit easily with multi-accelerator training and inference within the code. This code - written in `jax` [@jax] - allows for seemless integration of cutting edge generative models to SBI, including continuous normalising flows [@ffjord], matched flows [@flowmatching] and masked autoregressive flows [@mafs; @flowjax]. The code features integration with the `optuna` [@optuna] hyperparameter optimisation framework which would be used to ensure consistent analyses, `blackjax` [@blackjax] for fast MCMC sampling and neural network compression methods with `equinox` [@equinox]. The design of `sbiax` allows for new density estimation algorithms to be trained and sampled from. 
 
 <!-- BlackJAX integrated for MCMC sampling -->
 
@@ -98,22 +98,38 @@ $$
     \log p_\phi(\boldsymbol{x}|\boldsymbol{\pi}) = \log \mathcal{G}[f_\phi(\boldsymbol{x};\boldsymbol{\pi})|\boldsymbol{0}, \mathbb{I}] + \log \big | \mathbf{J}_{f_\phi}(\boldsymbol{x};\boldsymbol{\pi})\big |,
 $$
 
-This density estimate is fit to a set of $N$ simulation-parameter pairs $\{(\boldsymbol{x}_i, \boldsymbol{\pi}_i)\}_{i=1}^N$ by minimising a Monte-Carlo estimate of the KL-divergence 
+This density estimate is fit to a set of $N$ simulation-parameter pairs $\{(\boldsymbol{\xi}, \boldsymbol{\pi})_0, ..., (\boldsymbol{\xi}, \boldsymbol{\pi})_N\}$ by minimising a Monte-Carlo estimate of the KL-divergence 
 
 $$
 \begin{align}
     \langle D_{KL}(q||p_\phi) \rangle_{\boldsymbol{\pi} \sim p(\boldsymbol{\pi})} &= \int \text{d}\boldsymbol{\pi} \; p(\boldsymbol{\pi}) \int \text{d}\boldsymbol{x} \; q(\boldsymbol{x}|\boldsymbol{\pi}) \log \frac{q(\boldsymbol{x}|\boldsymbol{\pi})}{p_\phi(\boldsymbol{x}|\boldsymbol{\pi})}, \nonumber \\
     &= \int \text{d}\boldsymbol{\pi} \int \text{d}\boldsymbol{x} \; p(\boldsymbol{\pi}, \boldsymbol{x})[\log q(\boldsymbol{x}|\boldsymbol{\pi}) - \log p_\phi(\boldsymbol{x}|\boldsymbol{\pi})], \nonumber \\
     &\geq -\int \text{d}\boldsymbol{\pi} \int \text{d}\boldsymbol{x} \; p(\boldsymbol{\pi},\boldsymbol{x}) \log p_\phi(\boldsymbol{x}|\boldsymbol{\pi}), \nonumber \\
-    &\approx -\frac{1}{N}\sum_i^N \log p_\phi(\boldsymbol{x}_i|\boldsymbol{\pi}_i),
+    &\approx -\frac{1}{N}\sum_{i=1}^N \log p_\phi(\boldsymbol{x}_i|\boldsymbol{\pi}_i),
 \end{align}
 $$
 
 where $q(\boldsymbol{x}|\boldsymbol{\pi})$ is the unknown likelihood from which the simulations $\boldsymbol{x}$ are drawn. This applies similarly for an estimator of the posterior (instead of the likelihood as shown here) and is the basis of being able to estimate the likelihood or posterior directly when an analytic form is not available. If the likelihood is fit from simulations, a prior is required and the posterior is sampled via an MCMC given some measurement. This is implemented within the code.
 
+An ensemble of density estimators has a likelihood which is written as
 
 
-# Citations
+$$
+    p_{\text{ensemble}}(\boldsymbol{\xi}|\boldsymbol{\pi}) = \sum_i \alpha_i p_{\phi_i}(\hat{\boldsymbol{\xi}}|\boldsymbol{\pi})
+$$
+
+where
+
+$$
+    \alpha_i = \frac{\exp(p_{\phi_i}(\hat{\boldsymbol{\xi}}|\boldsymbol{\pi}))}{\sum_j\exp(p_{\phi_j}(\hat{\boldsymbol{\xi}}|\boldsymbol{\pi}))}
+$$
+
+are the weights of each density estimator in the ensemble. This ensemble likelihood can be easily sampled with an MCMC sampler.
+
+![An example of posteriors derived with `sbiax`. We fit a continuous normalising flow to a set of simulations of cosmic shear two-point functions. The expectation $\xi[\pi]$ is linearised with respect to $\pi$ and a theoretical data covariance model $\Sigma$ allows for easy sampling of many simulations - an ideal test arena for SBI methods. We derive two posteriors, from separate experiments, where a linear (red) or neural network compression (blue) is used. In black, the true analytic posterior is shown (note that for a finite set of simulations the posteriors will not overlap completely).\label{fig:sbi_example}](sbi_example.png){ width=20% }
+\autoref{fig:sbi_example}.
+
+<!-- # Citations
 
 Citations to entries in paper.bib should be in
 [rMarkdown](http://rmarkdown.rstudio.com/authoring_bibliographies_and_citations.html)
@@ -125,16 +141,7 @@ citation) then you can do it with the example BibTeX entry below for @fidgit.
 For a quick reference, the following citation commands can be used:
 - `@author:2001`  ->  "Author et al. (2001)"
 - `[@author:2001]` -> "(Author et al., 2001)"
-- `[@author1:2001; @author2:2001]` -> "(Author1 et al., 2001; Author2 et al., 2002)"
-
-# Figures
-
-Figures can be included like this:
-![Caption for example figure.\label{fig:example}](figure.png)
-and referenced from text using \autoref{fig:example}.
-
-Figure sizes can be customized by adding an optional second parameter:
-![Caption for example figure.](figure.png){ width=20% }
+- `[@author1:2001; @author2:2001]` -> "(Author1 et al., 2001; Author2 et al., 2002)" -->
 
 # Acknowledgements
 

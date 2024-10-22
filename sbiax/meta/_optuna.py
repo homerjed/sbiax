@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 import optuna
-# import plotly.graph_objects as go
+import plotly.graph_objects as go
 
 
 def get_trial_hyperparameters(trial, model_type):
@@ -19,6 +19,13 @@ def get_trial_hyperparameters(trial, model_type):
             "depth" : trial.suggest_int(name="depth", low=1, high=5, step=1), # Flow depth
             "layers" : trial.suggest_int(name="layers", low=1, high=3, step=1), # NN layers
         }
+    if model_type == "gmm":
+        model_hyperparameters = {
+            "width" : trial.suggest_int(name="width", low=3, high=7, step=1), # Hidden units in NNs
+            "depth" : trial.suggest_int(name="depth", low=1, high=5, step=1), # Hidden layers 
+            "n_components" : trial.suggest_int(name="n_components", low=1, high=5, step=1), # Mixture components
+        }
+
     training_hyperparameters = {
         # Training
         "n_batch" : trial.suggest_int(name="n_batch", low=40, high=100, step=10), 

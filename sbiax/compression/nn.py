@@ -1,9 +1,18 @@
+from typing import Tuple, Optional
 import jax
 import jax.numpy as jnp
 import jax.random as jr
 import equinox as eqx
+from jaxtyping import PRNGKeyArray, Array
+import optax
 import numpy as np 
 from tqdm.auto import trange
+
+"""
+    Tools for compression with neural networks.
+    - train a user-defined `eqx.Module` network that compresses a datavector
+      to a model-dimensional summary, by minimising a MSE loss.
+"""
 
 
 def loss(model, x, y):
@@ -32,16 +41,46 @@ def get_batch(D, Y, n, key):
 
 
 def fit_nn(
-    key, 
-    model, 
-    D, 
-    Y, 
-    opt, 
-    n_batch, 
-    patience, 
-    n_steps=100_000, 
-    valid_fraction=0.9, 
-):
+    key: PRNGKeyArray, 
+    model: eqx.Module, 
+    D: Array, 
+    Y: Array, 
+    opt: optax.GradientTransformation, 
+    n_batch: int, 
+    patience: Optional[int], 
+    n_steps: int = 100_000, 
+    valid_fraction: int = 0.9, 
+) -> Tuple[eqx.Module, Array]:
+    """
+        Trains a neural network model with early stopping.
+
+        Args:
+            key: A `PRNGKeyArray`.
+            model: The neural network model to be trained, represented as an `eqx.Module`.
+            D: The input data matrix (`Array`), where rows are data points and columns are features.
+            Y: The target values (`Array`) corresponding to the input data.
+            opt: The optimizer to be used for gradient updates, defined as an `optax.GradientTransformation`.
+            n_batch: The number of data points per mini-batch for each training step (`int`).
+            patience: The number of steps to continue without improvement on the validation loss 
+                before early stopping is triggered (`int`).
+            n_steps: The maximum number of training steps to perform (`int`, optional). Default is 100,000.
+            valid_fraction: The fraction of the data to use for training, with the remainder
+                used for validation (`float`, optional). Default is 0.9 (90% training, 10% validation).
+
+        Returns:
+            Tuple[`eqx.Module`, `Array`]: 
+                - The trained `model` after the optimization process.
+                - A 2D array of shape (n_steps, 2), where the first column contains the training loss at each 
+                step, and the second column contains the validation loss.
+        
+        Notes:
+            1. The data `D` and targets `Y` are split into training and validation sets based on the 
+            `valid_fraction` parameter.
+            4. Early stopping occurs if the validation loss does not improve within a specified 
+            number of steps (`patience`).
+            5. The function returns the trained model and the recorded training/validation loss history.
+
+    """
     n_s, _ = D.shape
 
     opt_state = opt.init(eqx.filter(model, eqx.is_array))
@@ -70,8 +109,9 @@ def fit_nn(
                 )
             )
 
-            if (step > 0) and (step - np.argmin(L[:step, 1]) > patience):
-                steps.set_description_str(f"Stopped at {step=}")
-                break
+            if patience is not None:
+                if (step > 0) and (step - np.argmin(L[:step, 1]) > patience):
+                    steps.set_description_str(f"Stopped at {step=}")
+                    break
 
     return model, L[:step]

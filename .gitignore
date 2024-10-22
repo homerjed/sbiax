@@ -11,3 +11,4 @@ results/
 __pycache__/
 
 affine.py
+_experiment.py
