@@ -26,7 +26,7 @@ aas-journal: Astrophysical Journal <- The name of the AAS journal.
 
 # Summary
 
-In a typical Bayesian inference problem, the data likelihood is not known. In such analyses, density-estimation simulation-based inference methods can derive a posterior, which typically involves
+In a typical Bayesian inference problem, the data likelihood is not known. However, in recent years, machine learning methods for density estimation can allow for inference using an estimator of the data likelihood. This likelihood is created with neural networks that are trained on simulations - one of the many tools for simulation based inference (SBI, @sbi). In such analyses, density-estimation simulation-based inference methods can derive a posterior, which typically involves
 
 * simulating a set of data and model parameters $\{(\boldsymbol{\xi}, \boldsymbol{\pi})_0, ..., (\boldsymbol{\xi}, \boldsymbol{\pi})_N\}$,
 * obtaining a measurement $\hat{\boldsymbol{\xi}}$,
@@ -35,7 +35,7 @@ In a typical Bayesian inference problem, the data likelihood is not known. In su
 * the optional optimisation of the parameters for the architecture and fitting hyperparameters of the algorithms,
 * sampling the ensemble posterior (using an MCMC sampler if the likelihood is fit directly) conditioned on the datavector to obtain parameter constraints on the parameters of a physical model, $\boldsymbol{\pi}$.
 
-`sbiax` is a code for implementing each of these steps.
+`sbiax` is a code for implementing each of these steps. The code allows for Neural Likelihood Estimation [@papamakarios; @delfi] and Neural Posterior Estimation [@npe].
 
 As shown in Homer 2024, SBI is shown to successfully obtain the correct posterior widths and coverages given enough simulations which agree with the analytic solution.
 
@@ -124,7 +124,7 @@ $$
 
 are the weights of each density estimator in the ensemble. This ensemble likelihood can be easily sampled with an MCMC sampler.
 
-![An example of posteriors derived with `sbiax`. We fit a continuous normalising flow to a set of simulations of cosmic shear two-point functions. The expectation $\xi[\pi]$ is linearised with respect to $\pi$ and a theoretical data covariance model $\Sigma$ allows for easy sampling of many simulations - an ideal test arena for SBI methods. We derive two posteriors, from separate experiments, where a linear (red) or neural network compression (blue) is used. In black, the true analytic posterior is shown (note that for a finite set of simulations the posteriors will not overlap completely).\label{fig:sbi_example}](sbi_example.png){ width=80% }
+![An example of posteriors derived with `sbiax`. We fit a continuous normalising flow to a set of simulations of cosmic shear two-point functions. The expectation $\xi[\pi]$ is linearised with respect to $\pi$ and a theoretical data covariance model $\Sigma$ allows for easy sampling of many simulations - an ideal test arena for SBI methods. We derive two posteriors, from separate experiments, where a linear (red) or neural network compression (blue) is used. In black, the true analytic posterior is shown (note that for a finite set of simulations the posteriors will not overlap completely).\label{fig:sbi_example}](sbi_example.png)
 \autoref{fig:sbi_example}.
 
 <!-- # Citations
