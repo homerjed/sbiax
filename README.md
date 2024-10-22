@@ -17,13 +17,27 @@
 
 ### Design
 
-A typical inference with SBI occurs with  
+<!-- A typical inference with SBI occurs with  
 
 * fitting a density estimator to a set of simulations and parameters $(\xi, \pi)$ that may be compressed to summary statistics,
 * the measurement of a datavector $\hat{\xi}$,
 * the sampling of a posterior $p(\pi|\hat{\xi})$ conditioned on the measurement $\hat{\xi}$.
 
-`sbiax` is designed to perform such an inference. 
+`sbiax` is designed to perform such an inference.  -->
+
+In a typical inference problem the data likelihood is unknown. Using density-estimation SBI, we can proceed by
+
+<!-- Bayesian analyses where the likelihood function is unknown can proceed with density-estimation simulation-based inference methods, which typically involve -->
+
+* simulating a set of data and model parameters $\{(\boldsymbol{\xi}, \boldsymbol{\pi})_0, ..., (\boldsymbol{\xi}, \boldsymbol{\pi})_N\}$,
+* obtaining a measurement $\hat{\boldsymbol{\xi}}$,
+* compressing the simulations and the measurements - usually with a neural network or linear compression - to a set of summaries $\{(\boldsymbol{x}, \boldsymbol{\pi})_0, ..., (\boldsymbol{x}, \boldsymbol{\pi})_N\}$ and $\hat{\boldsymbol{x}}$, 
+* fitting an ensemble of normalising flow or similar density estimation algorithms (e.g. a Gaussian mixture model),
+* the optional optimisation of the parameters for the architecture and fitting hyperparameters of the algorithms,
+* sampling the ensemble posterior (using an MCMC sampler if the likelihood is fit directly) conditioned on the datavector to obtain parameter constraints on the parameters of a physical model, $\boldsymbol{\pi}$.
+
+`sbiax` is a code for implementing each of these steps.
+
 
 <!-- #### a) Configuration
 
