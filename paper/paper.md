@@ -37,7 +37,7 @@ In a typical Bayesian inference problem, the data likelihood is not known. In su
 
 `sbiax` is a code for implementing each of these steps.
 
-As shown in Homer 2024, SBI is shown to successfully obtain the correct posterior widths and coverages given enough simulations which agree with the analytic solution.
+<!-- As shown in Homer 2024, SBI is shown to successfully obtain the correct posterior widths and coverages given enough simulations which agree with the analytic solution. -->
 
 <!--  
     What the code does
