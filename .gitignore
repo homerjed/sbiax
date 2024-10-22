@@ -5,6 +5,7 @@
 *.eqx
 *.log
 !paper/sbi_example.png
+!paper/paper.pdf
 
 scripts/tests/
 scripts/
