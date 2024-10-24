@@ -16,20 +16,23 @@ class Ensemble(eqx.Module):
     weights: Array
 
     def __init__(
-        self, ndes: Sequence[eqx.Module], sbi_type: str = "nle", weights: Array = None
+        self, 
+        ndes: Sequence[eqx.Module], 
+        sbi_type: str = "nle", 
+        weights: Array = None
     ):
         self.ndes = ndes
         self.sbi_type = sbi_type
         self.weights = default_weights(weights, ndes)
 
-    def nde_log_prob_fn(self, nde, prior, data):
+    def nde_log_prob_fn(self, nde, data, prior):
         """ 
             Get log-probability function for NDE at given observation.
         """
         def _nde_log_prob_fn(theta, **kwargs): 
             return (
                 nde.log_prob(x=data, y=theta, **kwargs) 
-                + prior.prior.log_prob(theta)
+                + prior.log_prob(theta)
             )
         return _nde_log_prob_fn
 

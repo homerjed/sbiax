@@ -82,7 +82,7 @@ An ensemble of density estimators (with parameters - e.g. the weights and biases
 
 
 $$
-    p_{\text{ensemble}}(\boldsymbol{\xi}|\boldsymbol{\pi}) = \sum_{j=1}^J \alpha_i p_{\phi_i}(\hat{\boldsymbol{\xi}}|\boldsymbol{\pi})
+    p_{\text{ensemble}}(\boldsymbol{\xi}|\boldsymbol{\pi}) = \sum_{j=1}^J \alpha_j p_{\phi_j}(\hat{\boldsymbol{\xi}}|\boldsymbol{\pi})
 $$
 
 where
@@ -126,6 +126,6 @@ For a quick reference, the following citation commands can be used:
 
 # Acknowledgements
 
-We thank the developers of the packages `jax` [@jax], `blackjax` [@blackjax],`optax` [@optax], `equinox` [@equinox] and `diffrax` [@kidger] for their work and for making their code available to the community.
+We thank the developers of the packages `jax` [@jax], `blackjax` [@blackjax],`optax` [@optax], `equinox` [@equinox] and `diffrax` [@diffrax] for their work and for making their code available to the community.
 
 # References
