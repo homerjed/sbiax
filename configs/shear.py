@@ -17,11 +17,11 @@ def shear():
     # NDEs
     config.model = model = ml_collections.ConfigDict()
     model.model_type       = "cnf"
-    model.width_size       = 8
+    model.width_size       = 5#8
     model.depth            = 0
     model.activation       = jax.nn.tanh
     model.dropout_rate     = 0.
-    model.dt               = 0.1
+    model.dt               = 0.08#0.1
     model.t1               = 1.
     model.solver           = "Heun"
     model.exact_log_prob   = True
@@ -36,8 +36,8 @@ def shear():
     # Optimisation hyperparameters
     config.start_step      = 0
     config.n_epochs        = 10_000
-    config.n_batch         = 50
-    config.patience        = 20
+    config.n_batch         = 40 #50
+    config.patience        = 60 #20
     config.lr              = 1e-4
     config.opt             = "adamw" 
     config.opt_kwargs      = {}

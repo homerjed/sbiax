@@ -48,7 +48,7 @@ def fit_nn(
     opt: optax.GradientTransformation, 
     n_batch: int, 
     patience: Optional[int], 
-    n_steps: int = 100_000, 
+    n_steps: int = 10_000, 
     valid_fraction: int = 0.9, 
 ) -> Tuple[eqx.Module, Array]:
     """

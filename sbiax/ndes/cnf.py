@@ -11,7 +11,7 @@ from beartype import beartype as typechecker
 TimeArray = Float[Array, ""]
 
 
-def get_timestep_embedding(timesteps, embedding_dim: int):
+def get_timestep_embedding(timesteps: Array, embedding_dim: int) -> Array:
     # Convert scalar timesteps to an array
     assert embedding_dim % 2 == 0
     if jnp.isscalar(timesteps):
@@ -127,9 +127,7 @@ class ResidualNetwork(eqx.Module):
         *, 
         key: Key
     ):
-        """ Time-embedding may be necessary """
         in_key, *net_keys, out_key = jr.split(key, 2 + depth)
-        # NOTE: was in_size + y_dim + 1 but t_emb_dim added to y_dim here
         self._in = Linear(in_size + y_dim, width_size, key=in_key)
         layers = [
             Linear(
@@ -138,7 +136,6 @@ class ResidualNetwork(eqx.Module):
             for _key in net_keys 
         ]
         self._out = Linear(width_size, out_size, key=out_key)
-        # NOTE: make this optional
         dropouts = [
             eqx.nn.Dropout(p=dropout_rate) for _ in layers
         ]

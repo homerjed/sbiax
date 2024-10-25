@@ -37,7 +37,7 @@ In a typical Bayesian inference problem, the data likelihood is not known. Howev
 
 `sbiax` is a code for implementing each of these steps. The code allows for Neural Likelihood Estimation [@papamakarios; @delfi] and Neural Posterior Estimation [@npe].
 
-As shown in Homer 2024, SBI is shown to successfully obtain the correct posterior widths and coverages given enough simulations which agree with the analytic solution.
+As shown in @homer, SBI is shown to successfully obtain the correct posterior widths and coverages given enough simulations which agree with the analytic solution.
 
 # Statement of need
 
@@ -94,7 +94,7 @@ $$
 are the weights of each density estimator in the ensemble. This ensemble likelihood can be easily sampled with an MCMC sampler. In Figure 
 \ref{fig:sbi_example} we show an example posterior from applying SBI, with our code, using two compression methods separately. 
 
-![An example of posteriors derived with `sbiax`. We fit a ensemble of two continuous normalising flows to a set of simulations of cosmic shear two-point functions. The expectation $\xi[\pi]$ is linearised with respect to $\pi$ and a theoretical data covariance model $\Sigma$ allows for easy sampling of many simulations - an ideal test arena for SBI methods. We derive two posteriors, from separate experiments, where a linear (red) or neural network compression (blue) is used. In black, the true analytic posterior is shown (note that for a finite set of simulations the posteriors will not overlap completely).\label{fig:sbi_example}](sbi_example.png)
+![An example of posteriors derived with `sbiax`. We fit a ensemble of two continuous normalising flows to a set of simulations of cosmic shear two-point functions. The expectation $\xi[\pi]$ is linearised with respect to $\pi$ and a theoretical data covariance model $\Sigma$ allows for easy sampling of many simulations - an ideal test arena for SBI methods. We derive two posteriors, from separate experiments, where a linear (red) or neural network compression (blue) is used. In black, the true analytic posterior is shown. Note that for a finite set of simulations the blue posterior will not overlap completely with the black and red posteriors - we explore this effect upon the posteriors from SBI methods, due to an unknown data covariance, in @homer.\label{fig:sbi_example}](sbi_example.png)
 
 
 <!-- # Compression
@@ -126,6 +126,6 @@ For a quick reference, the following citation commands can be used:
 
 # Acknowledgements
 
-We thank the developers of the packages `jax` [@jax], `blackjax` [@blackjax],`optax` [@optax], `equinox` [@equinox] and `diffrax` [@diffrax] for their work and for making their code available to the community.
+We thank the developers of the packages `jax` [@jax], `blackjax` [@blackjax],`optax` [@optax], `equinox` [@equinox], `diffrax` [@diffrax] and `flowjax` [@flowjax] for their work and for making their code available to the community.
 
 # References
