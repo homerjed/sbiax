@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 import diffrax as dfx
 
-from sbiax.ndes import CNF, MAF
+from sbiax.ndes import CNF, MAF, GMM
 
 """
     Test NDEs: CNFs and MAFs.
@@ -57,3 +57,25 @@ def test_maf():
 
     x, p_x_y = maf.sample_and_log_prob(key, y)
     p_x_y = maf.log_prob(x, y)
+
+
+def test_gmm():
+    key = jr.key(0)
+
+    parameter_dim = 2
+
+    gmm = GMM(
+        event_dim=parameter_dim, 
+        context_dim=parameter_dim, 
+        n_components=2,
+        width_size=8,
+        depth=1,
+        activation=jax.nn.tanh,
+        scaler=None,
+        key=key
+    )
+
+    y = jnp.ones((parameter_dim,)) 
+
+    x, p_x_y = gmm.sample_and_log_prob(key, y)
+    p_x_y = gmm.log_prob(x, y)

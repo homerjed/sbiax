@@ -242,6 +242,17 @@ class GMM(eqx.Module):
         return -self.log_prob(x, y)
 
     @jaxtyped(typechecker=typechecker)
+    def sample_and_log_prob(
+        self, 
+        key: PRNGKeyArray, 
+        y: Float[Array, "{self.y_dim}"]
+    ) -> Tuple[Float[Array, "{self.x_dim}"], Float[Array, ""]]:
+        x = self.__call__(y).sample(seed=key)
+        # log_prob = self.__call__(y).log_prob(x)
+        log_prob = self.log_prob(x, y)
+        return x, log_prob
+
+    @jaxtyped(typechecker=typechecker)
     def log_prob(
         self,
         x: Float[Array, "{self.x_dim}"], 

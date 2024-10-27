@@ -126,6 +126,6 @@ For a quick reference, the following citation commands can be used:
 
 # Acknowledgements
 
-We thank the developers of the packages `jax` [@jax], `blackjax` [@blackjax],`optax` [@optax], `equinox` [@equinox], `diffrax` [@diffrax] and `flowjax` [@flowjax] for their work and for making their code available to the community.
+We thank the developers of the packages `jax` [@jax], `blackjax` [@blackjax], `optax` [@optax], `equinox` [@equinox], `diffrax` [@diffrax] and `flowjax` [@flowjax] for their work and for making their code available to the community.
 
 # References
