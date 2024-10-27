@@ -100,9 +100,9 @@ def _mle(d, pi, Finv, mu, dmu, precision):
     return pi + jnp.linalg.multi_dot([Finv, dmu, precision, d - mu])
 
 
-def get_experiment_data(key, good, n_sims, n_obs, *, results_dir):
+def get_experiment_data(key, true_covariance, n_sims, *, results_dir):
 
-    key, key_prior, key_simulate, key_obs = jr.split(key, 4)
+    key, key_prior, key_simulate = jr.split(key, 3)
 
     # Get constants for experiment
     (
@@ -119,12 +119,12 @@ def get_experiment_data(key, good, n_sims, n_obs, *, results_dir):
     ) = get_shear_experiment()
 
     # Estimate covariance, Fisher information and precision given n_sims 
-    if not good:
+    if true_covariance:
+        covariance_est = Finv_est = precision_est = None
+    else:
         (
             covariance_est, Finv_est, precision_est
         ) = get_estimated_objects(key, n_sims) # NOTE: no cosmology needed here?
-    else:
-        covariance_est = Finv_est = precision_est = None
 
     # Data-generating likelihood 
     _simulator = partial(
@@ -155,10 +155,10 @@ def get_experiment_data(key, good, n_sims, n_obs, *, results_dir):
     X = jax.vmap(_mle, in_axes=(0, 0, None, 0, None, None))(
         D, 
         Y, 
-        Finv if good else Finv_est,
+        Finv if true_covariance else Finv_est,
         mus, # Models at each parameter set 
         derivatives,
-        precision if good else precision_est
+        precision if true_covariance else precision_est
     )
 
     # Save all if the array exists for this experiment

@@ -1,9 +1,10 @@
-from typing import Tuple, Sequence
+from typing import Sequence, List, Callable, Optional
 import jax
 import jax.numpy as jnp
 import jax.random as jr 
 import equinox as eqx
-from jaxtyping import Key, Array
+from jaxtyping import PRNGKeyArray, Array
+from tensorflow_probability.substrates.jax.distributions import Distribution
 
 
 def default_weights(weights, ndes):
@@ -11,8 +12,64 @@ def default_weights(weights, ndes):
 
 
 class Ensemble(eqx.Module):
+    """
+    An `eqx.Module` representing an ensemble of neural density estimators (NDEs) with methods to 
+    compute the ensemble log-probability function and 'stacking weights' for this function.
+
+    This `Ensemble` supports different types of density estimation SBI techniques, such as neural 
+    likelihood estimation (NLE) and neural posterior estimation (NPE). It also supports saving and 
+    loading of the ensemble's state.
+
+    Attributes:
+        sbi_type (`str`): Specifies the type of SBI (`"nle"` or `"npe"`).
+        ndes (`List[eqx.Module]`): A listof NDE models that make up the ensemble.
+        weights (`Array`): Weights assigned to each NDE in the ensemble, which are used for 
+            calculating the ensemble likelihood.
+
+    Methods:
+        __init__(ndes: `Sequence[eqx.Module]`, sbi_type: `str` = "nle", weights: `Array` = None):
+            Initializes the ensemble with a list of NDEs, SBI type, and optional weights.
+        
+        nde_log_prob_fn(nde: `eqx.Module`, data: `Array`, prior: `Distribution`) -> `Callable`:
+            Returns a log-probability function for a single NDE with respect to the data and prior.
+
+        ensemble_log_prob_fn(data: `Array`, prior: `Optional[Distribution]` = None) -> `Callable`:
+            Returns the ensemble log-probability function that combines all NDEs at the given 
+            observation, adjusted based on `sbi_type`.
+
+        _ensemble_log_prob_fn(datavectors: `Union[Array, List[Array]]`, prior: `Optional[Distribution]` = None) -> `Callable`:
+            Internal method for generating the log-probability function for the ensemble 
+            across batched data vectors.
+
+        ensemble_likelihood(data: `Array`) -> `Callable`:
+            Returns the ensemble likelihood without the prior term, evaluated at `data`.
+
+        calculate_stacking_weights(losses: `List[float]`) -> `Array`:
+            Calculates the weights for each NDE in the ensemble using the final-epoch validation losses.
+
+        save_ensemble(path: `str`) -> None:
+            Saves the ensemble model to the specified path.
+
+        load_ensemble(path: `str`) -> `Ensemble`:
+            Loads and returns the ensemble model from the specified path.
+
+    Example:
+        ```python
+        import equinox as eqx
+        import jax.random as jr
+        from tensorflow_probability.substrates.jax.distributions import Normal
+        from sbiax.ndes import CNF
+
+        # Define some NDE models
+        ndes = [CNF(...), CNF(...)]
+        prior = Normal(0, 1)
+
+        ensemble = Ensemble(ndes=ndes, sbi_type="nle")
+        log_prob_fn = ensemble.ensemble_log_prob_fn(data, prior=prior)
+        ```
+    """
     sbi_type: str
-    ndes: Tuple[eqx.Module]
+    ndes: List[eqx.Module]
     weights: Array
 
     def __init__(
@@ -21,119 +78,136 @@ class Ensemble(eqx.Module):
         sbi_type: str = "nle", 
         weights: Array = None
     ):
+        """
+        Initializes the ensemble with a list of neural density estimators (NDEs), 
+        an SBI type (`"nle"` or `"npe"`), and optional weights (default is uniform).
+
+        Args:
+            ndes (`Sequence[eqx.Module]`): A sequence of NDE models in the ensemble.
+            sbi_type (`str`): Specifies the type of SBI, either `"nle"` (neural likelihood estimation) 
+                or `"npe"` (neural posterior estimation).
+            weights (`Array`, optional): Optional weights for each NDE in the ensemble. If not 
+                provided, weights are assigned equally.
+        """
         self.ndes = ndes
         self.sbi_type = sbi_type
         self.weights = default_weights(weights, ndes)
 
-    def nde_log_prob_fn(self, nde, data, prior):
+    def nde_log_prob_fn(
+        self, nde: eqx.Module, data: Array, prior: Distribution
+    ) -> Callable:
         """ 
-            Get log-probability function for NDE at given observation.
+        Returns a posterior log-probability function for a single NDE model parameterised by 
+        a datavector `data` and prior `prior`.
+
+        Args:
+            nde (`eqx.Module`): The NDE model for which the log-probability function is generated.
+            data (`Array`): The observed data vector.
+            prior (`Distribution`): The prior distribution to apply on the parameters.
+
+        Returns:
+            `Callable`: A function that computes the log-probability of the NDE 
+                given `data` and `prior`.
         """
         def _nde_log_prob_fn(theta, **kwargs): 
-            return (
-                nde.log_prob(x=data, y=theta, **kwargs) 
-                + prior.log_prob(theta)
-            )
+            nde_likelihood = nde.log_prob(x=data, y=theta, **kwargs) 
+            return nde_likelihood + prior.log_prob(theta)
         return _nde_log_prob_fn
 
-    def ensemble_log_prob_fn(self, data, prior=None):
+    def ensemble_log_prob_fn(self, data: Array, prior: Optional[Distribution]) -> Callable:
         """ 
-            Get log-probability function for NDE at given observation 
-            for whole ensemble of NDEs.
-            - some NDEs may have a probabilistic estimate of the likelihood
-              so a key is provided, the ndes are set to inference mode to 
-              imply this key is not used for dropout etc.
-        """
-        if self.sbi_type == "nle":
-            def _joint_log_prob_fn(theta, key=None):
-                L = 0.
-                for n, (nde, weight) in enumerate(zip(self.ndes, self.weights)):
-                    if key is not None:
-                        key = jr.fold_in(key, n)
-                    nde_log_L = nde.log_prob(x=data, y=theta, key=key)
-                    L_nde = weight * jnp.exp(nde_log_L)
-                    L = L + L_nde
-                L = jnp.log(L) 
-                if prior is not None:
-                    L = L + prior.log_prob(theta)
-                return L
+        Returns the ensemble log-probability function that combines all NDEs with the 
+        given observation, depending on `self.sbi_type`.
 
-        if self.sbi_type == "npe":
-            def _joint_log_prob_fn(theta, key=None):
-                L = 0.
-                for n, (nde, weight) in enumerate(zip(self.ndes, self.weights)):
-                    if key is not None:
-                        key = jr.fold_in(key, n)
-                    nde_log_L = nde.log_prob(x=theta, y=data, key=key)
-                    L_nde = weight * jnp.exp(nde_log_L)
-                    L = L + L_nde
-                return jnp.log(L) 
+        Args:
+            data (`Array`): The observed data vector.
+            prior (`Optional[Distribution]`): Optional prior distribution for conditioning 
+                the ensemble.
+
+        Returns:
+            `Callable`: A function that computes the log-probability for the ensemble, 
+                conditioned on `data` and adjusted by the `sbi_type` ("nle" or "npe").
+        """
+
+        _nle = self.sbi_type == "nle"
+
+        def _joint_log_prob_fn(theta: Array, key: PRNGKeyArray = None) -> Array:
+            L = 0.
+            for n, (nde, weight) in enumerate(zip(self.ndes, self.weights)):
+                if key is not None:
+                    key = jr.fold_in(key, n)
+                nde_log_L = nde.log_prob(
+                    x=data if _nle else theta, 
+                    y=theta if _nle else data, 
+                    key=key
+                )
+                L = L + weight * jnp.exp(nde_log_L)
+            L = jnp.log(L) 
+            if prior is not None and _nle:
+                L = L + prior.log_prob(theta)
+            return L 
 
         return _joint_log_prob_fn
 
-    def _ensemble_log_prob_fn(self, datavectors, prior=None):
-        """ 
-            Get log-probability function for NDE at given observation 
-            for whole ensemble of NDEs.
-            - some NDEs may have a probabilistic estimate of the likelihood
-              so a key is provided, the ndes are set to inference mode to 
-              imply this key is not used for dropout etc.
+    def ensemble_likelihood(self, data: Array) -> Array:
         """
-        # if datavectors is a list, jax.tree_map(lambda x: nde.log_prob(x=x, y=theta, key=key))
-        # > assert isinstance(datavectors, List[Array, ...])
-        # if its an array, check if it has a 'batch dim' 
-        # 
+        Returns the ensemble likelihood (no prior term), evaluated at `data`.
+        Useful for using multiple ensembles, as independent likelihoods, together.
 
-        if self.sbi_type == "nle":
+        Args:
+            data (`Array`): The observed data vector.
 
-            # def _joint_log_prob_fn(theta, key=None):
-            #     Ls = jax.tree_map(
-            #         lambda nde, x: jnp.exp(nde.log_prob(x=x, y=theta, key=key)), self.ndes
-            #     )
-            #     return Ls
-
-            def _joint_log_prob_fn(theta, key=None):
-                L = 0.
-                for n, (nde, weight) in enumerate(zip(self.ndes, self.weights)):
-                    if key is not None:
-                        key = jr.fold_in(key, n)
-                    nde_log_L = nde.log_prob(x=data, y=theta, key=key)
-                    L_nde = weight * jnp.exp(nde_log_L)
-                    L = L + L_nde
-                L = jnp.log(L) 
-                if prior is not None:
-                    L = L + prior.log_prob(theta)
-                return L
-
-        if self.sbi_type == "npe":
-            def _joint_log_prob_fn(theta, key=None):
-                L = 0.
-                for n, (nde, weight) in enumerate(zip(self.ndes, self.weights)):
-                    if key is not None:
-                        key = jr.fold_in(key, n)
-                    nde_log_L = nde.log_prob(x=theta, y=data, key=key)
-                    L_nde = weight * jnp.exp(nde_log_L)
-                    L = L + L_nde
-                return jnp.log(L) 
-
-        return _joint_log_prob_fn
-
-    def ensemble_likelihood(self, data):
+        Returns:
+            `Array`: The likelihood of the ensemble at the given `data`.
+        """
         return self.ensemble_log_prob_fn(data, prior=None)
 
-    def calculate_stacking_weights(self, losses):
+    def calculate_stacking_weights(self, losses: Sequence[Array]) -> Array:
         """
-            Calculate weightings of NDEs in ensemble
-            - losses is a list of final-epoch validation losses
+        Calculates the weights for each NDE in the ensemble using the final-epoch 
+        validation losses.
+
+        Args:
+            losses (`Sequence[Array]`): A list of validation losses for each NDE model 
+                in the ensemble.
+
+        Returns:
+            `Array`: Calculated weights for each NDE in the ensemble based on their 
+                validation losses.
         """
         Ls = jnp.array(
             [-losses[n] for n, _ in enumerate(self.ndes)]
         )
-        nde_weights = jnp.exp(Ls) / jnp.exp(Ls).sum() #jax.nn.softmax(Ls)
+        nde_weights = jnp.exp(Ls) / jnp.sum(jnp.exp(Ls)) 
         return nde_weights
 
-    def save_ensemble(self, path):
+    def get_nde_names(self) -> List[str]:
+        """
+        Gets names of NDEs in the ensemble
+
+
+        Returns:
+            `List[str]`: List of names of NDEs in the ensemble.
+        """
+        return [nde.__class__.__name__ for nde in self.ndes]
+
+    def save_ensemble(self, path: str) -> None:
+        """
+        Saves the ensemble model's state to the specified path.
+
+        Args:
+            path (`str`): The file path where the ensemble's state will be saved.
+        """
         eqx.tree_serialise_leaves(path, self)
 
-    def load_ensemble(self, path):
+    def load_ensemble(self, path: str) -> eqx.Module:
+        """
+        Loads and returns the ensemble model's state from the specified path.
+
+        Args:
+            path (`str`): The file path from which the ensemble's state will be loaded.
+
+        Returns:
+            `Ensemble`: The deserialized ensemble model with the saved state.
+        """
         return eqx.tree_deserialise_leaves(path, self)

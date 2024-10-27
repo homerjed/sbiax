@@ -386,7 +386,7 @@ def plot_losses(ensemble, filename, fisher=False):
         if np.any((Lt < 0.) | (Lv < 0.)):
             negatives = True
     plotter = plt.semilogy if not negatives else plt.plot
-    for nde in ndes:
+    for nde in ensemble.ndes:
         _losses = nde.fisher_train_losses if fisher else nde.train_losses
         plotter(_losses.train, label=nde.name + " (train)")
         plotter(
@@ -496,13 +496,16 @@ def train_ensemble(
         )
 
         ensemble.ndes[n] = nde
+
         stats.append(stats_n)
         ndes.append(nde)
 
     # ensemble = replace(ensemble, ndes=ndes)
     
     weights = ensemble.calculate_stacking_weights(
-        losses=[stats[n]["all_valid_loss"] for n, _ in enumerate(ensemble.ndes)]
+        losses=[
+            stats[n]["all_valid_loss"] for n, _ in enumerate(ensemble.ndes)
+        ]
     )
     ensemble = replace(ensemble, weights=weights)
     print("Weights:", ensemble.weights)

@@ -37,7 +37,7 @@ In a typical Bayesian inference problem, the data likelihood is not known. Howev
 
 `sbiax` is a code for implementing each of these steps. The code allows for Neural Likelihood Estimation [@papamakarios; @delfi] and Neural Posterior Estimation [@npe].
 
-As shown in @homer, SBI is shown to successfully obtain the correct posterior widths and coverages given enough simulations which agree with the analytic solution.
+As shown in @homer, SBI is shown to successfully obtain the correct posterior widths and coverages given enough simulations which agree with the analytic solution - this code was used in the research for this publication. 
 
 # Statement of need
 

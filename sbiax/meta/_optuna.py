@@ -29,7 +29,7 @@ def get_trial_hyperparameters(trial, model_type):
     training_hyperparameters = {
         # Training
         "n_batch" : trial.suggest_int(name="n_batch", low=40, high=100, step=10), 
-        "lr": trial.suggest_float(name="lr", low=1e-5, high=1e-3, log=True), 
+        "lr" : trial.suggest_float(name="lr", low=1e-5, high=1e-3, log=True), 
         "p" : trial.suggest_int(name="p", low=10, high=100, step=10),
     }
     return {**model_hyperparameters, **training_hyperparameters} 

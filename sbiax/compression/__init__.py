@@ -1,1 +1,1 @@
-from .linear import linearized_model, simulator, _mle
+from .linear import linearized_model, simulator, mle

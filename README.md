@@ -1,14 +1,25 @@
 <h1 align='center'>sbiax</h1>
 <h2 align='center'>Fast, lightweight and parallel simulation-based inference.</h2>
 
-<p align="center">
+<!-- <p align="center">
   <img style="max-width: 128px; max-height: 128px" src="https://github.com/homerjed/sbipdf/blob/main/assets/cover.png" />
-</p>
+</p> -->
+
+<picture>
+  <source srcset="https://github.com/homerjed/sbipdf/blob/main/assets/cover_dark.png" media="(prefers-color-scheme: dark)">
+  <source srcset="https://github.com/homerjed/sbipdf/blob/main/assets/cover.png" media="(prefers-color-scheme: light)">
+  <img src="https://github.com/homerjed/sbipdf/blob/main/assets/cover.png" alt="Your image description">
+</picture>
+
+<!-- <picture>
+  <source srcset="assets/cover_dark.png" media="(prefers-color-scheme: dark)">
+  <source srcset="assets/cover.png" media="(prefers-color-scheme: light)">
+  <img src="assets/cover.png" alt="Your image description">
+</picture> -->
 
 `sbiax` is a lightweight library for simulation-based inference (SBI) with a fixed grid of simulations. 
 
 <!-- The design puts the neural density estimator (NDE) models at the centre of the code, allowing for flexible combinations of different models.  -->
-
 
 > [!WARNING]
 > :building_construction: Note this repository is under construction, expect changes. :building_construction:

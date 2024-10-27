@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Sequence
 import jax
 import jax.numpy as jnp
 import jax.random as jr
@@ -43,8 +43,7 @@ def get_batch(D, Y, n, key):
 def fit_nn(
     key: PRNGKeyArray, 
     model: eqx.Module, 
-    D: Array, 
-    Y: Array, 
+    train_data: Sequence[Array], 
     opt: optax.GradientTransformation, 
     n_batch: int, 
     patience: Optional[int], 
@@ -52,35 +51,36 @@ def fit_nn(
     valid_fraction: int = 0.9, 
 ) -> Tuple[eqx.Module, Array]:
     """
-        Trains a neural network model with early stopping.
+    Trains a neural network model with early stopping.
 
-        Args:
-            key: A `PRNGKeyArray`.
-            model: The neural network model to be trained, represented as an `eqx.Module`.
-            D: The input data matrix (`Array`), where rows are data points and columns are features.
-            Y: The target values (`Array`) corresponding to the input data.
-            opt: The optimizer to be used for gradient updates, defined as an `optax.GradientTransformation`.
-            n_batch: The number of data points per mini-batch for each training step (`int`).
-            patience: The number of steps to continue without improvement on the validation loss 
-                before early stopping is triggered (`int`).
-            n_steps: The maximum number of training steps to perform (`int`, optional). Default is 100,000.
-            valid_fraction: The fraction of the data to use for training, with the remainder
-                used for validation (`float`, optional). Default is 0.9 (90% training, 10% validation).
+    Args:
+        key: A `PRNGKeyArray`.
+        model: The neural network model to be trained, represented as an `eqx.Module`.
+        D: The input data matrix (`Array`), where rows are data points and columns are features.
+        Y: The target values (`Array`) corresponding to the input data.
+        opt: The optimizer to be used for gradient updates, defined as an `optax.GradientTransformation`.
+        n_batch: The number of data points per mini-batch for each training step (`int`).
+        patience: The number of steps to continue without improvement on the validation loss 
+            before early stopping is triggered (`int`).
+        n_steps: The maximum number of training steps to perform (`int`, optional). Default is 100,000.
+        valid_fraction: The fraction of the data to use for training, with the remainder
+            used for validation (`float`, optional). Default is 0.9 (90% training, 10% validation).
 
-        Returns:
-            Tuple[`eqx.Module`, `Array`]: 
-                - The trained `model` after the optimization process.
-                - A 2D array of shape (n_steps, 2), where the first column contains the training loss at each 
-                step, and the second column contains the validation loss.
-        
-        Notes:
-            1. The data `D` and targets `Y` are split into training and validation sets based on the 
-            `valid_fraction` parameter.
-            4. Early stopping occurs if the validation loss does not improve within a specified 
-            number of steps (`patience`).
-            5. The function returns the trained model and the recorded training/validation loss history.
-
+    Returns:
+        Tuple[`eqx.Module`, `Array`]: 
+            - The trained `model` after the optimization process.
+            - A 2D array of shape (n_steps, 2), where the first column contains the training loss at each 
+            step, and the second column contains the validation loss.
+    
+    Notes:
+        1. The data `D` and targets `Y` are split into training and validation sets based on the 
+        `valid_fraction` parameter.
+        4. Early stopping occurs if the validation loss does not improve within a specified 
+        number of steps (`patience`).
+        5. The function returns the trained model and the recorded training/validation loss history.
     """
+    D, Y = train_data
+
     n_s, _ = D.shape
 
     opt_state = opt.init(eqx.filter(model, eqx.is_array))

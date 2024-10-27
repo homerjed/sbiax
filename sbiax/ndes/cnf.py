@@ -286,6 +286,102 @@ class ConcatSquash(eqx.Module):
 
 
 class CNF(eqx.Module):
+    """
+    Implements a Continuous Normalizing Flow (CNF) model for density estimation and sampling 
+    with support for conditional inputs and an optional data scaler. 
+
+    Attributes:
+        net (`eqx.Module`): The neural network model used for modelling the flow path with time.
+        x_dim (`int`): Dimensionality of the input data (`x`).
+        y_dim (`int`): Dimensionality of the conditioning data (`y`).
+        dt (`float`): Integration time step size for the ODE solver.
+        t1 (`float`): Time limit for solving the ODE, defining flow duration.
+        exact_log_prob (`bool`): Flag indicating whether to compute an exact Jacobian or estimate 
+            it with noise.
+        solver (`Optional[dfx.AbstractSolver]`): Solver for the differential equation (default is `dfx.Heun`).
+        time_embedder (`Callable`): Function to embed time along flow path (useful for high-dimensional `x` and `y`).
+        scaler (`Optional[eqx.Module]`): Optional scaler module to transform `x` and `y` inputs.
+    
+    Methods:
+        __init__(
+            event_dim: `int`, 
+            context_dim: `int`, 
+            width_size: `int`, 
+            depth: `int`, 
+            activation: `Callable`, 
+            dt: `float`, 
+            t1: `float`, 
+            t_emb_dim: `Optional[int]` = None, 
+            exact_log_prob: `bool` = True, 
+            dropout_rate: `float` = 0.0, 
+            solver: `Optional[dfx.AbstractSolver]` = None, 
+            scaler: `Optional[eqx.Module]` = None, 
+            key: `Key`
+        ):
+            Initializes the CNF model with specified dimensions, network configuration, and solver 
+            settings.
+
+        log_prob(
+            x: `Float[Array, "{self.x_dim}"]`, 
+            y: `Float[Array, "{self.y_dim}"]`, 
+            key: `Optional[PRNGKeyArray]` = None, 
+            exact_log_prob: `Optional[bool]` = False
+        ) -> `Float[Array, ""]`:
+            Computes the log-probability of `x` given `y` by integrating over the ODE-defined 
+            continuous flow, using either an exact or approximate Jacobian.
+
+        sample_and_log_prob(
+            key: `PRNGKeyArray`, 
+            y: `Float[Array, "{self.y_dim}"]`, 
+            exact_log_prob: `Optional[bool]` = None
+        ) -> `Tuple[Float[Array, "{self.x_dim}"], Float[Array, ""]]`:
+            Samples from the flow model conditioned on `y`, returning both the sample and its 
+            log-probability.
+
+        sample_and_log_prob_n(
+            key: `PRNGKeyArray`, 
+            y: `Array`, 
+            n_samples: `int`, 
+            exact_log_prob: `Optional[bool]` = None
+        ) -> `Tuple[Array, Array]`:
+            Generates `n_samples` samples conditioned on `y`, returning the samples and their 
+            corresponding log-probabilities.
+
+        prior_log_prob(z: `Array`) -> `Array`:
+            Computes the log-probability of `z` under a Gaussian prior.
+
+        loss(x: `Array`, y: `Array`, key: `Optional[Key]` = None) -> `Array`:
+            Computes the negative log-likelihood for given `x` and `y` as a loss function.
+    
+    Example:
+        ```python
+        import jax
+        import jax.random as jr
+        import equinox as eqx
+        from sbiax.ndes import CNF
+
+        key = jr.key(0)
+
+        event_dim = 2
+        context_dim = 3
+        cnf = CNF(
+            event_dim=event_dim, 
+            context_dim=context_dim, 
+            width_size=64, 
+            depth=3, 
+            activation=jax.nn.relu, 
+            dt=0.1, 
+            t1=1.0, 
+            key=key
+        )
+        
+        x = jr.normal(key, (event_dim,))
+        y = jr.normal(key, (context_dim,))
+        
+        log_prob = cnf.log_prob(x, y)
+        sample, sample_log_prob = cnf.sample_and_log_prob(key, y)
+        ```
+    """
     net: eqx.Module
     x_dim: int
     y_dim: int
@@ -313,10 +409,41 @@ class CNF(eqx.Module):
         *,
         key: Key
     ):
+        """
+        Initializes a Continuous Normalizing Flow (CNF) model for conditional density estimation.
+
+        Args:
+            event_dim (int): Dimensionality of the data space (target variable).
+            context_dim (int): Dimensionality of the conditioning context space.
+            width_size (int): Width (number of neurons) for each hidden layer in the neural network.
+            depth (int): Depth (number of layers) of the neural network.
+            dt (float): Time step for the integration process of the CNF.
+            t1 (float): Final integration time for the CNF.
+            exact_log_prob (bool, optional): Whether to use exact log-probability or an approximation. 
+                Defaults to `False`.
+            solver (optional): ODE solver to use for the flow. Defaults to `None`, in which case 
+                a default solver is selected.
+            scaler (optional): Optional scaler for data preprocessing. Defaults to `None`.
+            activation (Callable, optional): Activation function for the neural network layers. 
+                Defaults to `jax.nn.tanh`.
+            key (PRNGKeyArray): Random key for initializing the network parameters.
+
+        Attributes:
+            net (eqx.Module): Neural network representing the dynamics of the flow.
+            time_embedder (optional): Optional time embedding module for conditional generation.
+            x_dim (int): Dimensionality of the target variable.
+            y_dim (int): Dimensionality of the conditioning variable.
+            dt (float): Time step for the integration process of the CNF.
+            t1 (float): Final integration time for the CNF.
+            exact_log_prob (bool): Indicator for using exact or approximate log-probability.
+            solver: ODE solver for integrating the flow dynamics.
+            scaler (optional): Scaler for preprocessing data before transformation.
+        """
+
         if t_emb_dim is not None:
             y_dim = context_dim + t_emb_dim
         else:
-            y_dim = context_dim + 1
+            y_dim = context_dim + 1 
   
         self.net = SquashMLP(
             in_size=event_dim,
@@ -327,6 +454,7 @@ class CNF(eqx.Module):
             activation=activation,
             key=key
         )
+
         self.x_dim = event_dim
         self.y_dim = context_dim 
         self.dt = dt
@@ -344,6 +472,21 @@ class CNF(eqx.Module):
         key: Optional[PRNGKeyArray] = None,
         exact_log_prob: Optional[bool] = False 
     ) -> Float[Array, ""]:
+        """
+        Computes the log-probability of the data `x` given the conditioning `y` 
+        by integrating the continuous normalizing flow.
+
+        Args:
+            x (Float[Array, "{self.x_dim}"]): Input data for which the log-probability is calculated.
+            y (Float[Array, "{self.y_dim}"]): Conditioning used for the transformation.
+            key (Optional[PRNGKeyArray], optional): Optional random key for sampling if using approximate log-prob.
+            exact_log_prob (Optional[bool], optional): Whether to compute the exact log-probability or use 
+                an approximation with the Hutchinson estimator. Defaults to `False`.
+
+        Returns:
+            Float[Array, ""]: The computed log-probability of the input data `x` given `y`.
+        """
+
         solver = _get_solver() if self.solver is None else self.solver
 
         if self.scaler is not None:
@@ -385,7 +528,22 @@ class CNF(eqx.Module):
         y: Float[Array, "{self.y_dim}"], 
         exact_log_prob: Optional[bool] = None
     ) -> Tuple[Float[Array, "{self.x_dim}"], Float[Array, ""]]:
-        """ Sample many samples given a single condition """
+        """
+        Samples from the continuous normalizing flow and computes the log-probability of 
+        the generated sample, given the conditioning context `y`.
+
+        Args:
+            key (PRNGKeyArray): Random key used for sampling.
+            y (Float[Array, "{self.y_dim}"]): Conditioning used for generating the sample.
+            exact_log_prob (Optional[bool], optional): Whether to compute the exact log-probability or use 
+                an approximation with the Hutchinson estimator. Defaults to the class attribute `exact_log_prob`.
+
+        Returns:
+            Tuple[Float[Array, "{self.x_dim}"], Float[Array, ""]]: A tuple containing:
+                - The sampled data `x` from the continuous normalizing flow.
+                - The log-probability of the sampled data `x` given `y`.
+        """
+
         key_eps, key_z, key_sample = jr.split(key, 3)
 
         args = (y, self.net, key_sample, self.time_embedder)
@@ -427,7 +585,22 @@ class CNF(eqx.Module):
         n_samples: int, 
         exact_log_prob: Optional[bool] = None
     ) -> Tuple[Array, Array]:
-        """ Sample x ~ p(x|y) for a fixed y. """
+        """
+        Generates `n_samples` samples from the continuous normalizing flow and computes 
+        the log-probabilities for each sample given the conditioning context `y`.
+
+        Args:
+            key (Key): Random key used for generating samples.
+            y (Array): Conditioning used for generating the samples.
+            n_samples (int): Number of samples to generate.
+            exact_log_prob (Optional[bool], optional): Whether to compute the exact log-probability or use 
+                an approximation with the Hutchinson estimator. Defaults to the class attribute `exact_log_prob`.
+
+        Returns:
+            Tuple[Array, Array]: A tuple containing:
+                - An array of generated samples of shape `(n_samples, self.x_dim)`.
+                - An array of log-probabilities for each sample of shape `(n_samples,)`.
+        """
 
         if exact_log_prob is not None:
             _use_exact_log_prob = exact_log_prob
@@ -446,9 +619,32 @@ class CNF(eqx.Module):
         return samples, log_probs 
 
     def prior_log_prob(self, z: Array) -> Array:
+        """
+        Computes the log-probability of a sample `z` under the prior distribution, which is 
+        assumed to be a standard multivariate normal distribution.
+
+        Args:
+            z (Array): Input sample for which to compute the prior log-probability.
+
+        Returns:
+            Array: Log-probability of the sample under the prior distribution.
+        """
         return jax.scipy.stats.multivariate_normal.logpdf(
             z, jnp.zeros(self.x_dim), jnp.eye(self.x_dim)
         )
 
     def loss(self, x: Array, y: Array, key: Optional[Key] = None) -> Array:
+        """
+        Computes the loss for training the continuous normalizing flow model, which is 
+        defined as the negative log-probability of the data `x` given the conditioning 
+        context `y`.
+
+        Args:
+            x (Array): Input data for which the loss is calculated.
+            y (Array): Conditioning used for the transformation.
+            key (Optional[Key], optional): Optional random key for sampling if using approximate log-prob. 
+
+        Returns:
+            Array: Computed loss for the input data `x` given the context `y`.
+        """
         return -self.log_prob(x, y, key=key)

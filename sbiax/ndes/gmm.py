@@ -10,6 +10,47 @@ import tensorflow_probability.substrates.jax.distributions as tfd
 
 
 class GMM(eqx.Module):
+    """
+    Implements a Gaussian Mixture Model (GMM) with neural network parameterization for density 
+    estimation, supporting custom covariance regularization and multiple mixture components.
+
+    Attributes:
+        event_dim (`int`): Dimensionality of the input event (e.g., data).
+        context_dim (`int`): Dimensionality of the conditioning context (e.g., parameters).
+        n_components (`int`): Number of Gaussian components in the mixture.
+        covariance_eps (`float`): Small positive value to add to the covariance diagonals for stability.
+        covariance_init (`float`): Initial value for the covariance matrix components.
+        net (`eqx.Module`): Neural network module used to parameterize GMM weights, means, and covariances.
+        activation (`Callable`): Activation function applied to the network outputs.
+        sigma_tri_dim (`int`): Dimension of the triangular portion of the covariance matrix.
+        sigmas_out_shape (`Tuple[int]`): Shape of the output tensor for covariance parameters.
+        _alpha (`eqx.Module`): Network component predicting mixture weights (alphas).
+        _mean (`eqx.Module`): Network component predicting the means of each Gaussian component.
+        _sigma (`eqx.Module`): Network component predicting the covariances of each component.
+        x_dim (`int`): Dimensionality of the data.
+        y_dim (`int`): Dimensionality of the conditioning parameters.
+
+    Methods:
+        __init__(event_dim: `int`, context_dim: `int`, n_components: `int`, 
+                width_size: `int`, depth: `int`, activation: `Callable` = jax.nn.tanh, 
+                covariance_init: `float` = 1e-8, covariance_eps: `float` = 1e-8, key: `PRNGKeyArray`):
+            Initializes the GMM model, including setting up the neural network components.
+
+        regularise_diagonal(x: `Array`) -> `Array`:
+            Applies positive activation on the diagonal of the covariance matrix to ensure stability.
+
+        __call__(parameters: `Array`) -> `tfd.Distribution`:
+            Generates a GMM distribution instance using neural network outputs.
+
+        get_parameters(parameters: `Array`) -> `Tuple[Array, Array, Array]`:
+            Returns the alphas, means, and covariance matrices for each Gaussian component.
+
+        loss(x: `Float[Array, "{self.x_dim}"]`, y: `Float[Array, "{self.y_dim}"]`, key: `Optional[PRNGKeyArray]`) -> `Float[Array, ""]`:
+            Computes the negative log-probability for given data and conditioning parameters.
+
+        log_prob(x: `Float[Array, "{self.x_dim}"]`, y: `Float[Array, "{self.y_dim}"]`, key: `Optional[PRNGKeyArray]`) -> `Float[Array, ""]`:
+            Returns the log-probability for the given data and parameters.
+    """
     event_dim: int 
     context_dim: int 
     n_components: int 
@@ -25,6 +66,7 @@ class GMM(eqx.Module):
     _mean: eqx.Module
     _sigma: eqx.Module
 
+    scaler: eqx.Module
     x_dim: int
     y_dim: int
 
@@ -38,9 +80,27 @@ class GMM(eqx.Module):
         activation: Callable = jax.nn.tanh,
         covariance_init: float = 1e-8,
         covariance_eps: float = 1e-8, 
+        scaler: eqx.Module = None,
         *,
         key: PRNGKeyArray
     ):
+        """
+        Initializes the Gaussian Mixture Model with specified event and context dimensions, 
+        number of mixture components, neural network width, depth, and activation.
+
+        Args:
+            event_dim (`int`): Dimensionality of the data.
+            context_dim (`int`): Dimensionality of the conditioning parameters.
+            n_components (`int`): Number of Gaussian components in the mixture.
+            width_size (`int`): Width of each hidden layer in the neural network.
+            depth (`int`): Number of layers in the neural network.
+            activation (`Callable`, optional): Activation function for neural network layers. 
+                Defaults to `jax.nn.tanh`.
+            covariance_init (`float`, optional): Initial value for covariance entries. Defaults to `1e-8`.
+            covariance_eps (`float`, optional): Small positive value for covariance regularization. 
+                Defaults to `1e-8`.
+            key (`PRNGKeyArray`): Random key for parameter initialization.
+        """
         self.event_dim = event_dim
         self.context_dim = context_dim
         self.n_components = n_components
@@ -61,9 +121,8 @@ class GMM(eqx.Module):
         )
 
         if n_components == 1:
-            self._alpha = lambda x: jnp.ones((x.shape[0], 1))
+            self._alpha = lambda x: jnp.ones((1,))
         else:
-            key, _key = jr.split(key)
             self._alpha = eqx.nn.Linear(
                 width_size, n_components, key=key_alpha
             )
@@ -80,18 +139,38 @@ class GMM(eqx.Module):
         )
         self.sigmas_out_shape = (self.n_components,) + ((self.context_dim * (self.context_dim + 1)) // 2,)
 
+        self.scaler = scaler
         self.x_dim = event_dim
         self.y_dim = context_dim
 
     def regularise_diagonal(self, x: Array) -> Array:
-        """ Subtract diagonal and replace it with a positively activated one. """
+        """
+        Applies positive activation to the diagonal of the covariance matrix to ensure non-negativity.
+
+        Args:
+            x (`Array`): A covariance matrix input.
+
+        Returns:
+            `Array`: The covariance matrix with a positive diagonal and regularization applied.
+        """
         diag = jnp.diag(jnp.exp(jnp.diag(x))) # Positive activation on diagonal
-        regularize = jnp.eye(x.shape[-1]) * self.covariance_eps # Avoid overfitting (factor depends on Finv?)
+        regularize = jnp.eye(x.shape[-1]) * self.covariance_eps # Avoid overfitting
         x = x - jnp.diag(jnp.diag(x)) 
         x = x + diag + regularize
         return x 
 
     def __call__(self, parameters: Array) -> tfd.Distribution:
+        """
+        Generates a `tfd.MixtureSameFamily` distribution representing the Gaussian mixture model.
+
+        Args:
+            parameters (`Array`): Context (conditioning parameters)
+
+        Returns:
+            `tfd.Distribution`: A Gaussian mixture distribution with component weights, means, and 
+                covariances predicted by the neural network.
+        """
+
         net_out = self.net(parameters)
         alphas = self._alpha(net_out)
         means = self._mean(net_out)
@@ -105,18 +184,28 @@ class GMM(eqx.Module):
         covariance = jax.vmap(self.regularise_diagonal)(sigmas.reshape((-1, *cov_shape)))
         covariance = covariance.reshape((self.n_components, *cov_shape))
 
-        # GMM defined as a distribution. Mixture of neurally parameterised Gaussians.
-        _alpha = jax.nn.softmax(alphas, axis=0) # sum(alpha) = 1 for each in batch
-        weights_dist = tfd.Categorical(probs=_alpha)
+        weights_dist = tfd.Categorical(probs=jax.nn.softmax(alphas))
 
         # Full covariance distribution for components
         components_dist = tfd.MultivariateNormalTriL(loc=means, scale_tril=sigmas)
         
         gmm = tfd.MixtureSameFamily(
-            mixture_distribution=weights_dist, components_distribution=components_dist)
+            mixture_distribution=weights_dist, 
+            components_distribution=components_dist
+        )
         return gmm
     
     def get_parameters(self, parameters: Array) -> Tuple[Array, Array, Array]:
+        """
+        Gets the mixture component weights, means, and covariance matrices for the given parameters.
+
+        Args:
+            parameters (`Array`): Input parameter vector for the model.
+
+        Returns:
+            `Tuple[Array, Array, Array]`: Returns a tuple containing mixture weights (alphas), 
+            means, and covariance matrices for each component in the GMM.
+        """
         net_out = self.net(parameters)
         alphas = self._alpha(net_out)
         mean = self._mean(net_out)
@@ -129,7 +218,7 @@ class GMM(eqx.Module):
         covariance = jax.vmap(self.regularise_diagonal)(sigmas.reshape((-1, *cov_shape)))
         covariance = covariance.reshape((self.n_components, *cov_shape))
 
-        alpha = jax.nn.softmax(alphas, axis=0) 
+        alpha = jax.nn.softmax(alphas) 
         return mean, alpha, covariance
 
     @jaxtyped(typechecker=typechecker)
@@ -137,17 +226,41 @@ class GMM(eqx.Module):
         self, 
         x: Float[Array, "{self.x_dim}"], 
         y: Float[Array, "{self.y_dim}"], 
-        key: Optional[PRNGKeyArray]
+        key: Optional[PRNGKeyArray] = None
     ) -> Float[Array, ""]:
-        return self.log_prob(x, y)
+        """
+        Computes the loss as the negative log-probability of the data given the conditioning parameters.
+
+        Args:
+            x (`Float[Array, "{self.x_dim}"]`): Input data sample.
+            y (`Float[Array, "{self.y_dim}"]`): Conditioning context vector.
+            key (`Optional[PRNGKeyArray]`): Optional random key for stochastic operations.
+
+        Returns:
+            `Float[Array, ""]`: Negative log-probability value as the loss.
+        """
+        return -self.log_prob(x, y)
 
     @jaxtyped(typechecker=typechecker)
     def log_prob(
         self,
         x: Float[Array, "{self.x_dim}"], 
         y: Float[Array, "{self.y_dim}"], 
-        key: Optional[PRNGKeyArray]
+        key: Optional[PRNGKeyArray] = None
     ) -> Float[Array, ""]:
+        """
+        Computes the log-probability of the data given the conditioning parameters.
+
+        Args:
+            x (`Float[Array, "{self.x_dim}"]`): Input data sample.
+            y (`Float[Array, "{self.y_dim}"]`): Conditioning context vector.
+            key (`Optional[PRNGKeyArray]`): Optional random key for stochastic operations.
+
+        Returns:
+            `Float[Array, ""]`: Log-probability value for the given data and parameters.
+        """
         x = jnp.atleast_1d(y)
         y = jnp.atleast_1d(y)
+        if self.scaler is not None:
+            x, y = self.scaler.forward(x, y)
         return self.__call__(y).log_prob(x) 

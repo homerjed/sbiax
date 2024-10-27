@@ -2,6 +2,7 @@ from .ensemble import Ensemble
 from .multi_ensemble import MultiEnsemble
 from .cnf import CNF
 from .maf import MAF
+from .gmm import GMM
 from .ndes import (
     nde_log_prob,
     nde_log_prob_posterior,
