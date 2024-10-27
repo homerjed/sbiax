@@ -35,7 +35,6 @@ jobs:
           message: '(auto) Paper PDF Draft'
           author_name: 'homerjed'
           author_email: 'homerjed@users.noreply.github.com'
-          message: "(auto) Paper PDF Draft"
-          push: "origin main"
+          push: 'origin main'
           # This should be the path to the paper within your repo.
           add: 'paper/paper.pdf' # 'paper/*.pdf' to commit all PDFs in the paper directory
