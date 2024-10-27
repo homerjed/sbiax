@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
       - name: Build draft PDF
         uses: openjournals/openjournals-draft-action@master
         with:
@@ -31,5 +33,9 @@ jobs:
         uses: EndBug/add-and-commit@v9
         with:
           message: '(auto) Paper PDF Draft'
+          author_name: 'homerjed'
+          author_email: 'homerjed@users.noreply.github.com'
+          message: "(auto) Paper PDF Draft"
+          push: "origin main"
           # This should be the path to the paper within your repo.
           add: 'paper/paper.pdf' # 'paper/*.pdf' to commit all PDFs in the paper directory
