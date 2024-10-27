@@ -7,11 +7,19 @@
   <source srcset="https://github.com/homerjed/sbipdf/blob/main/assets/cover.png" media="(prefers-color-scheme: light)">
   <img src="https://github.com/homerjed/sbipdf/blob/main/assets/cover.png" alt="Your image description">
 </picture> -->
-<p align="center">
+<!-- <p align="center">
   <picture>
     <source srcset="https://github.com/homerjed/sbipdf/blob/main/assets/cover_dark.png" media="(prefers-color-scheme: dark)">
     <source srcset="https://github.com/homerjed/sbipdf/blob/main/assets/cover.png" media="(prefers-color-scheme: light)">
     <img src="https://github.com/homerjed/sbipdf/blob/main/assets/cover.png" alt="Your image description">
+  </picture>
+</p> -->
+
+<p align="center">
+  <picture>
+    <source srcset="https://raw.githubusercontent.com/homerjed/sbipdf/main/assets/cover_dark.png" media="(prefers-color-scheme: dark)">
+    <source srcset="https://raw.githubusercontent.com/homerjed/sbipdf/main/assets/cover.png" media="(prefers-color-scheme: light)">
+    <img src="https://raw.githubusercontent.com/homerjed/sbipdf/main/assets/cover.png" alt="Your image description">
   </picture>
 </p>
 
