@@ -80,7 +80,8 @@ class Ensemble(eqx.Module):
     ):
         """
         Initializes the ensemble with a list of neural density estimators (NDEs), 
-        an SBI type (`"nle"` or `"npe"`), and optional weights (default is uniform).
+        an SBI type (`"nle"` or `"npe"`), and optional stacking weights for the
+        ensemble log-likelihood (default is uniform).
 
         Args:
             ndes (`Sequence[eqx.Module]`): A sequence of NDE models in the ensemble.
