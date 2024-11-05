@@ -8,7 +8,7 @@ tags:
   - Simulation based inference
 authors:
   - name: Jed Homer
-    orcid: 0000-0000-0000-0000
+    orcid: 0009-0002-0985-1437
     equal-contrib: true
     affiliation: "1" # (Multiple affiliations must be quoted)
 affiliations:
