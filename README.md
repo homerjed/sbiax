@@ -89,3 +89,20 @@ Install via
 ```pip install sbiax```
 
 and have a look at [examples](https://github.com/homerjed/sbiax/tree/main/examples).
+
+### Citation
+
+If you found this library to be useful in academic work, then please cite:  <!--([arXiv link](https://arxiv.org/abs/2111.00254)) -->
+
+```bibtex
+@misc{homer2024simulationbasedinferencedodelsonschneidereffect,
+      title={Simulation-based inference has its own Dodelson-Schneider effect (but it knows that it does)}, 
+      author={Jed Homer and Oliver Friedrich and Daniel Gruen},
+      year={2024},
+      eprint={2412.02311},
+      archivePrefix={arXiv},
+      primaryClass={astro-ph.CO},
+      url={https://arxiv.org/abs/2412.02311}, 
+}
+
+```
