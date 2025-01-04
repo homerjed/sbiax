@@ -1,6 +1,6 @@
 [project]
 name = "sbiax"
-version = "0.0.12"
+version = "0.0.13"
 description = "Fast, parallel and lightweight simulation-based inference in JAX."
 readme = "README.md"
 requires-python ="~=3.12"
@@ -24,7 +24,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-urls = {repository = "https://github.com/homerjed/sbi1pdf"}
+urls = {repository = "https://github.com/homerjed/sbiax"}
 
 dependencies = [
     'jax==0.4.33',

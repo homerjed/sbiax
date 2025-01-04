@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import jax.tree_util as jtu
-from jax.sharding import NamedSharding
+from jax.sharding import NamedSharding, PositionalSharding
 import equinox as eqx
 from jaxtyping import Key, Array, PyTree
 import optax
@@ -20,6 +20,16 @@ from .loader import _InMemoryDataLoader, sort_sample
 from ..ndes import Ensemble
 
 Optimiser = optax.GradientTransformation 
+
+
+
+def shard_batch(
+    batch: Tuple[Array, ...], 
+    sharding: Optional[NamedSharding] = None
+) -> Tuple[Array, ...]:
+    if sharding:
+        batch = eqx.filter_shard(batch, sharding)
+    return batch
 
 
 def apply_ema(
@@ -52,14 +62,24 @@ def make_step(
     opt_state: PyTree,
     opt: Optimiser,
     clip_max_norm: float,
-    key: Key
+    key: Key,
+    *,
+    replicated_sharding: Optional[PositionalSharding] = None,
 ) -> Tuple[eqx.Module, PyTree, Array]:
     _fn = eqx.filter_value_and_grad(batch_loss_fn)
+    if replicated_sharding is not None:
+        nde, opt_state = eqx.filter_shard(
+            (nde, opt_state), replicated_sharding
+        )
     L, grads = _fn(nde, x, y, key=key)
     if clip_max_norm is not None:
         grads = clip_grad_norm(grads, clip_max_norm)
     updates, opt_state = opt.update(grads, opt_state, nde)
     nde = eqx.apply_updates(nde, updates)
+    if replicated_sharding is not None:
+        nde, opt_state = eqx.filter_shard(
+            (nde, opt_state), replicated_sharding
+        )
     return nde, opt_state, L 
 
 
@@ -154,6 +174,7 @@ def train_nde(
     clip_max_norm: Optional[float] = None,
     # Sharding
     sharding: Optional[NamedSharding] = None,
+    replicated_sharding: Optional[NamedSharding] = None,
     # Optuna
     trial: Optional[optuna.trial.Trial] = None,
     # Saving
@@ -248,7 +269,7 @@ def train_nde(
                 xy = eqx.filter_shard(xy, sharding)
 
             model, opt_state, train_loss = make_step(
-                model, xy.x, xy.y, opt_state, opt, clip_max_norm, key
+                model, xy.x, xy.y, opt_state, opt, clip_max_norm, key, replicated_sharding=replicated_sharding
             )
 
             epoch_train_loss += train_loss 
@@ -265,7 +286,9 @@ def train_nde(
             if sharding is not None:
                 xy = eqx.filter_shard(xy, sharding)
 
-            valid_loss = batch_eval_fn(model, xy.x, xy.y, key=key)
+            valid_loss = batch_eval_fn(
+                model, xy.x, xy.y, key=key, replicated_sharding=replicated_sharding
+            )
 
             epoch_valid_loss += valid_loss
 
@@ -420,6 +443,7 @@ def train_ensemble(
     clip_max_norm: Optional[float] = None,
     # Sharding
     sharding: Optional[NamedSharding] = None,
+    replicated_sharding: Optional[NamedSharding] = None,
     # Optuna
     trial: Optional[optuna.trial.Trial] = None,
     # Saving
@@ -489,6 +513,7 @@ def train_ensemble(
             patience,
             clip_max_norm,
             sharding=sharding,
+            replicated_sharding=replicated_sharding,
             results_dir=results_dir,
             trial=trial,
             tqdm_description=tqdm_description,

@@ -2,8 +2,7 @@ from typing import Optional
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-import jax.tree_util as jtu
-from jax.sharding import NamedSharding
+from jax.sharding import PositionalSharding 
 import equinox as eqx
 from jaxtyping import Key, Array, PyTree
 
@@ -39,8 +38,11 @@ def batch_eval_fn(
     x: Array, 
     y: Array,  
     pdfs: Optional[Array] = None, 
-    key: Key = None
+    key: Key = None,
+    replicated_sharding: Optional[PositionalSharding] = None
 ) -> Array:
+    if replicated_sharding is not None:
+        nde = eqx.filter_shard(nde, replicated_sharding)
     nde = eqx.nn.inference_mode(nde, True)
     keys = jr.split(key, len(x))
     loss = jax.vmap(nde.loss)(x=x, y=y, key=keys).mean()

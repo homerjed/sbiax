@@ -6,10 +6,8 @@ import numpy as np
 import tensorflow_probability.substrates.jax.distributions as tfd
 
 
-def get_shear_experiment():
-    data_dir = "/Users/Jed.Homer/phd/sbiax/data/shear/"
-
-    covariance   = np.loadtxt(data_dir + "covariance_cosmic_shear_PMEpaper.dat")
+def get_shear_experiment(data_dir):
+    covariance   = np.loadtxt(data_dir + "covariance_cosmic_shear_PMEpaper.dat") # / (18. / 5.)
     precision    = np.linalg.inv(np.matrix(covariance))
     mu           = np.loadtxt(data_dir + "DES_shear-shear_a1.0_b0.5_data_vector")[:, 1]
     derivatives  = np.loadtxt(data_dir + "derivatives.dat").T
@@ -39,7 +37,6 @@ def get_shear_experiment():
 
 
 def linearized_model(_alpha, mu, alpha, derivatives):
-    """ Linearised model always uses true mu_0, C """
     return mu + jnp.dot(_alpha - alpha, derivatives)
 
 
@@ -100,7 +97,7 @@ def _mle(d, pi, Finv, mu, dmu, precision):
     return pi + jnp.linalg.multi_dot([Finv, dmu, precision, d - mu])
 
 
-def get_experiment_data(key, true_covariance, n_sims, *, results_dir):
+def get_experiment_data(key, true_covariance, n_sims, *, results_dir, data_dir):
 
     key, key_prior, key_simulate = jr.split(key, 3)
 
@@ -116,7 +113,7 @@ def get_experiment_data(key, true_covariance, n_sims, *, results_dir):
         Finv, 
         lower,
         upper
-    ) = get_shear_experiment()
+    ) = get_shear_experiment(data_dir=data_dir)
 
     # Estimate covariance, Fisher information and precision given n_sims 
     if true_covariance:

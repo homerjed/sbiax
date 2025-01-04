@@ -2,6 +2,7 @@ from typing import Tuple, Optional, Sequence
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+from jax.sharding import PositionalSharding
 import equinox as eqx
 from jaxtyping import PRNGKeyArray, Array
 import optax
@@ -23,15 +24,25 @@ def loss(model, x, y):
 
 
 @eqx.filter_jit
-def evaluate(model, x, y):
+def evaluate(model, x, y, *, replicated_sharding):
+    if replicated_sharding is not None:
+        model = eqx.filter_shard(model, replicated_sharding)
     return loss(model, x, y)
 
 
 @eqx.filter_jit
-def make_step(model, opt_state, x, y, opt):
+def make_step(model, opt_state, x, y, opt, *, replicated_sharding):
+    if replicated_sharding is not None:
+        model, opt_state = eqx.filter_shard(
+            (model, opt_state), replicated_sharding
+        )
     loss_value, grads = eqx.filter_value_and_grad(loss)(model, x, y)
     updates, opt_state = opt.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
+    if replicated_sharding is not None:
+        model, opt_state = eqx.filter_shard(
+            (model, opt_state), replicated_sharding
+        )
     return model, opt_state, loss_value
 
 
@@ -49,6 +60,11 @@ def fit_nn(
     patience: Optional[int], 
     n_steps: int = 10_000, 
     valid_fraction: int = 0.9, 
+    valid_data: Sequence[Array] = None,
+    batch_dataset: bool = True,
+    *,
+    sharding: Optional[PositionalSharding] = None,
+    replicated_sharding: Optional[PositionalSharding] = None,
 ) -> Tuple[eqx.Module, Array]:
     """
     Trains a neural network model with early stopping.
@@ -85,21 +101,41 @@ def fit_nn(
 
     opt_state = opt.init(eqx.filter(model, eqx.is_array))
 
-    Xt, Xv = jnp.split(D, [int(valid_fraction * n_s)])
-    Yt, Yv = jnp.split(Y, [int(valid_fraction * n_s)])
+    if valid_data is not None:
+        Xt, Yt = train_data
+        Xv, Yv = valid_data
+    else:
+        Xt, Xv = jnp.split(D, [int(valid_fraction * n_s)]) 
+        Yt, Yv = jnp.split(Y, [int(valid_fraction * n_s)])
 
     L = np.zeros((n_steps, 2))
-    with trange(
-        n_steps, desc="Training NN", colour="blue"
-    ) as steps:
+    with trange(n_steps, desc="Training NN", colour="blue") as steps:
         for step in steps:
             key_t, key_v = jr.split(jr.fold_in(key, step))
 
-            x, y = get_batch(Xt, Yt, n=n_batch, key=key_t)
-            model, opt_state, train_loss = make_step(model, opt_state, x, y, opt)
+            if batch_dataset:
+                x, y = get_batch(Xt, Yt, n=n_batch, key=key_t) # Xt, Yt
+            else:
+                x, y = Xt, Yt
+            
+            if sharding is not None:
+                x, y = eqx.filter_shard((x, y), sharding)
 
-            x, y = get_batch(Xv, Yv, n=n_batch, key=key_v)
-            valid_loss = evaluate(model, x, y)
+            model, opt_state, train_loss = make_step(
+                model, opt_state, x, y, opt, replicated_sharding=replicated_sharding
+            )
+
+            if batch_dataset:
+                x, y = get_batch(Xv, Yv, n=n_batch, key=key_v)
+            else:
+                x, y = Xv, Yv
+
+            if sharding is not None:
+                x, y = eqx.filter_shard((x, y), sharding)
+
+            valid_loss = evaluate(
+                model, x, y, replicated_sharding=replicated_sharding
+            )
 
             L[step] = train_loss, valid_loss
             steps.set_postfix_str(

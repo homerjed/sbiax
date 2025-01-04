@@ -92,7 +92,7 @@ and have a look at [examples](https://github.com/homerjed/sbiax/tree/main/exampl
 
 ### Citation
 
-If you found this library to be useful in academic work, then please cite:  <!--([arXiv link](https://arxiv.org/abs/2111.00254)) -->
+If you found this library to be useful in academic work, please cite:  <!--([arXiv link](https://arxiv.org/abs/2111.00254)) -->
 
 ```bibtex
 @misc{homer2024simulationbasedinferencedodelsonschneidereffect,
