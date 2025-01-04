@@ -10,10 +10,13 @@ authors:
   - name: Jed Homer
     orcid: 0009-0002-0985-1437 
     equal-contrib: true
-    affiliation: "1" # (Multiple affiliations must be quoted)
+    affiliation: "1, 2" # (Multiple affiliations must be quoted)
 affiliations:
- - name: Ludwig-Maximilians-Universität München, Faculty for Physics, University Observatory, Scheinerstrasse 1, München, Deustchland.
+ - name: University Observatory, Faculty for Physics, Ludwig-Maximilians-Universität München, Scheinerstrasse 1, München, Deustchland.
    index: 1
+   ror: 00hx57361
+ - name: Munich Center for Machine Learning.
+   index: 2
    ror: 00hx57361
 date: 1 October 2024
 bibliography: paper.bib
@@ -37,7 +40,7 @@ In a typical Bayesian inference problem, the data likelihood is not known. Howev
 
 `sbiax` is a code for implementing each of these steps. The code allows for Neural Likelihood Estimation [@papamakarios; @delfi] and Neural Posterior Estimation [@npe].
 
-As shown in @homer, SBI is shown to successfully obtain the correct posterior widths and coverages given enough simulations which agree with the analytic solution - this code was used in the research for this publication. 
+As shown in @homer, SBI can successfully obtain the correct posterior widths and coverages given enough simulations which agree with the analytic solution - this code was used in the research for this publication. 
 
 # Statement of need
 
@@ -45,7 +48,7 @@ Simulation-based inference (SBI) covers a broad class of statistical techniques 
 
 In the field of cosmology, SBI is of particular interest due to complexity and non-linearity of models for the expectations of non-standard summary statistics of the large-scale structure, as well as the non-Gaussian noise distributions for these statistics. The assumptions required for the complex analytic modelling of these statistics as well as the increasing dimensionality of data returned by spectroscopic and photometric galaxy surveys limits the amount of information that can be obtained on fundamental physical parameters. Therefore, the study and research into current and future statistical methods for Bayesian inference is of paramount importance for the field of cosmology.
 
-The software we present, `sbiax`, is designed to be used by machine learning and physics researchers for running Bayesian inferences using density-estimation SBI techniques. These models can be fit easily with multi-accelerator training and inference within the code. This code - written in `jax` [@jax] - allows for seemless integration of cutting edge generative models to SBI, including continuous normalising flows [@ffjord], matched flows [@flowmatching], masked autoregressive flows [@mafs; @flowjax] and Gaussian mixture models - all of which are implemented in the code. The code features integration with the `optuna` [@optuna] hyperparameter optimisation framework which would be used to ensure consistent analyses, `blackjax` [@blackjax] for fast MCMC sampling and `equinox` [@equinox] for neural network compression methods. The design of `sbiax` allows for new density estimation algorithms to be trained and sampled from. 
+The software we present, `sbiax`, is designed to be used by machine learning and physics researchers for running Bayesian inferences using density-estimation SBI techniques. These models can be fit easily with multi-accelerator training and inference within the code. This code - written in `jax` [@jax] - allows for seemless integration of cutting edge generative models to SBI, including continuous normalising flows [@ffjord], matched flows [@flowmatching], masked autoregressive flows [@mafs; @flowjax] and Gaussian mixture models - all of which are implemented in the code. The code features integration with the `optuna` [@optuna] hyperparameter optimisation framework which would be used to ensure consistent analyses, `blackjax` [@blackjax] for fast MCMC sampling and `equinox` [@equinox] for neural network methods. The design of `sbiax` allows for new density estimation algorithms to be trained and sampled from. 
 
 <!-- BlackJAX integrated for MCMC sampling -->
 
