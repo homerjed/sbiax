@@ -18,7 +18,6 @@ __pycache__/
 affine.py
 _experiment.py
 multi_ensemble.py
-
 sbiax/inference/nle/log_prob_fns.py
 sbiax/meta/_plots.py
 sbiax/ndes/ndes.py
@@ -31,3 +30,5 @@ examples/shear_nn_lin_newton.ipynb
 examples/shear_nn_nonlin.ipynb
 examples/shear_no_config.ipynb
 examples/single_layer_net.ipynb
+
+notes.txt
