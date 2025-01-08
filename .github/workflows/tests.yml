@@ -4,6 +4,7 @@ on:
   push:
       paths:
         - sbiax/**
+        - pyproject.toml # Only if version changes!
 
 jobs:
   run-test:

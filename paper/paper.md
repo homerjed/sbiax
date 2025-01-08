@@ -50,6 +50,8 @@ In the field of cosmology, SBI is of particular interest due to complexity and n
 
 The software we present, `sbiax`, is designed to be used by machine learning and physics researchers for running Bayesian inferences using density-estimation SBI techniques. These models can be fit easily with multi-accelerator training and inference within the code. This code - written in `jax` [@jax] - allows for seemless integration of cutting edge generative models to SBI, including continuous normalising flows [@ffjord], matched flows [@flowmatching], masked autoregressive flows [@mafs; @flowjax] and Gaussian mixture models - all of which are implemented in the code. The code features integration with the `optuna` [@optuna] hyperparameter optimisation framework which would be used to ensure consistent analyses, `blackjax` [@blackjax] for fast MCMC sampling and `equinox` [@equinox] for neural network methods. The design of `sbiax` allows for new density estimation algorithms to be trained and sampled from. 
 
+Whilst excellent software packages already exist for conducting simulation-based inference (e.g. `sbi` [@sbimacke], `sbijax` [@sbidirmeier]) for some applications it is useful to have a lightweight implementation that focuses on speed, ensembling of density estimators and easily integrated MCMC sampling (e.g. for ensembles of likelihoods) - all of which is based on a lightweight and regularly maintained `jax` machine learning library such as `equinox` [@equinox]. `sbiax` depends on density estimators and compression modules - as long as log-probability and callable methods exists for these, they can be integrated seemlessly.
+
 <!-- BlackJAX integrated for MCMC sampling -->
 
 # Density estimation with normalising flows 

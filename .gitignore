@@ -17,3 +17,12 @@ __pycache__/
 
 affine.py
 _experiment.py
+
+examples/compare_nns.py
+examples/run_nn.py
+examples/shear_nn_lin.ipynb
+examples/shear_nn_lin_bfgs.ipynb
+examples/shear_nn_lin_newton.ipynb
+examples/shear_nn_nonlin.ipynb
+examples/shear_no_config.ipynb
+examples/single_layer_net.ipynb

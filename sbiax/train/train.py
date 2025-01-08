@@ -208,15 +208,15 @@ def train_nde(
     Returns:
         Tuple[eqx.Module, dict]:
             - The trained NDE model, either at the last epoch or the epoch with the best validation loss.
-            - A dictionary containing training statistics such as loss values, best loss, and the best epoch.
+            - A dictionary containing training metrics such as loss values, best loss, and the best epoch.
             
-    Key Steps:
-        1. Partitions and preprocesses the training data into training and validation sets.
-        2. Trains the model for `n_epochs` using the specified optimizer and training data.
-        3. Tracks training and validation losses and applies early stopping based on validation loss.
-        4. Optionally applies gradient clipping and Optuna trial pruning.
+    Key steps:
+        1. Partition and preprocesses the training data into training and validation sets.
+        2. Train the model for `n_epochs` using the specified optimizer and training data.
+        3. Track training and validation losses and applies early stopping based on validation loss.
+        4. Optionally apply gradient clipping and Optuna trial pruning.
         5. Plots and saves the training and validation losses, and saves the best-performing model.
-        6. Returns the trained model and relevant training statistics.
+        6. Returns the trained model and relevant training metrics.
 
     Raises:
         optuna.exceptions.TrialPruned: If the Optuna trial is pruned based on validation loss.
@@ -451,9 +451,8 @@ def train_ensemble(
     # Progress bar
     tqdm_description: str = "Training",
     show_tqdm: bool = True,
-) -> Tuple[eqx.Module, dict]:
+) -> Tuple[Ensemble, dict]:
     """
-
     Trains an ensemble of neural density estimator (NDE) models. 
     
     Supports early stopping, gradient clipping, and Optuna integration for hyperparameter tuning.
@@ -514,8 +513,8 @@ def train_ensemble(
             clip_max_norm,
             sharding=sharding,
             replicated_sharding=replicated_sharding,
-            results_dir=results_dir,
             trial=trial,
+            results_dir=results_dir,
             tqdm_description=tqdm_description,
             show_tqdm=show_tqdm
         )
@@ -525,8 +524,6 @@ def train_ensemble(
         stats.append(stats_n)
         ndes.append(nde)
 
-    # ensemble = replace(ensemble, ndes=ndes)
-    
     weights = ensemble.calculate_stacking_weights(
         losses=[
             stats[n]["all_valid_loss"] for n, _ in enumerate(ensemble.ndes)
