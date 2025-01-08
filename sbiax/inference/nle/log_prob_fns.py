@@ -24,7 +24,8 @@ def nde_log_prob_posterior(
     """ NDE log-poserior logp(data|theta) + logprior(theta) """
     log_likelihood = nde_log_prob(nde, data, theta) 
     log_prior = prior.log_prob(theta)
-    return log_likelihood + log_prior
+    log_posterior = log_likelihood + log_prior
+    return log_posterior
 
 
 def get_nde_log_prob_fn(
@@ -42,7 +43,7 @@ def get_nde_log_prob_fn(
 
 def sample_state(
     key: Key, 
-    asymptotic: Any, 
+    asymptotic: Distribution | Any, 
     n_walkers: int, 
     chain_length: int
 ) -> Array:

@@ -3,9 +3,10 @@ import blackjax.progress_bar
 import jax
 import jax.random as jr
 import jax.numpy as jnp
-from jaxtyping import PRNGKeyArray, Array
+from jaxtyping import PRNGKeyArray, Array, Float
 import blackjax
 from tensorflow_probability.substrates.jax.distributions import Distribution
+
 
 def nuts_sample(
     key: PRNGKeyArray, 
@@ -14,9 +15,9 @@ def nuts_sample(
     n_samples: int = 100_000, 
     n_chains: int = 1,
     n_warmup_steps: int = 1000,
-    initial_state: Optional[Array] = None,
-    sampling_kwargs: dict = None
-) -> Tuple[Array, Array]:
+    initial_state: Optional[Float[Array, "#n p"]] = None,
+    sampling_kwargs: Optional[dict] = None
+) -> Tuple[Float[Array, "#n p"], Float[Array, "#n 1"]]:
     """
     Runs NUTS (No-U-Turn Sampler) to sample from a posterior distribution using JAX.
 
