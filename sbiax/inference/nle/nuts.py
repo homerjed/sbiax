@@ -3,11 +3,13 @@ import blackjax.progress_bar
 import jax
 import jax.random as jr
 import jax.numpy as jnp
-from jaxtyping import PRNGKeyArray, Array, Float
+from jaxtyping import PRNGKeyArray, Array, Float, jaxtyped
+from beartype import beartype as typechecker
 import blackjax
 from tensorflow_probability.substrates.jax.distributions import Distribution
 
 
+@jaxtyped(typechecker=typechecker)
 def nuts_sample(
     key: PRNGKeyArray, 
     log_prob_fn: Callable, 
@@ -15,9 +17,9 @@ def nuts_sample(
     n_samples: int = 100_000, 
     n_chains: int = 1,
     n_warmup_steps: int = 1000,
-    initial_state: Optional[Float[Array, "#n p"]] = None,
+    initial_state: Optional[Float[Array, "#i p"]] = None,
     sampling_kwargs: Optional[dict] = None
-) -> Tuple[Float[Array, "#n p"], Float[Array, "#n 1"]]:
+) -> Tuple[Float[Array, "#c #n p"], Float[Array, "#c #n"]]:
     """
     Runs NUTS (No-U-Turn Sampler) to sample from a posterior distribution using JAX.
 

@@ -1,9 +1,9 @@
-from typing import Sequence, List, Callable, Optional
+from typing import Sequence, List, Callable, Optional, Literal
 import jax
 import jax.numpy as jnp
 import jax.random as jr 
 import equinox as eqx
-from jaxtyping import PRNGKeyArray, Array
+from jaxtyping import Key, Array, Float
 from tensorflow_probability.substrates.jax.distributions import Distribution
 
 
@@ -75,8 +75,8 @@ class Ensemble(eqx.Module):
     def __init__(
         self, 
         ndes: Sequence[eqx.Module], 
-        sbi_type: str = "nle", 
-        weights: Array = None
+        sbi_type: Literal["nle", "npe"] = "nle", 
+        weights: Optional[Float[Array, "l"]] = None
     ):
         """
         Initializes the ensemble with a list of neural density estimators (NDEs), 
@@ -95,8 +95,13 @@ class Ensemble(eqx.Module):
         self.weights = default_weights(weights, ndes)
 
     def nde_log_prob_fn(
-        self, nde: eqx.Module, data: Array, prior: Distribution
-    ) -> Callable:
+        self, 
+        nde: eqx.Module, 
+        data: Float[Array, "x"], 
+        prior: Distribution
+    ) -> Callable[
+        [Float[Array, "y"], Key[jnp.ndarray, "..."]], Float[Array, ""]
+    ]:
         """ 
         Returns a posterior log-probability function for a single NDE model parameterised by 
         a datavector `data` and prior `prior`.
@@ -115,7 +120,13 @@ class Ensemble(eqx.Module):
             return nde_likelihood + prior.log_prob(theta)
         return _nde_log_prob_fn
 
-    def ensemble_log_prob_fn(self, data: Array, prior: Optional[Distribution]) -> Callable:
+    def ensemble_log_prob_fn(
+        self, 
+        data: Float[Array, "x"], 
+        prior: Optional[Distribution]
+    ) -> Callable[
+        [Float[Array, "y"], Key[jnp.ndarray, "..."]], Float[Array, ""]
+    ]:
         """ 
         Returns the ensemble log-probability function that combines all NDEs with the 
         given observation, depending on `self.sbi_type`.
@@ -132,8 +143,11 @@ class Ensemble(eqx.Module):
 
         _nle = self.sbi_type == "nle"
 
-        def _joint_log_prob_fn(theta: Array, key: PRNGKeyArray = None) -> Array:
-            L = 0.
+        def _joint_log_prob_fn(
+            theta: Float[Array, "y"], 
+            key: Key[jnp.ndarray, "..."] = None
+        ) -> Float[Array, ""]:
+            L = jnp.zeros(())
             for n, (nde, weight) in enumerate(zip(self.ndes, self.weights)):
                 if key is not None:
                     key = jr.fold_in(key, n)
@@ -150,7 +164,7 @@ class Ensemble(eqx.Module):
 
         return _joint_log_prob_fn
 
-    def ensemble_likelihood(self, data: Array) -> Array:
+    def ensemble_likelihood(self, data: Float[Array, "x"]) -> Float[Array, ""]:
         """
         Returns the ensemble likelihood (no prior term), evaluated at `data`.
         Useful for using multiple ensembles, as independent likelihoods, together.
@@ -163,7 +177,7 @@ class Ensemble(eqx.Module):
         """
         return self.ensemble_log_prob_fn(data, prior=None)
 
-    def calculate_stacking_weights(self, losses: Sequence[Array]) -> Array:
+    def calculate_stacking_weights(self, losses: Sequence[Float[Array, "..."]]) -> Float[Array, "l"]:
         """
         Calculates the weights for each NDE in the ensemble using the final-epoch 
         validation losses.
@@ -176,9 +190,7 @@ class Ensemble(eqx.Module):
             `Array`: Calculated weights for each NDE in the ensemble based on their 
                 validation losses.
         """
-        Ls = jnp.array(
-            [-losses[n] for n, _ in enumerate(self.ndes)]
-        )
+        Ls = jnp.array([-losses[n] for n, _ in enumerate(self.ndes)])
         nde_weights = jnp.exp(Ls) / jnp.sum(jnp.exp(Ls)) 
         return nde_weights
 

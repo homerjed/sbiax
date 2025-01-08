@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import jax.random as jr
 import equinox as eqx
 import diffrax as dfx
-from jaxtyping import Array, Float, Key, jaxtyped, PRNGKeyArray
+from jaxtyping import Key, Array, Float, jaxtyped 
 from beartype import beartype as typechecker
 
 TimeArray = Float[Array, ""]
@@ -152,7 +152,7 @@ class ResidualNetwork(eqx.Module):
         t: TimeArray, 
         y: Float[Array, "{self.y_dim}"],
         *, 
-        key: PRNGKeyArray
+        key: Key[jnp.ndarray, "..."] 
     ) -> Float[Array, "{self.out_size}"]:
         t = jnp.atleast_1d(t)
         xyt = jnp.concatenate([x, y, t])
@@ -469,7 +469,7 @@ class CNF(eqx.Module):
         self, 
         x: Float[Array, "{self.x_dim}"], 
         y: Float[Array, "{self.y_dim}"], 
-        key: Optional[PRNGKeyArray] = None,
+        key: Optional[Key[jnp.ndarray, "..."]] = None,
         exact_log_prob: Optional[bool] = False 
     ) -> Float[Array, ""]:
         """
@@ -524,7 +524,7 @@ class CNF(eqx.Module):
     @jaxtyped(typechecker=typechecker)
     def sample_and_log_prob(
         self, 
-        key: PRNGKeyArray, 
+        key: Key[jnp.ndarray, "..."], 
         y: Float[Array, "{self.y_dim}"], 
         exact_log_prob: Optional[bool] = None
     ) -> Tuple[Float[Array, "{self.x_dim}"], Float[Array, ""]]:
@@ -578,13 +578,14 @@ class CNF(eqx.Module):
         log_prob = delta_log_likelihood + self.prior_log_prob(z)
         return x, log_prob
 
+    @jaxtyped(typechecker=typechecker)
     def sample_and_log_prob_n(
         self, 
-        key: Key, 
-        y: Array, 
+        key: Key[jnp.ndarray, "..."], 
+        y: Float[Array, "#n {self.y_dim}"], 
         n_samples: int, 
         exact_log_prob: Optional[bool] = None
-    ) -> Tuple[Array, Array]:
+    ) -> Tuple[Float[Array, "#n {self.x_dim}"], Float[Array, "#n"]]:
         """
         Generates `n_samples` samples from the continuous normalizing flow and computes 
         the log-probabilities for each sample given the conditioning context `y`.
@@ -618,7 +619,7 @@ class CNF(eqx.Module):
         samples, log_probs = _sampler(keys, y)
         return samples, log_probs 
 
-    def prior_log_prob(self, z: Array) -> Array:
+    def prior_log_prob(self, z: Float[Array, "{self.x_dim}"]) -> Float[Array, ""]:
         """
         Computes the log-probability of a sample `z` under the prior distribution, which is 
         assumed to be a standard multivariate normal distribution.
@@ -633,7 +634,12 @@ class CNF(eqx.Module):
             z, jnp.zeros(self.x_dim), jnp.eye(self.x_dim)
         )
 
-    def loss(self, x: Array, y: Array, key: Optional[Key] = None) -> Array:
+    def loss(
+        self, 
+        x: Float[Array, "{self.x_dim}"], 
+        y: Float[Array, "{self.y_dim}"], 
+        key: Optional[Key[jnp.ndarray, ""]] = None
+    ) -> Float[Array, ""]:
         """
         Computes the loss for training the continuous normalizing flow model, which is 
         defined as the negative log-probability of the data `x` given the conditioning 

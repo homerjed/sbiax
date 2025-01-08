@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr  
 import equinox as eqx
-from jaxtyping import PRNGKeyArray, Array, Float, jaxtyped
+from jaxtyping import Key, Array, Float, jaxtyped
 from beartype import beartype as typechecker
 import tensorflow_probability.substrates.jax as tfp
 import tensorflow_probability.substrates.jax.distributions as tfd
@@ -82,7 +82,7 @@ class GMM(eqx.Module):
         covariance_eps: float = 1e-8, 
         scaler: eqx.Module = None,
         *,
-        key: PRNGKeyArray
+        key: Key 
     ):
         """
         Initializes the Gaussian Mixture Model with specified event and context dimensions, 
@@ -143,7 +143,10 @@ class GMM(eqx.Module):
         self.x_dim = event_dim
         self.y_dim = context_dim
 
-    def regularise_diagonal(self, x: Array) -> Array:
+    def regularise_diagonal(
+        self, 
+        x: Float[Array, "{self.x_dim} {self.x_dim}"]
+    ) -> Float[Array, "{self.x_dim} {self.x_dim}"]:
         """
         Applies positive activation to the diagonal of the covariance matrix to ensure non-negativity.
 
@@ -159,7 +162,7 @@ class GMM(eqx.Module):
         x = x + diag + regularize
         return x 
 
-    def __call__(self, parameters: Array) -> tfd.Distribution:
+    def __call__(self, parameters: Float[Array, "{self.y_dim}"]) -> tfd.Distribution:
         """
         Generates a `tfd.MixtureSameFamily` distribution representing the Gaussian mixture model.
 
@@ -195,7 +198,13 @@ class GMM(eqx.Module):
         )
         return gmm
     
-    def get_parameters(self, parameters: Array) -> Tuple[Array, Array, Array]:
+    def get_parameters(
+        self, parameters: Float[Array, "{self.y_dim}"]
+    ) -> Tuple[
+        Float[Array, "{self.n_components} {self.x_dim}"], 
+        Float[Array, "{self.n_components}"], 
+        Float[Array, "{self.n_components} {self.x_dim} {self.x_dim}"]
+    ]:
         """
         Gets the mixture component weights, means, and covariance matrices for the given parameters.
 
@@ -226,7 +235,7 @@ class GMM(eqx.Module):
         self, 
         x: Float[Array, "{self.x_dim}"], 
         y: Float[Array, "{self.y_dim}"], 
-        key: Optional[PRNGKeyArray] = None
+        key: Optional[Key[jnp.ndarray, "..."]] = None
     ) -> Float[Array, ""]:
         """
         Computes the loss as the negative log-probability of the data given the conditioning parameters.
@@ -234,7 +243,7 @@ class GMM(eqx.Module):
         Args:
             x (`Float[Array, "{self.x_dim}"]`): Input data sample.
             y (`Float[Array, "{self.y_dim}"]`): Conditioning context vector.
-            key (`Optional[PRNGKeyArray]`): Optional random key for stochastic operations.
+            key (`Optional[PRNGKeyArray]`): Optional random key.
 
         Returns:
             `Float[Array, ""]`: Negative log-probability value as the loss.
@@ -244,11 +253,10 @@ class GMM(eqx.Module):
     @jaxtyped(typechecker=typechecker)
     def sample_and_log_prob(
         self, 
-        key: PRNGKeyArray, 
+        key: Key[jnp.ndarray, "..."], 
         y: Float[Array, "{self.y_dim}"]
     ) -> Tuple[Float[Array, "{self.x_dim}"], Float[Array, ""]]:
         x = self.__call__(y).sample(seed=key)
-        # log_prob = self.__call__(y).log_prob(x)
         log_prob = self.log_prob(x, y)
         return x, log_prob
 
@@ -257,7 +265,7 @@ class GMM(eqx.Module):
         self,
         x: Float[Array, "{self.x_dim}"], 
         y: Float[Array, "{self.y_dim}"], 
-        key: Optional[PRNGKeyArray] = None
+        key: Optional[Key[jnp.ndarray, "..."]] = None
     ) -> Float[Array, ""]:
         """
         Computes the log-probability of the data given the conditioning parameters.
@@ -265,7 +273,7 @@ class GMM(eqx.Module):
         Args:
             x (`Float[Array, "{self.x_dim}"]`): Input data sample.
             y (`Float[Array, "{self.y_dim}"]`): Conditioning context vector.
-            key (`Optional[PRNGKeyArray]`): Optional random key for stochastic operations.
+            key (`Optional[PRNGKeyArray]`): Optional random key.
 
         Returns:
             `Float[Array, ""]`: Log-probability value for the given data and parameters.

@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import Tuple, Optional 
 from copy import deepcopy
 from dataclasses import replace
 import os
@@ -8,7 +8,8 @@ import jax.random as jr
 import jax.tree_util as jtu
 from jax.sharding import NamedSharding, PositionalSharding
 import equinox as eqx
-from jaxtyping import Key, Array, PyTree
+from jaxtyping import Key, PRNGKeyArray, Array, PyTree, Float, jaxtyped
+from beartype import beartype as typechecker
 import optax
 import numpy as np
 from tqdm.auto import tqdm, trange 
@@ -22,11 +23,10 @@ from ..ndes import Ensemble
 Optimiser = optax.GradientTransformation 
 
 
-
 def shard_batch(
-    batch: Tuple[Array, ...], 
+    batch: Tuple[Float[Array, "n x"], Float[Array, "n y"]], 
     sharding: Optional[NamedSharding] = None
-) -> Tuple[Array, ...]:
+) -> Tuple[Float[Array, "n x"], Float[Array, "n y"]]:
     if sharding:
         batch = eqx.filter_shard(batch, sharding)
     return batch
@@ -44,28 +44,29 @@ def apply_ema(
     return eqx.combine(e_, _m)
 
 
-def clip_grad_norm(grads, max_norm):
+def clip_grad_norm(grads: PyTree, max_norm: float) -> PyTree:
     norm = jnp.linalg.norm(
-        jtu.tree_leaves(
-            jtu.tree_map(jnp.linalg.norm, grads)
+        jax.tree.leaves(
+            jax.tree.map(jnp.linalg.norm, grads)
         )
     )
     factor = jnp.minimum(max_norm, max_norm / (norm + 1e-6))
-    return jtu.tree_map(lambda x: x * factor, grads)
+    return jax.tree.map(lambda x: x * factor, grads)
 
 
+@jaxtyped(typechecker=typechecker)
 @eqx.filter_jit
 def make_step(
     nde: eqx.Module, 
-    x: Array, 
-    y: Array, 
+    x: Float[Array, "b x"], 
+    y: Float[Array, "b y"], 
     opt_state: PyTree,
     opt: Optimiser,
-    clip_max_norm: float,
-    key: Key,
+    key: Key[jnp.ndarray, "..."],
     *,
+    clip_max_norm: Optional[float] = None,
     replicated_sharding: Optional[PositionalSharding] = None,
-) -> Tuple[eqx.Module, PyTree, Array]:
+) -> Tuple[eqx.Module, PyTree, Float[Array, ""]]:
     _fn = eqx.filter_value_and_grad(batch_loss_fn)
     if replicated_sharding is not None:
         nde, opt_state = eqx.filter_shard(
@@ -87,17 +88,22 @@ def count_params(nde: eqx.Module) -> int:
     return sum(x.size for x in jtu.tree_leaves(nde) if eqx.is_array(x))
 
 
-def get_n_split_keys(key: Key, n: int) -> Tuple[Key, Array]:
+def get_n_split_keys(key: Key, n: int) -> Tuple[Key, PRNGKeyArray]:
     key, *keys = jr.split(key, n + 1)
     return key, jnp.asarray(keys)
 
 
+@jaxtyped(typechecker=typechecker)
 def partition_and_preprocess_data(
-    key: Key, 
-    train_data: Tuple[Array, ...], 
+    key: Key[jnp.ndarray, "..."],
+    train_data: Tuple[Float[Array, "n x"], Float[Array, "n y"]], 
     valid_fraction: float, 
     n_batch: int, 
-) -> Tuple[Tuple[Array, ...], Tuple[Array, ...], Tuple[int, ...]]:
+) -> Tuple[
+    Tuple[Float[Array, "nt x"], Float[Array, "nt y"]], 
+    Tuple[Float[Array, "nv x"], Float[Array, "nv y"]], 
+    Tuple[int, int]
+]:
 
     # Number of training and validation samples
     n_train_data = len(train_data[0]) 
@@ -123,10 +129,11 @@ def partition_and_preprocess_data(
     return data_train, data_valid, (n_train_batches, n_valid_batches)
 
 
+@jaxtyped(typechecker=typechecker)
 def get_loaders(
-    key: Key, 
-    data_train: Tuple[Array, ...], 
-    data_valid: Tuple[Array, ...], 
+    key: Key[jnp.ndarray, "..."],
+    data_train: Tuple[Float[Array, "nt x"], Float[Array, "nt y"]], 
+    data_valid: Tuple[Float[Array, "nv x"], Float[Array, "nv y"]], 
     train_mode: str
 ) -> Tuple[_InMemoryDataLoader, _InMemoryDataLoader]:
     train_dl_key, valid_dl_key = jr.split(key)
@@ -157,14 +164,15 @@ def count_epochs_since_best(losses: list[float]) -> int:
     return len(losses) - min_idx - 1
 
 
+@jaxtyped(typechecker=typechecker)
 def train_nde(
-    key: Key,
+    key: Key[jnp.ndarray, "..."], 
     # NDE
     model: eqx.Module,
     train_mode: str,
     # Data
-    train_data: Tuple[Array, ...],
-    test_data: Tuple[Array, ...] = None, # Independent test data
+    train_data: Tuple[Float[Array, "n x"], Float[Array, "n y"]],
+    test_data: Optional[Tuple[Float[Array, "n x"], Float[Array, "n y"]]] = None,
     # Hyperparameters 
     opt: Optimiser = optax.adam(1e-3),
     valid_fraction: float = 0.1,
@@ -269,7 +277,14 @@ def train_nde(
                 xy = eqx.filter_shard(xy, sharding)
 
             model, opt_state, train_loss = make_step(
-                model, xy.x, xy.y, opt_state, opt, clip_max_norm, key, replicated_sharding=replicated_sharding
+                model, 
+                xy.x, 
+                xy.y, 
+                opt_state, 
+                opt, 
+                key, 
+                clip_max_norm=clip_max_norm, 
+                replicated_sharding=replicated_sharding
             )
 
             epoch_train_loss += train_loss 
@@ -432,8 +447,8 @@ def train_ensemble(
     ensemble: Ensemble,
     train_mode: str,
     # Data
-    train_data: Tuple[Array, ...],
-    test_data: Tuple[Array, ...] = None, # Independent test data
+    train_data: Tuple[Float[Array, "n x"], Float[Array, "n y"]],
+    test_data: Optional[Tuple[Float[Array, "nt x"], Float[Array, "nt y"]]] = None,
     # Hyperparameters 
     opt: Optimiser = optax.adam(1e-3),
     valid_fraction: float = 0.1,

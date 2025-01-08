@@ -1,10 +1,9 @@
-import abc
-from typing import NamedTuple
+from typing import NamedTuple, Literal, Tuple
 import jax
 import jax.numpy as jnp
 import jax.random as jr
 import equinox as eqx
-from jaxtyping import Key, Array
+from jaxtyping import Key, Array, Float
 
 
 class Sample(NamedTuple):
@@ -12,8 +11,22 @@ class Sample(NamedTuple):
     y: Array 
 
 
-def sort_sample(train_mode, simulations, parameters):
-    # Sort simulations and parameters according to NPE or NLE
+def sort_sample(
+    train_mode: Literal["npe", "nle"], 
+    simulations: Float[Array, "b x"],
+    parameters: Float[Array, "b y"]
+) -> Sample:
+    """
+        Sort simulations and parameters according to NPE or NLE
+        
+        Args:
+            train_mode (`str`): NPE or NLE mode of SBI.
+            simulations (`Array`): Simulations array.
+            parameters (`Array`): Parameters array.
+        
+        Returns:
+            (`Sample`): Ordered sample of simulations and parameters.
+    """
     _nle = train_mode.lower() == "nle"
     return Sample(
         x=simulations if _nle else parameters,
@@ -21,69 +34,10 @@ def sort_sample(train_mode, simulations, parameters):
     )
 
 
-class _AbstractDataLoader(metaclass=abc.ABCMeta):
-    @abc.abstractmethod
-    def __init__(self, data, targets, *, key):
-        pass
-
-    def __iter__(self):
-        raise RuntimeError("Use `.loop` to iterate over the data loader.")
-
-    @abc.abstractmethod
-    def loop(self, batch_size):
-        pass
-
-
-class _InMemoryDataLoader(_AbstractDataLoader):
-    def __init__(
-        self, 
-        simulations: Array, 
-        parameters: Array, 
-        train_mode: str, 
-        *, 
-        key: Key
-    ): 
-        self.simulations = simulations 
-        self.parameters = parameters 
-        self.train_mode = train_mode.lower()
-        self.key = key
-        assert self.train_mode.lower() in ["nle", "npe"]
-
-    @property 
-    def n_batches(self, batch_size):
-        return max(int(self.simulations.shape[0] / batch_size), 1)
-
-    def loop(self, batch_size: int):
-        # Loop through dataset, batching, while organising data for NPE or NLE
-        dataset_size = self.simulations.shape[0]
-        one_batch = batch_size >= dataset_size
-        key = self.key
-        indices = jnp.arange(dataset_size)
-        while True:
-            # Yield whole dataset if batch size is larger than dataset size
-            if one_batch:
-                yield sort_sample(
-                    self.train_mode, 
-                    self.simulations, 
-                    self.parameters
-                )
-            else:
-                key, subkey = jr.split(key)
-                perm = jr.permutation(subkey, indices)
-                start = 0
-                end = batch_size
-                while end < dataset_size:
-                    batch_perm = perm[start:end]
-                    yield sort_sample(
-                        self.train_mode, 
-                        self.simulations[batch_perm], 
-                        self.parameters[batch_perm] 
-                    )
-                    start = end
-                    end = start + batch_size
-
-
 class DataLoader(eqx.Module):
+    """
+        Ultra simple and jit compilable dataloader.
+    """
     arrays: tuple[Array, ...]
     batch_size: int
     key: Key
@@ -92,7 +46,16 @@ class DataLoader(eqx.Module):
         dataset_size = self.arrays[0].shape[0]
         assert all(array.shape[0] == dataset_size for array in self.arrays)
 
-    def __call__(self, step):
+    def __call__(self, step: int) -> Tuple[Float[Array, "b x"], Float[Array, "b y"]]:
+        """
+            Return a batch of simulations and parameters given the step.
+
+            Args:
+                step (`int`): Training iteration.
+
+            Returns:
+                (`Tuple[Array, Array]`): Tuple of simulations and parameter arrays.
+        """
         dataset_size = self.arrays[0].shape[0]
         num_batches = dataset_size // self.batch_size
         epoch = step // num_batches

@@ -4,7 +4,8 @@ import jax.numpy as jnp
 import jax.random as jr
 from jax.sharding import PositionalSharding
 import equinox as eqx
-from jaxtyping import PRNGKeyArray, Array
+from jaxtyping import Key, Array, Float, jaxtyped
+from beartype import beartype as typechecker
 import optax
 import numpy as np 
 from tqdm.auto import trange
@@ -16,7 +17,11 @@ from tqdm.auto import trange
 """
 
 
-def loss(model, x, y):
+def loss(
+    model: eqx.Module, 
+    x: Float[Array, "b x"], 
+    y: Float[Array, "b y"]
+) -> Float[Array, ""]:
     def fn(x, y):
         y_ = model(x)
         return jnp.square(jnp.subtract(y_, y))
@@ -24,14 +29,29 @@ def loss(model, x, y):
 
 
 @eqx.filter_jit
-def evaluate(model, x, y, *, replicated_sharding):
+def evaluate(
+    model: eqx.Module, 
+    x: Float[Array, "b x"], 
+    y: Float[Array, "b y"],
+    *, 
+    replicated_sharding: Optional[PositionalSharding] = None
+) -> Float[Array, ""]:
     if replicated_sharding is not None:
         model = eqx.filter_shard(model, replicated_sharding)
     return loss(model, x, y)
 
 
+@jaxtyped(typechecker=typechecker)
 @eqx.filter_jit
-def make_step(model, opt_state, x, y, opt, *, replicated_sharding):
+def make_step(
+    model: eqx.Module, 
+    opt_state: optax.OptState,
+    x: Float[Array, "b x"], 
+    y: Float[Array, "b y"],
+    opt: optax.GradientTransformation, 
+    *, 
+    replicated_sharding: Optional[PositionalSharding]
+) -> Tuple[eqx.Module, optax.OptState, Float[Array, ""]]:
     if replicated_sharding is not None:
         model, opt_state = eqx.filter_shard(
             (model, opt_state), replicated_sharding
@@ -46,15 +66,21 @@ def make_step(model, opt_state, x, y, opt, *, replicated_sharding):
     return model, opt_state, loss_value
 
 
-def get_batch(D, Y, n, key):
+def get_batch(
+    D: Float[Array, "n x"], 
+    Y: Float[Array, "n y"], 
+    n: int, 
+    key: Key
+) -> Tuple[Float[Array, "b x"], Float[Array, "b y"]]:
     idx = jr.choice(key, jnp.arange(D.shape[0]), (n,))
     return D[idx], Y[idx]
 
 
+@jaxtyped(typechecker=typechecker)
 def fit_nn(
-    key: PRNGKeyArray, 
+    key: Key[jnp.ndarray, "..."], 
     model: eqx.Module, 
-    train_data: Sequence[Array], 
+    train_data: Tuple[Float[Array, "n x"], Float[Array, "n y"]], 
     opt: optax.GradientTransformation, 
     n_batch: int, 
     patience: Optional[int], 
@@ -65,7 +91,7 @@ def fit_nn(
     *,
     sharding: Optional[PositionalSharding] = None,
     replicated_sharding: Optional[PositionalSharding] = None,
-) -> Tuple[eqx.Module, Array]:
+) -> Tuple[eqx.Module, Float[np.ndarray, "l 2"]]:
     """
     Trains a neural network model with early stopping.
 

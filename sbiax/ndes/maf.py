@@ -1,9 +1,9 @@
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Callable
 import jax
 import jax.random as jr
 import jax.numpy as jnp
 import equinox as eqx
-from jaxtyping import Array, Float, Key, jaxtyped, PRNGKeyArray
+from jaxtyping import Key, Array, Float, jaxtyped
 from beartype import beartype as typechecker
 from flowjax.flows import masked_autoregressive_flow
 from flowjax.distributions import Normal
@@ -94,15 +94,15 @@ class MAF(eqx.Module):
 
     def __init__(
         self, 
-        event_dim, 
-        context_dim, 
-        width_size, 
-        n_layers, 
-        nn_depth, 
-        activation=jax.nn.tanh, 
-        scaler=None,
+        event_dim: int, 
+        context_dim: int, 
+        width_size: int, 
+        n_layers: int, 
+        nn_depth: int, 
+        activation: Callable = jax.nn.tanh, 
+        scaler: eqx.Module = None,
         *, 
-        key
+        key: Key
     ):
         """
         Initializes a Masked Autoregressive Flow (MAF) model for conditional density estimation.
@@ -145,7 +145,7 @@ class MAF(eqx.Module):
         self, 
         x: Float[Array, "{self.x_dim}"], 
         y: Float[Array, "{self.y_dim}"],
-        key: Optional[PRNGKeyArray] = None
+        key: Optional[Key[jnp.ndarray, ""]] = None
     ) -> Float[Array, ""]:
         """
         Computes the log-probability of the data `x` given the conditioning `y`.
@@ -180,7 +180,7 @@ class MAF(eqx.Module):
     @jaxtyped(typechecker=typechecker)
     def sample_and_log_prob(
         self,
-        key: PRNGKeyArray,
+        key: Key[jnp.ndarray, ""],
         y: Float[Array, "{self.y_dim}"]
     ) -> Tuple[Float[Array, "{self.x_dim}"], Float[Array, ""]]:
         """
@@ -200,12 +200,13 @@ class MAF(eqx.Module):
         log_prob = self.flow.log_prob(sample, y)
         return sample, log_prob
 
+    @jaxtyped(typechecker=typechecker)
     def sample_and_log_prob_n(
         self, 
-        key: Key, 
-        y: Array, 
+        key: Key[jnp.ndarray, ""], 
+        y: Float[Array, "#n {self.y_dim}"], 
         n_samples: int
-    ):
+    ) -> Tuple[Float[Array, "#n {self.x_dim}"], Float[Array, "#n"]]:
         """
         Generates `n_samples` samples from the MAF model and computes the log-probabilities 
         for each sample given the conditioning context `y`.

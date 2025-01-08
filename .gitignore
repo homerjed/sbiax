@@ -17,6 +17,11 @@ __pycache__/
 
 affine.py
 _experiment.py
+multi_ensemble.py
+
+sbiax/inference/nle/log_prob_fns.py
+sbiax/meta/_plots.py
+sbiax/ndes/ndes.py
 
 examples/compare_nns.py
 examples/run_nn.py

@@ -4,7 +4,59 @@ import optuna
 import plotly.graph_objects as go
 
 
-def get_trial_hyperparameters(trial, model_type):
+def get_trial_hyperparameters(
+    trial: optuna.Trial, 
+    model_type: str
+) -> dict:
+    """
+    This function uses Optuna's `trial` object to suggest hyperparameter values for optimization. 
+
+    Returns a dictionary of hyperparameters. 
+
+    The hyperparameters returned are specific to the type of model being optimized (`CNF`, `MAF`, or `GMM`), 
+    along with common training hyperparameters.
+
+    Args:
+        trial (optuna.Trial): The current trial object, used to suggest hyperparameter values.
+        model_type (str): The type of model for which hyperparameters are being optimized. 
+            Must be one of the following:
+            - `"CNF"`: Continuous Normalizing Flow
+            - `"MAF"`: Masked Autoregressive Flow
+            - `"GMM"`: Gaussian Mixture Model
+
+    Returns:
+        dict: A dictionary containing the model-specific and training hyperparameters.
+
+        Model-specific hyperparameters:
+        - For `"CNF"`:
+            - `width` (int): Neural network width (2 to 5).
+            - `depth` (int): Neural network depth (0 to 2).
+            - `dt` (float): ODE solver timestep (0.01 to 0.15, step 0.01).
+            - `solver` (str): ODE solver choice (`"Euler"`, `"Heun"`, `"Tsit5"`).
+        - For `"MAF"`:
+            - `width` (int): Number of hidden units in neural networks (3 to 7).
+            - `depth` (int): Flow depth (1 to 5).
+            - `layers` (int): Number of layers in neural networks (1 to 3).
+        - For `"GMM"`:
+            - `width` (int): Number of hidden units in neural networks (3 to 7).
+            - `depth` (int): Number of hidden layers in neural networks (1 to 5).
+            - `n_components` (int): Number of Gaussian mixture components (1 to 5).
+
+        Common training hyperparameters:
+            - `n_batch` (int): Batch size (40 to 100, step 10).
+            - `lr` (float): Learning rate (log scale, 1e-5 to 1e-3).
+            - `p` (int): Additional parameter `p` (10 to 100, step 10).
+
+    Raises:
+        ValueError: If `model_type` is not one of `"CNF"`, `"MAF"`, or `"GMM"`.
+
+    Example:
+        >>> def objective(trial):
+        >>>     model_type = "CNF"
+        >>>     hyperparameters = get_trial_hyperparameters(trial, model_type)
+        >>>     # Use hyperparameters to train and evaluate the model.
+        >>>     return score  # Optimization target.
+    """
     # Arrange hyperparameters to optimise for and return to the experiment
     if model_type == "CNF":
         model_hyperparameters = {
@@ -41,6 +93,44 @@ def callback(
     figs_dir: str, 
     arch_search_dir: str
 ) -> None:
+    """
+    Callback function for Optuna study to log and visualize progress during optimization.
+
+    This function is executed at the end of each trial, saving visualizations of the study's
+    progress, parameter importances, and other insights. 
+
+    Args:
+        study (`optuna.Study`): The Optuna study instance, which contains the trials and results of 
+            the optimization process.
+        trial (`optuna.Trial`): The current trial instance being evaluated.
+        figs_dir (str): Directory path to save visualization figures, such as parameter importances, 
+            optimization history, contour plots, etc.
+        arch_search_dir (`str`): Directory path to save a DataFrame containing trial details.
+
+    Workflow:
+        - Logs the best trial and its parameters after each trial.
+        - Generates and displays the following visualizations:
+            1. Parameter importances
+            2. Optimization history
+            3. Contour plot
+            4. Intermediate values (if applicable)
+            5. Timeline of the trials
+        - Saves the generated visualizations as PDF files in the `figs_dir`.
+        - Saves a DataFrame of the trial results as a pickle file in `arch_search_dir`.
+
+    Exceptions:
+        - Catches `ValueError` if there are not enough trials to generate certain visualizations (e.g., 
+          parameter importance or contour plots).
+
+    Notes:
+        - Requires `plotly` for visualization.
+        - Directories specified by `figs_dir` and `arch_search_dir` must exist before running the callback.
+
+    Example:
+        >>> study = optuna.create_study(direction="minimize")
+        >>> study.optimize(objective_function, callbacks=[callback])
+
+    """
     try:
         print("@" * 80 + datetime.today().strftime('%Y-%m-%d %H:%M:%S'))
         print(f"Best values so far:\n\t{study.best_trial}\n\t{study.best_trial.params}")
