@@ -19,7 +19,7 @@ def nan_to_value(samples, log_probs):
 def get_shardings():
     devices = jax.local_devices()
     n_devices = len(devices)
-    print(f"Running on {n_devices} local devices: \n\t{devices}")
+    print("Running on {} local devices: \n\t{}".format(n_devices, devices))
 
     if n_devices > 1:
         mesh = Mesh(devices, ("x",))

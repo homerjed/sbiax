@@ -165,15 +165,12 @@ def fit_nn(
 
             L[step] = train_loss, valid_loss
             steps.set_postfix_str(
-                (
-                    f"train={train_loss.item():.3E}, " + 
-                    f"valid={valid_loss.item():.3E}"
-                )
+                "train={:.3E}, valid={:.3E}".format(train_loss.item(), valid_loss.item())
             )
 
             if patience is not None:
                 if (step > 0) and (step - np.argmin(L[:step, 1]) > patience):
-                    steps.set_description_str(f"Stopped at {step=}")
+                    steps.set_description_str("Stopped at {}".format(step))
                     break
 
     return model, L[:step]

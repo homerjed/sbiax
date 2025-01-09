@@ -244,7 +244,7 @@ def train_nde(
     del train_data # Release train_data from memory
 
     n_params = count_params(model)
-    print(f"NDE has n_params={n_params}.")
+    print("NDE has n_params={}.".format(n_params))
 
     opt_state = opt.init(eqx.filter(model, eqx.is_array)) 
 
@@ -310,13 +310,13 @@ def train_nde(
         stats["valid_losses"].append(epoch_valid_loss / (s + 1))
 
         if show_tqdm:
-            epochs.set_postfix(
-                ordered_dict={
-                    "train" : f"{stats["train_losses"][-1]:.3E}",
-                    "valid" : f"{stats["valid_losses"][-1]:.3E}",
-                    "best_valid" : f"{stats["best_loss"]:.3E}",
-                    "stop" : f"{(patience - stats["stopping_count"] if patience is not None else 0):04d}"
-                },
+            epochs.set_postfix_str(
+                "t={:.3E} | v={:.3E} | v(best)={:.3E} | stop={:04d}".format(
+                    stats["train_losses"][-1],
+                    stats["valid_losses"][-1],
+                    stats["best_loss"],
+                    (patience - stats["stopping_count"] if patience is not None else 0)
+                ),
                 refresh=True
             )
 
@@ -324,7 +324,7 @@ def train_nde(
         if not jnp.isfinite(stats["valid_losses"][-1]) or not jnp.isfinite(stats["train_losses"][-1]):
             if show_tqdm:
                 epochs.set_description_str(
-                    f"\nTraining terminated early at epoch {epoch + 1} (NaN loss).", 
+                    "\nTraining terminated early at epoch {} (NaN loss).".format(epoch + 1), 
                     # end="\n\n"
                 )
             break
@@ -356,9 +356,9 @@ def train_nde(
                 if stats["stopping_count"] > patience: 
                     if show_tqdm:
                         epochs.set_description_str(
-                            f"Training terminated early at epoch {epoch + 1}; " + 
-                            f"valid={stats["valid_losses"][-1]:.3E}, " + 
-                            f"train={stats["train_losses"][-1]:.3E}.", 
+                            "Training terminated early at epoch {}; valid={:.3E}, train={:.3E}.".format(
+                                epoch + 1, stats["valid_losses"][-1], stats["train_losses"][-1]
+                            ), 
                         )
 
                     # NOTE: question of 'best' vs 'last' nde parameters to use (last => converged)
@@ -385,7 +385,7 @@ def train_nde(
         valid_losses[stats["best_epoch"]],
         marker="x", 
         color="red",
-        label=f"Best loss {stats["best_loss"]:.3E}",
+        label="Best loss {:.3E}".format(stats["best_loss"]),
         linestyle=""
     )
     plt.legend()

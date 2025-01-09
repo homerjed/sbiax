@@ -133,7 +133,7 @@ def callback(
     """
     try:
         print("@" * 80 + datetime.today().strftime('%Y-%m-%d %H:%M:%S'))
-        print(f"Best values so far:\n\t{study.best_trial}\n\t{study.best_trial.params}")
+        print("Best values so far:\n\t{}\n\t{}".format(study.best_trial, study.best_trial.params))
         print("@" * 80 + "n_trials=" + str(len(study.trials)))
 
         layout_kwargs = dict(template="simple_white", title=dict(text=None))
