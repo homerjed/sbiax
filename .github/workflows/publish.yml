@@ -14,13 +14,15 @@ jobs:
   build:
     name: Build distribution 📦
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"] # Specify multiple Python versions
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ${{ matrix.python-version }}
     - name: Install pypa/build
       run: >-
         python3 -m
@@ -32,8 +34,34 @@ jobs:
     - name: Store the distribution packages
       uses: actions/upload-artifact@v4
       with:
-        name: python-package-distributions
+        name: python-package-distributions-${{ matrix.python-version }}
         path: dist/
+
+
+# jobs:
+#   build:
+#     name: Build distribution 📦
+#     runs-on: ubuntu-latest
+
+#     steps:
+#     - uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v5
+#       with:
+#         python-version: ["3.10", "3.11", "3.12"]
+#     - name: Install pypa/build
+#       run: >-
+#         python3 -m
+#         pip install
+#         build
+#         --user
+#     - name: Build a binary wheel and a source tarball
+#       run: python3 -m build
+#     - name: Store the distribution packages
+#       uses: actions/upload-artifact@v4
+#       with:
+#         name: python-package-distributions
+#         path: dist/
 
   publish-to-pypi:
     name: >-
