@@ -31,11 +31,13 @@ jobs:
         --user
     - name: Build a binary wheel and a source tarball
       run: python3 -m build
+    - name: Ensure dist/ exists
+      run: test -d dist/ || mkdir dist/
     - name: Store the distribution packages
       uses: actions/upload-artifact@v4
-      # with:
-      #   name: python-package-distributions-${{ matrix.python-version }}
-      #   path: dist/
+      with:
+        name: python-package-distributions-${{ matrix.python-version }}
+        path: dist/
 
 
 # jobs:
