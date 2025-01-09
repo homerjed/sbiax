@@ -115,9 +115,15 @@ class Ensemble(eqx.Module):
             `Callable`: A function that computes the log-probability of the NDE 
                 given `data` and `prior`.
         """
+        _nle = self.sbi_type == "nle"
+
         def _nde_log_prob_fn(theta, **kwargs): 
             nde_likelihood = nde.log_prob(x=data, y=theta, **kwargs) 
-            return nde_likelihood + prior.log_prob(theta)
+            if _nle:
+                nde_posterior = nde_likelihood + prior.log_prob(theta)
+            else:
+                nde_posterior = nde_likelihood 
+            return nde_posterior
         return _nde_log_prob_fn
 
     def ensemble_log_prob_fn(
