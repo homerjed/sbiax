@@ -27,6 +27,23 @@ def shard_batch(
     batch: Tuple[Float[Array, "n x"], Float[Array, "n y"]], 
     sharding: Optional[NamedSharding] = None
 ) -> Tuple[Float[Array, "n x"], Float[Array, "n y"]]:
+    """
+    Applies sharding to a batch of data for distributed processing.
+
+    Args:
+        batch (`Tuple[Array, Array]`): A tuple containing:
+            - Simulation data of shape `(n, x)`.
+            - Parameter data of shape `(n, y)`.
+        sharding (`jax.sharding.NamedSharding`): An optional `NamedSharding` 
+            object to define how the batch is distributed across devices.
+
+    Returns:
+        (`Tuple[Array, Array]`): The batch, potentially sharded according to the specified `sharding`.
+
+    Notes:
+        - If `sharding` is not provided, the batch remains unchanged.
+        - Useful for distributing data across devices in multi-GPU or TPU setups.
+    """
     if sharding:
         batch = eqx.filter_shard(batch, sharding)
     return batch
@@ -37,6 +54,23 @@ def apply_ema(
     model: eqx.Module, 
     ema_rate: float = 0.9999
 ) -> eqx.Module:
+    """
+    Updates an Exponential Moving Average (EMA) model based on the current model parameters.
+
+    Args:
+        ema_model: The current EMA model (`eqx.Module`).
+        model: The current model (`eqx.Module`) whose parameters are used to update the EMA model.
+        ema_rate: The decay rate for the EMA. Defaults to `0.9999`.
+
+    Returns:
+        The updated EMA model.
+
+    Notes:
+        - EMA is computed using the formula:
+          `p_ema = p_ema * ema_rate + p * (1 - ema_rate)`, 
+          where `p_ema` are the EMA parameters, and `p` are the model parameters.
+        - Inexact arrays are updated while preserving non-trainable state.
+    """
     ema_fn = lambda p_ema, p: p_ema * ema_rate + p * (1. - ema_rate)
     m_, _m = eqx.partition(model, eqx.is_inexact_array)
     e_, _e = eqx.partition(ema_model, eqx.is_inexact_array)
@@ -45,6 +79,21 @@ def apply_ema(
 
 
 def clip_grad_norm(grads: PyTree, max_norm: float) -> PyTree:
+    """
+    Clips the gradient norm of a PyTree of gradients to a specified maximum.
+
+    Args:
+        grads: A PyTree containing the gradients to be clipped.
+        max_norm: The maximum allowable norm for the gradients.
+
+    Returns:
+        A PyTree of gradients where the norm is clipped to `max_norm` if it exceeds the limit.
+
+    Notes:
+        - Uses L2 norm for clipping.
+        - Preserves the relative proportions of gradients while scaling them.
+        - Avoids division by zero by adding a small epsilon (`1e-6`) to the denominator.
+    """
     norm = jnp.linalg.norm(
         jax.tree.leaves(
             jax.tree.map(jnp.linalg.norm, grads)
@@ -67,6 +116,30 @@ def make_step(
     clip_max_norm: Optional[float] = None,
     replicated_sharding: Optional[PositionalSharding] = None,
 ) -> Tuple[eqx.Module, PyTree, Float[Array, ""]]:
+    """
+    Performs a single optimization step for a neural density estimator.
+
+    Args:
+        nde: The neural density estimator model (`eqx.Module`) being optimized.
+        x: The input data of shape `(b, x)`.
+        y: The target data of shape `(b, y)`.
+        opt_state: The optimizer state (`PyTree`) used to compute parameter updates.
+        opt: The optimizer object (`Optimiser`) for computing updates.
+        key: A JAX random key for stochastic operations.
+        clip_max_norm: An optional float specifying the maximum norm for gradient clipping. Defaults to `None`.
+        replicated_sharding: An optional `PositionalSharding` object for distributing computations across devices. Defaults to `None`.
+
+    Returns:
+        A tuple containing:
+            - The updated model (`eqx.Module`).
+            - The updated optimizer state (`PyTree`).
+            - The loss value (`Float[Array, ""]`).
+
+    Notes:
+        - The function computes the loss and its gradients using `batch_loss_fn`.
+        - If `clip_max_norm` is specified, gradient clipping is applied.
+        - Supports distributed computations using sharding for model parameters and optimizer states.
+    """
     _fn = eqx.filter_value_and_grad(batch_loss_fn)
     if replicated_sharding is not None:
         nde, opt_state = eqx.filter_shard(
@@ -104,7 +177,49 @@ def partition_and_preprocess_data(
     Tuple[Float[Array, "nv x"], Float[Array, "nv y"]], 
     Tuple[int, int]
 ]:
+    """
+    Partitions the dataset into training and validation sets, and computes the number of batches.
 
+    Args:
+        key: A JAX random key for shuffling the data.
+        train_data: A tuple containing:
+            - Simulation data of shape `(n, x)`.
+            - Parameter data of shape `(n, y)`.
+        valid_fraction: The fraction of the dataset to be used for validation (`float`).
+        n_batch: The number of samples per batch (`int`).
+
+    Returns:
+        A tuple containing:
+            - Training data as a tuple of simulation and parameter arrays, 
+                with shapes `(nt, x)` and `(nt, y)` respectively.
+            - Validation data as a tuple of simulation and parameter arrays, 
+                with shapes `(nv, x)` and `(nv, y)` respectively.
+            - A tuple with the number of training and validation batches (`int, int`).
+
+    Notes:
+        - The dataset is shuffled using the provided random key before partitioning.
+        - The training and validation sets are determined based on the `valid_fraction` parameter.
+        - If `n_batch` is not `None`, the number of batches is calculated by dividing 
+            the number of samples in each set by the batch size, with a minimum of one batch.
+        - If `n_batch` is `None`, the number of batches is returned as `None`.
+
+    Example:
+        ```python
+        import jax.random as jr
+        from partitioning import partition_and_preprocess_data
+
+        key = jr.PRNGKey(0)
+        simulations = jnp.ones((100, 10))  # 100 samples, 10 features
+        parameters = jnp.ones((100, 5))   # 100 samples, 5 parameters
+        train_data = (simulations, parameters)
+        valid_fraction = 0.2
+        n_batch = 10
+
+        train_set, valid_set, batch_counts = partition_and_preprocess_data(
+            key, train_data, valid_fraction, n_batch
+        )
+        ```
+    """
     # Number of training and validation samples
     n_train_data = len(train_data[0]) 
     n_valid = int(n_train_data * valid_fraction)
