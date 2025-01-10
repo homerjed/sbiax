@@ -4,16 +4,16 @@ import jax.numpy as jnp
 import jax.random as jr
 from jax.sharding import PositionalSharding 
 import equinox as eqx
-from jaxtyping import Key, Array, PyTree
+from jaxtyping import Key, Array, Float
 
 
 def pdf_mse_loss(
     nde: eqx.Module, 
-    x: Array, 
-    y: Array, 
-    pdf: Array,
-    key: Key
-) -> Array:
+    x: Float[Array, "..."], 
+    y: Float[Array, "..."], 
+    pdf: Float[Array, "..."],
+    key: Key[jnp.ndarray, "..."]
+) -> Float[Array, ""]:
     p_x_y = nde.loss(x=x, y=y, key=key) 
     return jnp.square(jnp.subtract(p_x_y, pdf))
 
@@ -21,11 +21,11 @@ def pdf_mse_loss(
 @eqx.filter_jit
 def batch_loss_fn(
     nde: eqx.Module, 
-    x: Array, 
-    y: Array,
-    pdfs: Optional[Array] = None, 
+    x: Float[Array, "..."], 
+    y: Float[Array, "..."], 
+    pdfs: Optional[Float[Array, "..."]] = None, 
     key: Key = None
-) -> Array:
+) -> Float[Array, ""]:
     nde = eqx.nn.inference_mode(nde, False)
     keys = jr.split(key, len(x))
     loss = jax.vmap(nde.loss)(x=x, y=y, key=keys).mean()
@@ -35,12 +35,12 @@ def batch_loss_fn(
 @eqx.filter_jit
 def batch_eval_fn(
     nde: eqx.Module, 
-    x: Array, 
-    y: Array,  
-    pdfs: Optional[Array] = None, 
-    key: Key = None,
+    x: Float[Array, "..."], 
+    y: Float[Array, "..."], 
+    pdfs: Optional[Float[Array, "..."]] = None, 
+    key: Optional[Key[jnp.ndarray, "..."]] = None,
     replicated_sharding: Optional[PositionalSharding] = None
-) -> Array:
+) -> Float[Array, ""]:
     if replicated_sharding is not None:
         nde = eqx.filter_shard(nde, replicated_sharding)
     nde = eqx.nn.inference_mode(nde, True)

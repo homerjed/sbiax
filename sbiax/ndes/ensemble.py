@@ -100,7 +100,7 @@ class Ensemble(eqx.Module):
         data: Float[Array, "x"], 
         prior: Distribution
     ) -> Callable[
-        [Float[Array, "y"], Key[jnp.ndarray, "..."]], Float[Array, ""]
+        [Float[Array, "y"], Optional[Key[jnp.ndarray, "..."]]], Float[Array, ""]
     ]:
         """ 
         Returns a posterior log-probability function for a single NDE model parameterised by 
@@ -131,7 +131,7 @@ class Ensemble(eqx.Module):
         data: Float[Array, "x"], 
         prior: Optional[Distribution]
     ) -> Callable[
-        [Float[Array, "y"], Key[jnp.ndarray, "..."]], Float[Array, ""]
+        [Float[Array, "y"], Optional[Key[jnp.ndarray, "..."]]], Float[Array, ""]
     ]:
         """ 
         Returns the ensemble log-probability function that combines all NDEs with the 
@@ -151,7 +151,7 @@ class Ensemble(eqx.Module):
 
         def _joint_log_prob_fn(
             theta: Float[Array, "y"], 
-            key: Key[jnp.ndarray, "..."] = None
+            key: Optional[Key[jnp.ndarray, "..."]] = None
         ) -> Float[Array, ""]:
             L = jnp.zeros(())
             for n, (nde, weight) in enumerate(zip(self.ndes, self.weights)):

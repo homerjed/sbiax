@@ -8,10 +8,10 @@ import tensorflow_probability.substrates.jax.distributions as tfd
 
 from sbiax.ndes import CNF, Ensemble, Scaler
 from sbiax.train import train_ensemble
-from sbiax.inference.nle import nuts_sample
+from sbiax.inference import nuts_sample
 
 """
-    Test a run-through of code with NPE / NLE on atoy problem.
+    Test a run-through of code with NPE / NLE on a toy problem.
 """
 
 def get_data(key):
