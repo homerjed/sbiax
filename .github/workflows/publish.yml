@@ -105,15 +105,33 @@ jobs:
             distributions/*.tar.gz
             distributions/*.whl
 
-      - name: Create 📂 GitHub Release 🚀
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: gh release --repo="${{ github.repository }}" create "${{ github.ref_name }}"
+      # - name: Create 📂 GitHub Release 🚀
+      #   env:
+      #     GITHUB_TOKEN: ${{ github.token }}
+      #   run: gh release --repo="${{ github.repository }}" create "${{ github.ref_name }}"
 
-      - name: Upload 📤 distributions 📦 and signatures 🔏 to GitHub Release 🚀
+      # - name: Upload 📤 distributions 📦 and signatures 🔏 to GitHub Release 🚀
+      #   env:
+      #     GITHUB_TOKEN: ${{ github.token }}
+      #   run: gh release --repo="${{ github.repository }}" upload "${{ github.ref_name }}" distributions/**
+      - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: gh release --repo="${{ github.repository }}" upload "${{ github.ref_name }}" distributions/**
+        run: >-
+          gh release create
+          '${{ github.ref_name }}'
+          --repo '${{ github.repository }}'
+          --notes ""
+      - name: Upload artifact signatures to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        # Upload to GitHub Release using the `gh` CLI.
+        # `dist/` contains the built packages, and the
+        # sigstore-produced signatures and certificates.
+        run: >-
+          gh release upload
+          '${{ github.ref_name }}' distributions/**
+          --repo '${{ github.repository }}'
 
   publish-to-testpypi:
     name: Publish Python 🐍 distribution 📦 to TestPyPI
