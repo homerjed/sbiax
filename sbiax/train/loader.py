@@ -92,6 +92,39 @@ class _InMemoryDataLoader(_AbstractDataLoader):
     def loop(
         self, batch_size: int
     ) -> Generator[Tuple[Float[Array, "batch x"], Float[Array, "batch y"]], None, None]:
+        """
+        Generates batches of simulation and parameter data for training.
+
+        This function handles data shuffling and batching for training neural likelihood 
+        estimation (NLE) or neural posterior estimation (NPE). Depending on the batch size 
+        and the dataset size, it either yields the entire dataset or divides it into smaller 
+        batches. Shuffling is applied for reproducibility and to prevent overfitting.
+
+        Args:
+            batch_size: The number of samples in each batch. If the batch size is larger 
+                than the dataset size, the entire dataset is returned as a single batch.
+
+        Yields:
+            A tuple containing:
+                - A batch of simulation data with shape `(batch, x)`.
+                - A batch of parameter data with shape `(batch, y)`.
+
+        Notes:
+            - The batching and data preparation align with the training mode, which is either 
+            "nle" (neural likelihood estimation) or "npe" (neural posterior estimation).
+            - This function operates as an infinite generator, repeatedly cycling through 
+            the data.
+
+        Example:
+            ```python
+            loader = _InMemoryDataLoader(simulations, parameters, "nle", key=jr.PRNGKey(0))
+            batch_size = 64
+
+            for batch_x, batch_y in loader.loop(batch_size):
+                # Perform training or evaluation with batch_x and batch_y
+                ...
+            ```
+        """
         # Loop through dataset, batching, while organising data for NPE or NLE
         dataset_size = self.simulations.shape[0]
         one_batch = batch_size >= dataset_size
