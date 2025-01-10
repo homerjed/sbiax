@@ -1,6 +1,6 @@
 [project]
 name = "sbiax"
-version = "0.0.30"
+version = "0.0.31"
 description = "Fast, parallel and lightweight simulation-based inference in JAX."
 readme = "README.md"
 requires-python =">=3.10"
