@@ -1,92 +1,118 @@
-name: Publish Python 🐍 distribution 📦 to PyPI and TestPyPI
-on: push
+name: Publish 📡 Python 🐍 distributions 📦
+
+on:
+  push:
+    tags:
+      - 0.0.*
+    paths:
+      - sbiax/**
+      - pyproject.toml # Only if version changes!
+
 jobs:
-  build:
-    name: Build distribution 📦
+  # lint:
+  #   name: Check 🧐 Python 🐍 package 🗂️
+  #   runs-on: ubuntu-latest
+
+  test:
+    name: Test 🔍 package 🗂️
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
+
     steps:
-    - uses: actions/checkout@v4
-      with:
-        persist-credentials: false
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install pypa/build
-      run: >-
-        python3 -m
-        pip install
-        build
-        --user
-    - name: Build a binary wheel and a source tarball
-      run: python3 -m build
-    - name: Store the distribution packages
-      uses: actions/upload-artifact@v4
-      with:
-        name: python-package-distributions
-        path: dist/
+      - uses: actions/checkout@v4
+
+      - name: Setup 🛠️ Python 🐍
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install 🛠️ dependencies 📚
+        run: |
+          pip install --upgrade pip
+          pip install --requirement=requirements.txt --requirement=tests/requirements.txt
+
+      - name: Run ⏱️ tests 📊
+        run: pytest
+
+  build:
+    name: Build 🏗️ distributions 📦
+    needs: [test]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup 🛠️ Python 🐍
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Build 🏗️ a source distribution 🗃️ and a binary wheel 🛞
+        run: pipx run build --outdir=distributions
+
+      - name: Upload 📤 the built distributions 📦
+        uses: actions/upload-artifact@v4
+        with:
+          name: distributions-py${{ matrix.python-version }} # name: distributions
+          path: distributions/
 
   publish-to-pypi:
-    name: >-
-      Publish Python 🐍 distribution 📦 to PyPI
-    if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
-    needs:
-    - build
+    name: Publish 📡 Python 🐍 distributions 📦 to PyPI 🌐
+    needs: [build]
     runs-on: ubuntu-latest
     environment:
-      name: pypi
-      url: https://pypi.org/p/sbiax  # Replace <package-name> with your PyPI project name
+      name: release
+      url: https://pypi.org/p/sbiax
     permissions:
-      id-token: write  # IMPORTANT: mandatory for trusted publishing
-    steps:
-    - name: Download all the dists
-      uses: actions/download-artifact@v4
-      with:
-        name: python-package-distributions
-        path: dist/
-    - name: Publish distribution 📦 to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
+      id-token: write
 
-  github-release:
-    name: >-
-      Sign the Python 🐍 distribution 📦 with Sigstore
-      and upload them to GitHub Release
-    needs:
-    - publish-to-pypi
+    steps:
+      - name: Download 📥 all the distributions 📦
+        uses: actions/download-artifact@v4
+        with:
+          pattern: distributions-* #pattern: distributions
+          path: distributions/
+          merge-multiple: true
+
+      - name: Publish 📡 distributions 📦 to PyPI 🌐
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: distributions/
+
+  upload-to-github-release:
+    name: Upload 📤 Python 🐍 distributions 📦 to GitHub Release 🚀
+    needs: [publish-to-pypi]
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # IMPORTANT: mandatory for making GitHub Releases
-      id-token: write  # IMPORTANT: mandatory for sigstore
+      id-token: write
+      contents: write
+
     steps:
-    - name: Download all the dists
-      uses: actions/download-artifact@v4
-      with:
-        name: python-package-distributions
-        path: dist/
-    - name: Sign the dists with Sigstore
-      uses: sigstore/gh-action-sigstore-python@v3.0.0
-      with:
-        inputs: >-
-          ./dist/*.tar.gz
-          ./dist/*.whl
-    - name: Create GitHub Release
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-      run: >-
-        gh release create
-        "$GITHUB_REF_NAME"
-        --repo "$GITHUB_REPOSITORY"
-        --notes ""
-    - name: Upload artifact signatures to GitHub Release
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-      run: >-
-        gh release upload
-        "$GITHUB_REF_NAME" dist/**
-        --repo "$GITHUB_REPOSITORY"
+      - name: Download 📥 all the distributions 📦
+        uses: actions/download-artifact@v4
+        with:
+          pattern: distributions
+          path: distributions/
+          merge-multiple: true
+
+      - name: Sign 🔑 the distributions 📦 with Sigstore
+        uses: sigstore/gh-action-sigstore-python@v3.0.0
+        with:
+          inputs: |
+            distributions/*.tar.gz
+            distributions/*.whl
+
+      - name: Create 📂 GitHub Release 🚀
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: gh release --repo="${{ github.repository }}" create "${{ github.ref_name }}"
+
+      - name: Upload 📤 distributions 📦 and signatures 🔏 to GitHub Release 🚀
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: gh release --repo="${{ github.repository }}" upload "${{ github.ref_name }}" distributions/**
 
   publish-to-testpypi:
     name: Publish Python 🐍 distribution 📦 to TestPyPI
@@ -95,19 +121,142 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: testpypi
-      url: https://test.pypi.org/p/<package-name>
+      url: https://test.pypi.org/p/sbiax
     permissions:
       id-token: write  # IMPORTANT: mandatory for trusted publishing
     steps:
     - name: Download all the dists
       uses: actions/download-artifact@v4
       with:
-        name: python-package-distributions
-        path: dist/
+        pattern: python-package-distributions-*
+        path: distributions/  
+        merge-multiple: true
     - name: Publish distribution 📦 to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         repository-url: https://test.pypi.org/legacy/
+
+
+
+
+
+# name: Publish Python 🐍 distribution 📦 to PyPI and TestPyPI
+# on: push
+# jobs:
+#   build:
+#     name: Build distribution 📦
+#     runs-on: ubuntu-latest
+#     strategy:
+#       matrix:
+#         python-version: [, "3.9", "3.10", "3.11", "3.12"]
+#     steps:
+#     - uses: actions/checkout@v4
+#       with:
+#         persist-credentials: false
+#     - name: Set up Python ${{ matrix.python-version }}
+#       uses: actions/setup-python@v5
+#       with:
+#         python-version: ${{ matrix.python-version }}
+#     - name: Install pypa/build
+#       run: >-
+#         python3 -m
+#         pip install
+#         build
+#         --user
+#     - name: Build a binary wheel and a source tarball
+#       run: python3 -m build
+#     - name: Store the distribution packages
+#       uses: actions/upload-artifact@v4
+#       with:
+#         name: python-package-distributions-${{ matrix.python-version }}
+#         path: dist/
+
+#   publish-to-pypi:
+#     name: >-
+#       Publish Python 🐍 distribution 📦 to PyPI
+#     if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
+#     needs:
+#     - build
+#     runs-on: ubuntu-latest
+#     environment:
+#       name: pypi
+#       url: https://pypi.org/p/<package-name>  # Replace <package-name> with your PyPI project name
+#     permissions:
+#       id-token: write  # IMPORTANT: mandatory for trusted publishing
+#     steps:
+#     - name: Download all the dists
+#       uses: actions/download-artifact@v4
+#       with:
+#         pattern: python-package-distributions-*
+#         path: dist/
+#         merge-multiple: true
+#     - name: Publish distribution 📦 to PyPI
+#       uses: pypa/gh-action-pypi-publish@release/v1
+
+#   github-release:
+#     name: >-
+#       Sign the Python 🐍 distribution 📦 with Sigstore
+#       and upload them to GitHub Release
+#     needs:
+#     - publish-to-pypi
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: write  # IMPORTANT: mandatory for making GitHub Releases
+#       id-token: write  # IMPORTANT: mandatory for sigstore
+#     steps:
+#     - name: Download all the dists
+#       uses: actions/download-artifact@v4
+#       with:
+#         pattern: python-package-distributions-*
+#         path: dist/
+#         merge-multiple: true
+#     - name: Sign the dists with Sigstore
+#       uses: sigstore/gh-action-sigstore-python@v3.0.0
+#       with:
+#         inputs: >-
+#           ./dist/*.tar.gz
+#           ./dist/*.whl
+#     - name: Create GitHub Release
+#       env:
+#         GITHUB_TOKEN: ${{ github.token }}
+#       run: >-
+#         gh release create
+#         "$GITHUB_REF_NAME"
+#         --repo "$GITHUB_REPOSITORY"
+#         --notes ""
+#     - name: Upload artifact signatures to GitHub Release
+#       env:
+#         GITHUB_TOKEN: ${{ github.token }}
+#       run: >-
+#         gh release upload
+#         "$GITHUB_REF_NAME" dist/**
+#         --repo "$GITHUB_REPOSITORY"
+
+#   publish-to-testpypi:
+#     name: Publish Python 🐍 distribution 📦 to TestPyPI
+#     needs:
+#     - build
+#     runs-on: ubuntu-latest
+#     environment:
+#       name: testpypi
+#       url: https://test.pypi.org/p/<package-name>
+#     permissions:
+#       id-token: write  # IMPORTANT: mandatory for trusted publishing
+#     steps:
+#     - name: Download all the dists
+#       uses: actions/download-artifact@v4
+#       with:
+#         pattern: python-package-distributions-*
+#         path: dist/
+#         merge-multiple: true
+#     - name: Publish distribution 📦 to TestPyPI
+#       uses: pypa/gh-action-pypi-publish@release/v1
+#       with:
+#         repository-url: https://test.pypi.org/legacy/
+
+
+
+
 
 
 
