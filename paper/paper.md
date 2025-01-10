@@ -11,6 +11,10 @@ authors:
     orcid: 0009-0002-0985-1437 
     equal-contrib: true
     affiliation: "1, 2" # (Multiple affiliations must be quoted)
+  - name: Oliver Friedrich
+    orcid: 0000-0001-6120-4988
+    equal-contrib: true
+    affiliation: "1, 2, 3" # (Multiple affiliations must be quoted)
 affiliations:
  - name: University Observatory, Faculty for Physics, Ludwig-Maximilians-Universität München, Scheinerstrasse 1, München, Deustchland.
    index: 1
@@ -18,7 +22,10 @@ affiliations:
  - name: Munich Center for Machine Learning.
    index: 2
    ror: 00hx57361
-date: 1 October 2024
+ - name: Excellence Cluster ORIGINS, Boltzmannstr. 2, 85748 Garching, Deutschland.
+   index: 3
+   ror: 00hx57361
+date: 10 January 2025
 bibliography: paper.bib
 
 # Optional fields if submitting to a AAS journal too, see this blog post:

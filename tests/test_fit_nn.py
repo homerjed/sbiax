@@ -11,7 +11,7 @@ from sbiax.compression.nn import fit_nn
 """
 
 
-def test_cnf():
+def test_fit_nn():
     key = jr.key(0)
 
     net_key, net_train_key = jr.split(key)
