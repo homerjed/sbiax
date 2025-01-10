@@ -101,16 +101,6 @@ jobs:
           inputs: |
             distributions/*.tar.gz
             distributions/*.whl
-
-      # - name: Create 📂 GitHub Release 🚀
-      #   env:
-      #     GITHUB_TOKEN: ${{ github.token }}
-      #   run: gh release --repo="${{ github.repository }}" create "${{ github.ref_name }}"
-
-      # - name: Upload 📤 distributions 📦 and signatures 🔏 to GitHub Release 🚀
-      #   env:
-      #     GITHUB_TOKEN: ${{ github.token }}
-      #   run: gh release --repo="${{ github.repository }}" upload "${{ github.ref_name }}" distributions/**
       - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -153,7 +143,15 @@ jobs:
         repository-url: https://test.pypi.org/legacy/
 
 
+  # - name: Create 📂 GitHub Release 🚀
+  #   env:
+  #     GITHUB_TOKEN: ${{ github.token }}
+  #   run: gh release --repo="${{ github.repository }}" create "${{ github.ref_name }}"
 
+  # - name: Upload 📤 distributions 📦 and signatures 🔏 to GitHub Release 🚀
+  #   env:
+  #     GITHUB_TOKEN: ${{ github.token }}
+  #   run: gh release --repo="${{ github.repository }}" upload "${{ github.ref_name }}" distributions/**
 
 
 # name: Publish Python 🐍 distribution 📦 to PyPI and TestPyPI
