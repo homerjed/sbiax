@@ -3,7 +3,7 @@ import blackjax.progress_bar
 import jax
 import jax.random as jr
 import jax.numpy as jnp
-from jaxtyping import PRNGKeyArray, Array, Float, jaxtyped
+from jaxtyping import Key, Array, Float, jaxtyped
 from beartype import beartype as typechecker
 import blackjax
 from tensorflow_probability.substrates.jax.distributions import Distribution
@@ -11,8 +11,8 @@ from tensorflow_probability.substrates.jax.distributions import Distribution
 
 @jaxtyped(typechecker=typechecker)
 def nuts_sample(
-    key: PRNGKeyArray, 
-    log_prob_fn: Callable, 
+    key: Key[jnp.ndarray, "..."], 
+    log_prob_fn: Callable[[Float[Array, "..."]], Float[Array, ""]], 
     prior: Distribution, 
     n_samples: int = 100_000, 
     n_chains: int = 1,
@@ -75,7 +75,16 @@ def nuts_sample(
 
     key, init_key, warmup_key, sample_key = jr.split(key, 4)
 
-    def init_param_fn(seed):
+    def init_param_fn(seed: Key[jnp.ndarray, "..."]) -> Float[Array, "..."]:
+        """
+        Samples initial parameters from the provided prior distribution.
+
+        Args:
+            seed: A JAX `PRNGKeyArray` used for random sampling.
+
+        Returns:
+            An array of sampled parameter values from the prior distribution.
+        """
         return prior.sample(seed=seed)
 
     warmup = blackjax.window_adaptation(blackjax.nuts, log_prob_fn)
@@ -88,7 +97,19 @@ def nuts_sample(
         initial_params = jax.vmap(init_param_fn)(init_keys)
 
     @jax.vmap
-    def call_warmup(seed, param):
+    def call_warmup(seed: Key[jnp.ndarray, "..."], param: Float[Array, "..."]):
+        """
+        Performs the warm-up phase of NUTS to adapt parameters and obtain initial states.
+
+        Args:
+            seed: A JAX `PRNGKeyArray` used for warm-up.
+            param: Initial parameter values for the sampler.
+
+        Returns:
+            Tuple containing:
+                - Initial states after warm-up.
+                - Tuned parameters obtained during warm-up.
+        """
         (initial_states, tuned_params), _ = warmup.run(seed, param, n_warmup_steps)
         return initial_states, tuned_params
 
@@ -96,19 +117,60 @@ def nuts_sample(
     initial_states, tuned_params = jax.jit(call_warmup)(warmup_keys, initial_params)
 
     def inference_loop_multiple_chains(
-        key, 
-        initial_states, 
-        tuned_params, 
-        log_prob_fn, 
-        n_samples, 
-        num_chains
-    ):
+        key: Key[jnp.ndarray, "..."], 
+        initial_states: Float[Array, "..."], 
+        tuned_params: Float[Array, "..."], 
+        log_prob_fn: Callable[[Float[Array, "..."]], Float[Array, "..."]], 
+        n_samples: int, 
+        num_chains: int
+    ) -> Tuple[blackjax._hmc.HMCState, blackjax._nuts.NUTSInfo]:
+        """
+        Runs the NUTS sampler for multiple chains to obtain posterior samples.
+
+        Args:
+            key: A JAX `PRNGKeyArray` for random sampling.
+            initial_states: Initial states for the sampler, obtained after warm-up.
+            tuned_params: Parameters tuned during the warm-up phase.
+            log_prob_fn: The log probability function of the posterior distribution.
+            n_samples: Number of samples to generate for each chain.
+            num_chains: The number of parallel chains to run.
+
+        Returns:
+            Tuple containing:
+                - An array of sampled states for all chains.
+                - An array of additional information about the sampling process.
+        """
         kernel = blackjax.nuts.build_kernel()
 
-        def step_fn(key, state, **params):
+        def step_fn(
+            key: Key[jnp.ndarray, "..."], state: blackjax._hmc.HMCState, **params
+        ) -> Callable:
+            """
+            Performs a single step of the NUTS algorithm.
+
+            Args:
+                key: A JAX `PRNGKeyArray` for random sampling.
+                state: The current state of the sampler.
+                **params: Additional parameters for the NUTS kernel.
+
+            Returns:
+                The next state of the sampler and associated information.
+            """
             return kernel(key, state, log_prob_fn, **params)
 
-        def one_step(states, i):
+        def one_step(
+            states: blackjax._hmc.HMCState, i: int
+        ) -> Tuple[blackjax._hmc.HMCState, blackjax._nuts.NUTSInfo]: 
+            """
+            Executes one step of sampling across all chains.
+
+            Args:
+                states: The current states of all chains.
+                i: The iteration index for tracking progress.
+
+            Returns:
+                Updated states and a tuple of new states and additional information.
+            """
             keys = jr.split(jr.fold_in(key, i), num_chains)
             states, infos = jax.vmap(step_fn)(keys, states, **tuned_params)
             return states, (states, infos)
