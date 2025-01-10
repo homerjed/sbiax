@@ -31,7 +31,8 @@ jobs:
       - name: Install 🛠️ dependencies 📚
         run: |
           pip install --upgrade pip
-          pip install --requirement=requirements.txt --requirement=tests/requirements.txt
+          pip install -e .
+        # pip install --requirement=requirements.txt --requirement=tests/requirements.txt
 
       - name: Run ⏱️ tests 📊
         run: pytest
