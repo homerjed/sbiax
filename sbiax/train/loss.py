@@ -12,7 +12,7 @@ def pdf_mse_loss(
     x: Float[Array, "..."], 
     y: Float[Array, "..."], 
     pdf: Float[Array, "..."],
-    key: Key[jnp.ndarray, "..."]
+    key: Optional[Key[jnp.ndarray, "..."]] = None
 ) -> Float[Array, ""]:
     p_x_y = nde.loss(x=x, y=y, key=key) 
     return jnp.square(jnp.subtract(p_x_y, pdf))
@@ -24,7 +24,7 @@ def batch_loss_fn(
     x: Float[Array, "..."], 
     y: Float[Array, "..."], 
     pdfs: Optional[Float[Array, "..."]] = None, 
-    key: Key = None
+    key: Optional[Key[jnp.ndarray, "..."]] = None
 ) -> Float[Array, ""]:
     nde = eqx.nn.inference_mode(nde, False)
     keys = jr.split(key, len(x))
