@@ -46,11 +46,11 @@ jobs:
       id-token: write  # Mandatory for trusted publishing
 
     steps:
-    - name: Download artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: python-package-distributions-${{ matrix.python-version }}
-        path: dist/
+    # - name: Download artifacts
+    #   uses: actions/download-artifact@v4
+    #   with:
+    #     name: python-package-distributions-${{ matrix.python-version }}
+    #     path: dist/
     - name: Publish distribution 📦 to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
 
@@ -63,13 +63,14 @@ jobs:
       id-token: write  # Required for sigstore
 
     steps:
-    - name: Download artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: python-package-distributions-${{ matrix.python-version }}
-        path: dist/
+    # - name: Download artifacts
+    #   uses: actions/download-artifact@v4
+    #   with:
+    #     name: python-package-distributions-${{ matrix.python-version }}
+    #     path: dist/
     - name: Sign the dists with Sigstore
-      uses: sigstore/gh-action-sigstore-python@v2.1.1
+      # uses: sigstore/gh-action-sigstore-python@v2.1.1
+      uses: sigstore/gh-action-sigstore-python@v3.0.0 
       with:
         inputs: |
           ./dist/*.tar.gz
@@ -94,12 +95,12 @@ jobs:
     permissions:
       id-token: write  # Mandatory for trusted publishing
 
-    steps:
-    - name: Download artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: python-package-distributions-${{ matrix.python-version }}
-        path: dist/
+    # steps:
+    # - name: Download artifacts
+    #   uses: actions/download-artifact@v4
+    #   with:
+    #     name: python-package-distributions-${{ matrix.python-version }}
+    #     path: dist/
     - name: Publish distribution 📦 to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
