@@ -90,9 +90,13 @@ Install via
 
 and have a look at [examples](https://github.com/homerjed/sbiax/tree/main/examples).
 
+-----
+
 ### Contributing
 
 Want to add something? See `CONTRIBUTING.md`.
+
+-----
 
 ### Citation
 
