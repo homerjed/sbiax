@@ -12,7 +12,7 @@ Then clone and install the library in development mode:
 
 ```bash
 git clone https://github.com/your-username-here/sbiax.git
-cd equinox
+cd sbiax/ 
 pip install -e .
 ```
 
@@ -22,10 +22,11 @@ pip install -e .
 
 Now make your changes. Make sure to include additional tests if necessary.
 
-Next verify the tests all pass:
+Next verify the tests all pass by running `pytest` to check your new changes work:
 
 ```bash
-pip install pytest
+cd sbiax/tests/
+pip install requirements.txt
 pytest
 ```
 
