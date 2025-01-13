@@ -81,12 +81,14 @@ $$
 
 This density estimate is fit to a set of $N$ simulation-parameter pairs $\{(\boldsymbol{\xi}, \boldsymbol{\pi})_0, ..., (\boldsymbol{\xi}, \boldsymbol{\pi})_N\}$ by minimising a Monte-Carlo estimate of the KL-divergence 
 
+$$
 \begin{align}
     \langle D_{KL}(q||p_\phi) \rangle_{\boldsymbol{\pi} \sim p(\boldsymbol{\pi})} &= \int \text{d}\boldsymbol{\pi} \; p(\boldsymbol{\pi}) \int \text{d}\boldsymbol{x} \; q(\boldsymbol{x}|\boldsymbol{\pi}) \log \frac{q(\boldsymbol{x}|\boldsymbol{\pi})}{p_\phi(\boldsymbol{x}|\boldsymbol{\pi})}, \nonumber \\
     &= \int \text{d}\boldsymbol{\pi} \int \text{d}\boldsymbol{x} \; p(\boldsymbol{\pi}, \boldsymbol{x})[\log q(\boldsymbol{x}|\boldsymbol{\pi}) - \log p_\phi(\boldsymbol{x}|\boldsymbol{\pi})], \nonumber \\
     &\geq -\int \text{d}\boldsymbol{\pi} \int \text{d}\boldsymbol{x} \; p(\boldsymbol{\pi},\boldsymbol{x}) \log p_\phi(\boldsymbol{x}|\boldsymbol{\pi}), \nonumber \\
     &\approx -\frac{1}{N}\sum_{i=1}^N \log p_\phi(\boldsymbol{x}_i|\boldsymbol{\pi}_i),
 \end{align}
+$$
 
 where $q(\boldsymbol{x}|\boldsymbol{\pi})$ is the unknown likelihood from which the simulations $\boldsymbol{x}$ are drawn. This applies similarly for an estimator of the posterior (instead of the likelihood as shown here) and is the basis of being able to estimate the likelihood or posterior directly when an analytic form is not available. If the likelihood is fit from simulations, a prior is required and the posterior is sampled via an MCMC given some measurement. This is implemented within the code.
 
