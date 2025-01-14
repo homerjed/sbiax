@@ -34,17 +34,19 @@ def test_nle():
     model_key, train_key, sample_key = jr.split(key, 3)
 
     X, Y = get_data(key)
+
+    _, data_dim = X.shape
     _, parameter_dim = Y.shape
 
     parameter_prior = tfd.Blockwise(
-        [tfd.Uniform(-1., 1.) for p in range(2)]
+        [tfd.Uniform(-1., 1.) for p in range(parameter_dim)]
     )
 
     model_keys = jr.split(model_key, 2)
 
     scaler = Scaler(X, Y, use_scaling=False)
 
-    solver = getattr(dfx, "Euler")()
+    solver = dfx.Euler()
 
     ndes = [
         CNF(
@@ -66,7 +68,7 @@ def test_nle():
 
     ensemble = Ensemble(ndes, sbi_type="nle")
 
-    opt = getattr(optax, "adamw")(1e-2)
+    opt = optax.adamw(1e-2)
 
     ensemble, stats = train_ensemble(
         train_key, 
@@ -95,6 +97,10 @@ def test_nle():
         key_sample, log_prob_fn, prior=parameter_prior, n_samples=10
     )
 
+    assert jnp.all(jnp.isfinite(samples))
+    assert jnp.all(jnp.isfinite(samples_log_prob))
+    assert samples.shape[-1] == parameter_dim
+
 
 def test_npe():
     key = jr.key(0)
@@ -102,17 +108,19 @@ def test_npe():
     model_key, train_key, sample_key = jr.split(key, 3)
 
     X, Y = get_data(key)
+    
+    _, data_dim = X.shape
     _, parameter_dim = Y.shape
 
     parameter_prior = tfd.Blockwise(
-        [tfd.Uniform(-1., 1.) for p in range(2)]
+        [tfd.Uniform(-1., 1.) for p in range(parameter_dim)]
     )
 
     model_keys = jr.split(model_key, 2)
 
     scaler = Scaler(X, Y, use_scaling=False)
 
-    solver = getattr(dfx, "Euler")()
+    solver = dfx.Euler()
 
     ndes = [
         CNF(
@@ -134,7 +142,7 @@ def test_npe():
 
     ensemble = Ensemble(ndes, sbi_type="npe")
 
-    opt = getattr(optax, "adamw")(1e-2)
+    opt = optax.adamw(1e-2)
 
     ensemble, stats = train_ensemble(
         train_key, 
@@ -162,3 +170,7 @@ def test_npe():
     samples, samples_log_prob = nuts_sample(
         key_sample, log_prob_fn, prior=parameter_prior, n_samples=10
     )
+
+    assert jnp.all(jnp.isfinite(samples))
+    assert jnp.all(jnp.isfinite(samples_log_prob))
+    assert samples.shape[-1] == parameter_dim

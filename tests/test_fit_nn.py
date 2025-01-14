@@ -16,9 +16,12 @@ def test_fit_nn():
 
     net_key, net_train_key = jr.split(key)
 
+    in_size = 3
+    out_size = 2
+
     net = eqx.nn.MLP(
-        3, 
-        2, 
+        in_size, 
+        out_size, 
         width_size=8, 
         depth=2, 
         activation=jax.nn.tanh,
@@ -27,8 +30,8 @@ def test_fit_nn():
 
     opt = optax.adamw(1e-3)
 
-    D = jnp.ones((100, 3))
-    Y = jnp.ones((100, 2))
+    D = jnp.ones((100, in_size))
+    Y = jnp.ones((100, out_size))
 
     model, losses = fit_nn(
         net_train_key, 
@@ -40,3 +43,7 @@ def test_fit_nn():
     )
 
     X = jax.vmap(model)(D)
+
+    assert jnp.all(jnp.isfinite(X))
+    assert jnp.all(jnp.isfinite(losses))
+    assert X.shape == (D.shape[0], out_size)

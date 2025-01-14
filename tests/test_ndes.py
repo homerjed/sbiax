@@ -13,7 +13,7 @@ from sbiax.ndes import CNF, MAF, GMM
 def test_cnf():
     key = jr.key(0)
 
-    solver = getattr(dfx, "Euler")()
+    solver = dfx.Euler()
     parameter_dim = 2
 
     cnf = CNF(
@@ -35,6 +35,9 @@ def test_cnf():
 
     x, p_x_y = cnf.sample_and_log_prob(key, y)
     p_x_y = cnf.log_prob(x, y)
+
+    assert jnp.isfinite(p_x_y)
+    assert jnp.all(jnp.isfinite(x))
 
 
 def test_maf():
@@ -58,6 +61,9 @@ def test_maf():
     x, p_x_y = maf.sample_and_log_prob(key, y)
     p_x_y = maf.log_prob(x, y)
 
+    assert jnp.isfinite(p_x_y)
+    assert jnp.all(jnp.isfinite(x))
+
 
 def test_gmm():
     key = jr.key(0)
@@ -79,3 +85,6 @@ def test_gmm():
 
     x, p_x_y = gmm.sample_and_log_prob(key, y)
     p_x_y = gmm.log_prob(x, y)
+
+    assert jnp.isfinite(p_x_y)
+    assert jnp.all(jnp.isfinite(x))
