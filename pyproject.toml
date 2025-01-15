@@ -1,6 +1,6 @@
 [project]
 name = "sbiax"
-version = "0.0.49"
+version = "0.0.52"
 description = "Fast, parallel and lightweight simulation-based inference in JAX."
 readme = "README.md"
 requires-python =">=3.10"
@@ -12,6 +12,7 @@ keywords = [
     "simulation-based-inference",
     "likelihood-free-inference",
     "jax", 
+    "machine-learning",
     "deep-learning", 
     "bayesian-inference",
     "generative-models", 

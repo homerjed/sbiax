@@ -47,7 +47,7 @@ In a typical Bayesian inference problem, the data likelihood is not known. Howev
 
 `sbiax` is a code for implementing each of these steps. The code allows for Neural Likelihood Estimation [@papamakarios; @delfi] and Neural Posterior Estimation [@npe].
 
-As shown in [@homer], SBI can successfully obtain the correct posterior widths and coverages given enough simulations which agree with the analytic solution - this code was used in the research for this publication. 
+As shown in [@homersbi], SBI can successfully obtain the correct posterior widths and coverages given enough simulations which agree with the analytic solution - this code was used in the research for this publication. 
 
 # Statement of need
 
@@ -59,13 +59,7 @@ The software we present, `sbiax`, is designed to be used by machine learning and
 
 Whilst excellent software packages already exist for conducting simulation-based inference (e.g. `sbi` [@sbimacke], `sbijax` [@sbidirmeier]) for some applications it is useful to have a lightweight implementation that focuses on speed, ensembling of density estimators and easily integrated MCMC sampling (e.g. for ensembles of likelihoods) - all of which is based on a lightweight and regularly maintained `jax` machine learning library such as `equinox` [@equinox]. `sbiax` depends on density estimators and compression modules - as long as log-probability and callable methods exists for these, they can be integrated seemlessly.
 
-<!-- BlackJAX integrated for MCMC sampling -->
-
 # Density estimation with normalising flows 
-
-<!-- What is SBI -->
-
-<!-- What is a normalising flow -->
 
 The use of density-estimation in SBI has been accelerated by the advent of normalising flows. These models parameterise a change-of-variables $\boldsymbol{y}=f_\phi(\boldsymbol{x};\boldsymbol{\pi})$ between a simple base distribution (e.g. a multivariate unit Gaussian $\mathcal{G}[\boldsymbol{z}|\mathbf{0}, \mathbf{I}]$) and an unknown distribution $q(\boldsymbol{x}|\boldsymbol{\pi})$ (from which we have simulated samples $\boldsymbol{x}$). Naturally, this is of particular importance in inference problems in which the likelihood is not known. The change-of-variables is fit from data by training neural networks to model the transformation in order to maximise the log-likelihood of the simulated data $\boldsymbol{x}$ conditioned on the parameters $\boldsymbol{\pi}$ of a simulator model. The mapping is expressed as
 
