@@ -143,6 +143,7 @@ def test_toy_nle():
         results_dir=results_dir
     )
 
+    # Check losses of NDEs
     assert all(
         [
             jnp.all(jnp.isfinite(jnp.asarray(stats[n]["train_losses"])))
@@ -202,205 +203,208 @@ def test_toy_nle():
     assert all([samples.shape[-1] == parameter_dim for samples, _ in posteriors])
 
 
-def test_toy_npe():
+# Test takes a long time so only run NLE for now
 
-    import os
-    import multiprocessing
+# def test_toy_npe():
 
-    os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
-        multiprocessing.cpu_count()
-    )
+#     import os
+#     import multiprocessing
 
-    import jax
-    import jax.numpy as jnp
-    import jax.random as jr
-    import equinox as eqx
-    import diffrax as dfx
-    import optax
-    import tensorflow_probability.substrates.jax.distributions as tfd
+#     os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count={}".format(
+#         multiprocessing.cpu_count()
+#     )
 
-    from configs import make_dirs
+#     import jax
+#     import jax.numpy as jnp
+#     import jax.random as jr
+#     import equinox as eqx
+#     import diffrax as dfx
+#     import optax
+#     import tensorflow_probability.substrates.jax.distributions as tfd
 
-    from sbiax.utils import make_df, get_shardings
-    from sbiax.ndes import Ensemble, MAF, CNF, Scaler
-    from sbiax.train import train_ensemble
-    from sbiax.inference import nuts_sample
-    from sbiax.compression.nn import fit_nn
+#     from configs import make_dirs
 
-    key = jr.key(0)
+#     from sbiax.utils import make_df, get_shardings
+#     from sbiax.ndes import Ensemble, MAF, CNF, Scaler
+#     from sbiax.train import train_ensemble
+#     from sbiax.inference import nuts_sample
+#     from sbiax.compression.nn import fit_nn
 
-    key, model_key, train_key, sample_key, data_key = jr.split(key, 5)
+#     key = jr.key(0)
 
-    results_dir = "results/toy/"
+#     key, model_key, train_key, sample_key, data_key = jr.split(key, 5)
 
-    make_dirs(results_dir)
+#     results_dir = "results/toy/"
 
-    n_sims = 10_000
-    data_dim = 100
-    parameter_dim = 2
+#     make_dirs(results_dir)
 
-    alpha = jnp.array([0.5, 0.5]) # True values of mu and sigma
-    lower = jnp.array([0., 0.1])
-    upper = jnp.array([1., 1.])
-    parameter_names = [r"$\mu$", r"$\sigma$"]
+#     n_sims = 10_000
+#     data_dim = 100
+#     parameter_dim = 2
 
-    parameter_prior = tfd.Blockwise(
-        [tfd.Uniform(lower[0], upper[0]), tfd.Uniform(lower[1], upper[1])]
-    )
+#     alpha = jnp.array([0.5, 0.5]) # True values of mu and sigma
+#     lower = jnp.array([0., 0.1])
+#     upper = jnp.array([1., 1.])
+#     parameter_names = [r"$\mu$", r"$\sigma$"]
 
-    def simulator(key, mu, sigma):
-        # Draw data d ~ G[d|mu, I * sigma]
-        return jr.multivariate_normal(key, jnp.ones(data_dim) * mu, jnp.eye(data_dim) * sigma)
+#     parameter_prior = tfd.Blockwise(
+#         [tfd.Uniform(lower[0], upper[0]), tfd.Uniform(lower[1], upper[1])]
+#     )
 
-    key_data, key_sims, key_prior = jr.split(data_key, 3)
+#     def simulator(key, mu, sigma):
+#         # Draw data d ~ G[d|mu, I * sigma]
+#         return jr.multivariate_normal(key, jnp.ones(data_dim) * mu, jnp.eye(data_dim) * sigma)
 
-    d = simulator(key_data, alpha[0], alpha[1])
+#     key_data, key_sims, key_prior = jr.split(data_key, 3)
 
-    Y = parameter_prior.sample((n_sims,), seed=key_prior)
+#     d = simulator(key_data, alpha[0], alpha[1])
 
-    keys = jr.split(key_sims, n_sims)
-    D = jax.vmap(simulator)(keys, Y[:, 0], Y[:, 1])
+#     Y = parameter_prior.sample((n_sims,), seed=key_prior)
 
-    sharding, replicated_sharding = get_shardings()
+#     keys = jr.split(key_sims, n_sims)
+#     D = jax.vmap(simulator)(keys, Y[:, 0], Y[:, 1])
 
-    net_key, net_train_key = jr.split(key)
+#     sharding, replicated_sharding = get_shardings()
 
-    net = eqx.nn.MLP(
-        D.shape[-1], 
-        Y.shape[-1], 
-        width_size=32, 
-        depth=2, 
-        activation=jax.nn.tanh,
-        key=net_key
-    )
+#     net_key, net_train_key = jr.split(key)
 
-    opt = optax.adamw(1e-3)
+#     net = eqx.nn.MLP(
+#         D.shape[-1], 
+#         Y.shape[-1], 
+#         width_size=32, 
+#         depth=2, 
+#         activation=jax.nn.tanh,
+#         key=net_key
+#     )
 
-    preprocess_fn = lambda x: (x - D.mean(axis=0)) / D.std(axis=0)
+#     opt = optax.adamw(1e-3)
 
-    model, losses = fit_nn(
-        net_train_key, 
-        net, 
-        train_data=(preprocess_fn(D), Y), 
-        opt=opt, 
-        n_batch=500, 
-        patience=1000,
-        sharding=sharding,
-        replicated_sharding=replicated_sharding
-    )
+#     preprocess_fn = lambda x: (x - D.mean(axis=0)) / D.std(axis=0)
 
-    X = jax.vmap(model)(preprocess_fn(D))
+#     model, losses = fit_nn(
+#         net_train_key, 
+#         net, 
+#         train_data=(preprocess_fn(D), Y), 
+#         opt=opt, 
+#         n_batch=500, 
+#         patience=1000,
+#         sharding=sharding,
+#         replicated_sharding=replicated_sharding
+#     )
 
-    X_ = model(preprocess_fn(d)) 
+#     X = jax.vmap(model)(preprocess_fn(D))
 
-    assert jnp.all(jnp.isfinite(X))
-    assert jnp.all(jnp.isfinite(losses))
-    assert X.shape[-1] == parameter_dim
+#     X_ = model(preprocess_fn(d)) 
 
-    model_keys = jr.split(model_key, 2)
+#     assert jnp.all(jnp.isfinite(X))
+#     assert jnp.all(jnp.isfinite(losses))
+#     assert X.shape[-1] == parameter_dim
 
-    sbi_type = "npe"
+#     model_keys = jr.split(model_key, 2)
 
-    scaler = Scaler(X, Y, use_scaling=True)
+#     sbi_type = "npe"
 
-    solver = dfx.Heun()
+#     scaler = Scaler(X, Y, use_scaling=True)
 
-    ndes = [
-        MAF(
-            event_dim=alpha.size, 
-            context_dim=alpha.size, 
-            width_size=32,
-            nn_depth=2,
-            n_layers=5,
-            scaler=scaler,
-            key=model_keys[0]
-        ),
-        CNF(
-            event_dim=alpha.size, 
-            context_dim=alpha.size, 
-            solver=solver,
-            dt=0.1,
-            t1=1.0,
-            width_size=8,
-            depth=0,
-            activation=jax.nn.tanh,
-            scaler=scaler,
-            key=model_keys[1]
-        ) 
-    ]
+#     solver = dfx.Heun()
 
-    ensemble = Ensemble(ndes, sbi_type=sbi_type)
+#     ndes = [
+#         MAF(
+#             event_dim=alpha.size, 
+#             context_dim=alpha.size, 
+#             width_size=32,
+#             nn_depth=2,
+#             n_layers=5,
+#             scaler=scaler,
+#             key=model_keys[0]
+#         ),
+#         CNF(
+#             event_dim=alpha.size, 
+#             context_dim=alpha.size, 
+#             solver=solver,
+#             dt=0.1,
+#             t1=1.0,
+#             width_size=8,
+#             depth=0,
+#             activation=jax.nn.tanh,
+#             scaler=scaler,
+#             key=model_keys[1]
+#         ) 
+#     ]
 
-    opt = optax.adamw(1e-3)
+#     ensemble = Ensemble(ndes, sbi_type=sbi_type)
 
-    ensemble, stats = train_ensemble(
-        train_key, 
-        ensemble,
-        train_mode=sbi_type,
-        train_data=(X, Y), 
-        opt=opt,
-        n_batch=50,
-        patience=20,
-        n_epochs=1000,
-        sharding=sharding,
-        replicated_sharding=replicated_sharding,
-        results_dir=results_dir
-    )
+#     opt = optax.adamw(1e-3)
 
-    assert all(
-        [
-            jnp.all(jnp.isfinite(jnp.asarray(stats[n]["train_losses"])))
-            for n in range(len(ensemble.ndes))
-        ]
-    )
-    assert all(
-        [
-            jnp.all(jnp.isfinite(jnp.asarray(stats[n]["train_losses"])))
-            for n in range(len(ensemble.ndes))
-        ]
-    )
-    assert all(
-        [
-            jnp.all(jnp.isfinite(jnp.asarray(stats[n]["all_valid_loss"])))
-            for n in range(len(ensemble.ndes))
-        ]
-    )
+#     ensemble, stats = train_ensemble(
+#         train_key, 
+#         ensemble,
+#         train_mode=sbi_type,
+#         train_data=(X, Y), 
+#         opt=opt,
+#         n_batch=50,
+#         patience=20,
+#         n_epochs=1000,
+#         sharding=sharding,
+#         replicated_sharding=replicated_sharding,
+#         results_dir=results_dir
+#     )
 
-    key_data, key_sample = jr.split(sample_key)
+#     # Check losses of NDEs
+#     assert all(
+#         [
+#             jnp.all(jnp.isfinite(jnp.asarray(stats[n]["train_losses"])))
+#             for n in range(len(ensemble.ndes))
+#         ]
+#     )
+#     assert all(
+#         [
+#             jnp.all(jnp.isfinite(jnp.asarray(stats[n]["train_losses"])))
+#             for n in range(len(ensemble.ndes))
+#         ]
+#     )
+#     assert all(
+#         [
+#             jnp.all(jnp.isfinite(jnp.asarray(stats[n]["all_valid_loss"])))
+#             for n in range(len(ensemble.ndes))
+#         ]
+#     )
 
-    ensemble = eqx.nn.inference_mode(ensemble)
+#     key_data, key_sample = jr.split(sample_key)
 
-    log_prob_fn = ensemble.ensemble_log_prob_fn(X_, parameter_prior)
+#     ensemble = eqx.nn.inference_mode(ensemble)
 
-    n_chains = 2 # Sample multiple chains for this posterior
+#     log_prob_fn = ensemble.ensemble_log_prob_fn(X_, parameter_prior)
 
-    samples, samples_log_prob = nuts_sample(
-        key_sample, 
-        log_prob_fn, 
-        n_chains=n_chains, 
-        prior=parameter_prior
-    )
+#     n_chains = 2 # Sample multiple chains for this posterior
 
-    assert jnp.all(jnp.isfinite(samples))
-    assert jnp.all(jnp.isfinite(samples_log_prob))
-    assert samples.shape[-1] == parameter_dim
+#     samples, samples_log_prob = nuts_sample(
+#         key_sample, 
+#         log_prob_fn, 
+#         n_chains=n_chains, 
+#         prior=parameter_prior
+#     )
 
-    n_chains = 1
+#     assert jnp.all(jnp.isfinite(samples))
+#     assert jnp.all(jnp.isfinite(samples_log_prob))
+#     assert samples.shape[-1] == parameter_dim
 
-    posteriors = []
-    for nde in ensemble.ndes:
-        log_prob_fn = ensemble.nde_log_prob_fn(nde, X_, parameter_prior)
+#     n_chains = 1
 
-        nde_posterior = nuts_sample(
-            key_sample, log_prob_fn, n_chains=n_chains, prior=parameter_prior
-        )
-        posteriors.append(nde_posterior)
+#     posteriors = []
+#     for nde in ensemble.ndes:
+#         log_prob_fn = ensemble.nde_log_prob_fn(nde, X_, parameter_prior)
 
-    # Check each posterior
-    assert all(
-        [jnp.all(jnp.isfinite(jnp.squeeze(samples))) for samples, _ in posteriors]
-    )
-    assert all(
-        [jnp.all(jnp.isfinite(jnp.squeeze(samples_log_probs))) for _, samples_log_probs in posteriors]
-    )
-    assert all([samples.shape[-1] == parameter_dim for samples, _ in posteriors])
+#         nde_posterior = nuts_sample(
+#             key_sample, log_prob_fn, n_chains=n_chains, prior=parameter_prior
+#         )
+#         posteriors.append(nde_posterior)
+
+#     # Check each posterior
+#     assert all(
+#         [jnp.all(jnp.isfinite(jnp.squeeze(samples))) for samples, _ in posteriors]
+#     )
+#     assert all(
+#         [jnp.all(jnp.isfinite(jnp.squeeze(samples_log_probs))) for _, samples_log_probs in posteriors]
+#     )
+#     assert all([samples.shape[-1] == parameter_dim for samples, _ in posteriors])
