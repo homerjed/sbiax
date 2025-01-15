@@ -2,7 +2,7 @@ from typing import Tuple, Optional, Sequence
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-from jax.sharding import PositionalSharding
+from jax.sharding import NamedSharding, PositionalSharding
 import equinox as eqx
 from jaxtyping import Key, Array, Float, jaxtyped
 from beartype import beartype as typechecker
@@ -89,7 +89,7 @@ def fit_nn(
     valid_data: Sequence[Array] = None,
     batch_dataset: bool = True,
     *,
-    sharding: Optional[PositionalSharding] = None,
+    sharding: Optional[NamedSharding] = None,
     replicated_sharding: Optional[PositionalSharding] = None,
 ) -> Tuple[eqx.Module, Float[np.ndarray, "l 2"]]:
     """

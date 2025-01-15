@@ -297,7 +297,7 @@ def train_nde(
     clip_max_norm: Optional[float] = None,
     # Sharding
     sharding: Optional[NamedSharding] = None,
-    replicated_sharding: Optional[NamedSharding] = None,
+    replicated_sharding: Optional[PositionalSharding] = None,
     # Optuna
     trial: Optional[optuna.trial.Trial] = None,
     # Saving
@@ -654,12 +654,14 @@ def train_ensemble(
         stats.append(stats_n)
         ndes.append(nde)
 
+    # Calculate weights of NDEs in ensemble (higher log-likelihood is better)
     weights = ensemble.calculate_stacking_weights(
         losses=[
             stats[n]["all_valid_loss"] for n, _ in enumerate(ensemble.ndes)
         ]
     )
     ensemble = replace(ensemble, weights=weights)
+
     print("Weights:", ensemble.weights)
 
     return ensemble, stats
