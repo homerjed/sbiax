@@ -1,5 +1,5 @@
 ---
-title: 'SBIAX: Density-estimation simulation-based inference in JAX.'
+title: 'SBIAX: Density-estimation simulation-based inference in JAX'
 tags:
   - Python
   - Machine learning 
