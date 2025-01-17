@@ -45,7 +45,7 @@ In a typical Bayesian inference problem, the data likelihood is not known. Howev
 * the optional optimisation of the parameters for the architecture and fitting hyper-parameters of the algorithms,
 * sampling the ensemble posterior (using an MCMC sampler if the likelihood is fit directly), conditioned on the data-vector, to obtain parameter constraints on the parameters of a physical model, $\boldsymbol{\pi}$.
 
-`sbiax` is a software package that implements each of these steps. The code allows for Neural Likelihood Estimation [@papamakarios; @delfi] and Neural Posterior Estimation [@npe].
+`sbiax` is a software package that implements each of these steps. The code allows for Neural Likelihood Estimation [@papamakarios; @delfi], and Neural Posterior Estimation [@npe].
 
 As shown in @homersbi, SBI can successfully obtain the correct posterior widths and coverages given enough simulations which agree with the analytic solution - this software was used in the research for this publication. 
 
