@@ -45,7 +45,7 @@ In a typical Bayesian inference problem, the data likelihood is not known. Howev
 * the optional optimisation of the parameters for the architecture and fitting hyper-parameters of the algorithms,
 * sampling the ensemble posterior (using an MCMC sampler if the likelihood is fit directly), conditioned on the data-vector, to obtain parameter constraints on the parameters of a physical model, $\boldsymbol{\pi}$.
 
-`sbiax` is a software package that implements each of these steps. The code allows for Neural Likelihood Estimation [@papamakarios; @delfi] and Neural Posterior Estimation [@npe].
+`sbiax` is a software package that implements each of these steps. The code allows for Neural Likelihood Estimation [@papamakarios; @delfi], and Neural Posterior Estimation [@npe].
 
 As shown in @homersbi, SBI can successfully obtain the correct posterior widths and coverages given enough simulations which agree with the analytic solution - this software was used in the research for this publication. 
 
@@ -99,7 +99,7 @@ $$
 are the weights of each density estimator in the ensemble. This ensemble likelihood can be easily sampled with an MCMC sampler. In Figure 
 \ref{fig:sbi_example} we show an example posterior from applying SBI, with our software, using two compression methods separately. 
 
-![An example of posteriors derived with `sbiax`. We fit an ensemble of two continuous normalising flows to a set of simulations of cosmic shear two-point functions. The expectation $\xi[\pi]$ is linearised with respect to $\pi$ and a theoretical data covariance model $\Sigma$ (in this example) allows for easy sampling of many simulations - an ideal test arena for SBI methods. We derive two posteriors, from separate experiments, where a linear (red) or neural network compression (blue) is used. In black, the true analytic posterior is shown. Note that for a finite set of simulations the blue posterior will not overlap completely with the black and red posteriors - we explore this effect upon the posteriors from SBI methods, due to an unknown data covariance, in [@homersbi].\label{fig:sbi_example}](sbi_example.png)
+![An example of posteriors derived with `sbiax`. We fit an ensemble of two continuous normalising flows to a set of simulations of cosmic shear two-point functions. The expectation $\xi[\pi]$ is linearised with respect to $\pi$ and a theoretical data covariance model $\Sigma$ (in this example) allows for easy sampling of many simulations - an ideal test arena for SBI methods. We derive two posteriors, from separate experiments, where a linear (red) or neural network compression (blue) is used. In black, the true analytic posterior is shown. Note that for a finite set of simulations the blue posterior will not overlap completely with the black and red posteriors - we explore this effect upon the posteriors from SBI methods, due to an unknown data covariance, in @homersbi.\label{fig:sbi_example}](sbi_example.png)
 
 
 <!-- # Compression
