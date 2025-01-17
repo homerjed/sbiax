@@ -51,7 +51,7 @@ As shown in [@homersbi], SBI can successfully obtain the correct posterior width
 
 # Statement of need
 
-Simulation-based inference (SBI) covers a broad class of statistical techniques such as Approximate Bayesian Computation (ABC), Neural Ratio Estimation (NRE), Neural Likelihood Estimation (NLE) and Neural Posterior Estimation (NPE). These techniques can derive posterior distributions conditioned of noisy data vectors in a rigorous and efficient manner. In particular, density-estimation methods have emerged as a promising method, given their efficiency, using generative models to fit likelihoods or posteriors directly using simulations.
+Simulation-based inference (SBI) covers a broad class of statistical techniques such as Approximate Bayesian Computation (ABC, [@ABC]), Neural Ratio Estimation (NRE, [@NRE]), Neural Likelihood Estimation (NLE) and Neural Posterior Estimation (NPE). These techniques can derive posterior distributions conditioned of noisy data vectors in a rigorous and efficient manner with assumptions on the data likelihood. In particular, density-estimation methods have emerged as a promising method, given their efficiency, using generative models to fit likelihoods or posteriors directly using simulations.
 
 In the field of cosmology, SBI is of particular interest due to complexity and non-linearity of models for the expectations of non-standard summary statistics of the large-scale structure, as well as the non-Gaussian noise distributions for these statistics. The assumptions required for the complex analytic modelling of these statistics as well as the increasing dimensionality of data returned by spectroscopic and photometric galaxy surveys limits the amount of information that can be obtained on fundamental physical parameters. Therefore, the study and research into current and future statistical methods for Bayesian inference is of paramount importance for the cosmology, especially in light of current and next-generation survey missions such as DES [@Euclid], DESI [@DESI] and Euclid [@Euclid].
 
@@ -97,7 +97,7 @@ $$
 $$
 
 are the weights of each density estimator in the ensemble. This ensemble likelihood can be easily sampled with an MCMC sampler. In Figure 
-\ref{fig:sbi_example} we show an example posterior from applying SBI, with our code, using two compression methods separately. 
+\ref{fig:sbi_example} we show an example posterior from applying SBI, with our software, using two compression methods separately. 
 
 ![An example of posteriors derived with `sbiax`. We fit an ensemble of two continuous normalising flows to a set of simulations of cosmic shear two-point functions. The expectation $\xi[\pi]$ is linearised with respect to $\pi$ and a theoretical data covariance model $\Sigma$ (in this example) allows for easy sampling of many simulations - an ideal test arena for SBI methods. We derive two posteriors, from separate experiments, where a linear (red) or neural network compression (blue) is used. In black, the true analytic posterior is shown. Note that for a finite set of simulations the blue posterior will not overlap completely with the black and red posteriors - we explore this effect upon the posteriors from SBI methods, due to an unknown data covariance, in [@homersbi].\label{fig:sbi_example}](sbi_example.png)
 
