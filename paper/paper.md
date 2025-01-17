@@ -1,5 +1,5 @@
 ---
-title: 'SBIAX: Density-estimation simulation-based inference in JAX.'
+title: 'SBIAX: Density-estimation simulation-based inference in JAX'
 tags:
   - Python
   - Machine learning 
@@ -40,9 +40,9 @@ In a typical Bayesian inference problem, the data likelihood is not known. Howev
 
 * simulating a set of data and model parameters $\{(\boldsymbol{\xi}, \boldsymbol{\pi})_0, ..., (\boldsymbol{\xi}, \boldsymbol{\pi})_N\}$,
 * obtaining a measurement $\hat{\boldsymbol{\xi}}$,
-* compressing the simulations and the measurements - usually with a neural network or linear compression - to a set of summaries $\{(\boldsymbol{x}, \boldsymbol{\pi})_0, ..., (\boldsymbol{x}, \boldsymbol{\pi})_N\}$ and $\hat{\boldsymbol{x}}$, 
+* compressing the simulations and measurements - usually with a neural network or linear compression - to a set of summaries $\{(\boldsymbol{x}, \boldsymbol{\pi})_0, ..., (\boldsymbol{x}, \boldsymbol{\pi})_N\}$ and $\hat{\boldsymbol{x}}$, 
 * fitting an ensemble of normalising flow or similar density estimation algorithms (e.g. a Gaussian mixture model),
-* the optional optimisation of the parameters for the architecture and fitting hyperparameters of the algorithms,
+* the optional optimisation of the parameters for the architecture and fitting-hyperparameters of the algorithms,
 * sampling the ensemble posterior (using an MCMC sampler if the likelihood is fit directly), conditioned on the data-vector, to obtain parameter constraints on the parameters of a physical model, $\boldsymbol{\pi}$.
 
 `sbiax` is a code for implementing each of these steps. The code allows for Neural Likelihood Estimation [@papamakarios; @delfi] and Neural Posterior Estimation [@npe].
