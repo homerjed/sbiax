@@ -1,6 +1,8 @@
 <h1 align='center'>sbiax</h1>
 <h2 align='center'>Fast, lightweight and parallel simulation-based inference.</h2>
 
+[![DOI](https://joss.theoj.org/papers/10.21105/joss.07606/status.svg)](https://doi.org/10.21105/joss.07606) [![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
+
 <!-- 
 <picture>
   <source srcset="https://github.com/homerjed/sbipdf/blob/main/assets/cover_dark.png" media="(prefers-color-scheme: dark)">
@@ -112,5 +114,20 @@ If you found this library to be useful in academic work, please cite:  <!--([arX
       primaryClass={astro-ph.CO},
       url={https://arxiv.org/abs/2412.02311}, 
 }
+```
 
+```bibtex
+@article{
+    Homer2025, 
+    doi = {10.21105/joss.07606}, 
+    url = {https://doi.org/10.21105/joss.07606}, 
+    year = {2025}, 
+    publisher = {The Open Journal}, 
+    volume = {10}, 
+    number = {105}, 
+    pages = {7606}, 
+    author = {Jed Homer and Oliver Friedrich}, 
+    title = {SBIAX: Density-estimation simulation-based inference in JAX}, 
+    journal = {Journal of Open Source Software} 
+} 
 ```
