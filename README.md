@@ -1,7 +1,7 @@
 <h1 align='center'>sbiax</h1>
 <h2 align='center'>Fast, lightweight and parallel simulation-based inference.</h2>
 
-[![DOI](https://joss.theoj.org/papers/10.21105/joss.07606/status.svg)](https://doi.org/10.21105/joss.07606) [![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
+[![DOI](https://joss.theoj.org/papers/10.21105/joss.07606/status.svg)](https://doi.org/10.21105/joss.07606) [![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active) [![arXiv](https://img.shields.io/badge/arXiv-2412.02311-b31b1b.svg)](https://arxiv.org/abs/2412.02311)
 
 <!-- 
 <picture>
