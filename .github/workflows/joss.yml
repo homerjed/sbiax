@@ -5,12 +5,8 @@ on:
         - paper/**
         - .github/workflows/joss.yml
 
-env:
-  RUN_ACTION: true # Change this to 'true' to re-publish pdf of paper
-
 jobs:
   paper:
-    if: env.RUN_ACTION == 'true'
     runs-on: ubuntu-latest
     name: Paper Draft
     steps:
