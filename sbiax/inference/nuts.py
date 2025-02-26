@@ -6,6 +6,7 @@ import jax.numpy as jnp
 from jaxtyping import Key, Array, Float, jaxtyped
 from beartype import beartype as typechecker
 import blackjax
+from jax_tqdm import scan_tqdm
 from tensorflow_probability.substrates.jax.distributions import Distribution
 
 
@@ -14,7 +15,7 @@ def nuts_sample(
     key: Key[jnp.ndarray, "..."], 
     log_prob_fn: Callable[[Float[Array, "..."]], Float[Array, ""]], 
     prior: Distribution, 
-    n_samples: int = 100_000, 
+    n_samples: int = 20_000, 
     n_chains: int = 1,
     n_warmup_steps: int = 1000,
     initial_state: Optional[Float[Array, "#i p"]] = None,
@@ -158,6 +159,7 @@ def nuts_sample(
             """
             return kernel(key, state, log_prob_fn, **params)
 
+        @scan_tqdm(n_samples, desc="Sampling")
         def one_step(
             states: blackjax._hmc.HMCState, i: int
         ) -> Tuple[blackjax._hmc.HMCState, blackjax._nuts.NUTSInfo]: 
@@ -176,7 +178,10 @@ def nuts_sample(
             return states, (states, infos)
 
         _, (states, infos) = jax.lax.scan(
-            one_step, initial_states, jnp.arange(n_samples)
+            # scan_tqdm(one_step, desc="Sampling"), 
+            one_step,
+            initial_states, 
+            jnp.arange(n_samples)
         )
         return states, infos
 

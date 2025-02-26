@@ -511,7 +511,7 @@ def train_nde(
     # Save NDE model
     if results_dir is not None:
         eqx.tree_serialise_leaves(
-            os.path.join(results_dir, "models/", "cnf.eqx"), model
+            os.path.join(results_dir, "cnf.eqx"), model
         )
 
     # Use test data for validation else just validation set

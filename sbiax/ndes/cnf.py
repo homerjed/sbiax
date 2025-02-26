@@ -440,6 +440,12 @@ class CNF(eqx.Module):
             scaler (optional): Scaler for preprocessing data before transformation.
         """
 
+        if isinstance(solver, str):
+            solver = getattr(dfx, solver)()
+
+        if isinstance(activation, str):
+            activation = getattr(jax.nn, activation)
+
         if t_emb_dim is not None:
             y_dim = context_dim + t_emb_dim
         else:

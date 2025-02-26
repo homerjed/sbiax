@@ -12,6 +12,8 @@
 scripts/tests/
 scripts/
 results/
+results_/
+sbatch_outs/
 __pycache__/
 .DS_Store
 

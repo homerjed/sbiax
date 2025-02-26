@@ -124,6 +124,10 @@ class MAF(eqx.Module):
             x_dim (int): Dimensionality of the target variable.
             y_dim (int): Dimensionality of the conditioning variable.
         """
+
+        if isinstance(activation, str):
+            activation = getattr(jax.nn, activation)
+
         self.base_dist = Normal(
             loc=jnp.zeros(event_dim), scale=jnp.ones(event_dim)
         )
