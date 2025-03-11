@@ -56,19 +56,21 @@ parser.add_argument(
     "-s", 
     "--seed", 
     type=int, 
-    help="Seed for random number generation.", 
-    default=0
+    default=0,
+    help="Seed for random number generation."
 )
 parser.add_argument(
     "-l",
     "--linearised", 
     action=argparse.BooleanOptionalAction, 
+    default=True,
     help="Linearised model for datavector."
 )
 parser.add_argument(
     "-n",
     "--n_linear_sims", 
     type=int,
+    default=100_000,
     action=argparse.BooleanOptionalAction, 
     help="Number of linearised simulations (used for pre-training if non-linear simulations and requested)."
 )
@@ -81,22 +83,24 @@ parser.add_argument(
 parser.add_argument(
     "-z",
     "--redshift", 
-    choices=[0.0, 0.5, 1.0],
     type=float,
+    choices=[0.0, 0.5, 1.0],
+    default=0.,
     help="Redshift of simulations."
 )
 parser.add_argument(
     "-t",
     "--sbi_type", 
-    choices=["nle", "npe"],
     type=str,
+    choices=["nle", "npe"],
+    default="nle",
     help="Method of SBI: neural likelihood (NLE) or posterior (NPE)."
 )
 args = parser.parse_args()
 
 
 def get_z_config_and_datavector(
-    key: Key, 
+    key: PRNGKeyArray, 
     seed: int,
     config: ConfigDict, 
     redshift: float, 

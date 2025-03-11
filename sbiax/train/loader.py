@@ -4,7 +4,8 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import equinox as eqx
-from jaxtyping import Key, Array, Float
+from jaxtyping import Key, Array, Float, jaxtyped
+from beartype import beartype as typechecker
 
 
 class Sample(NamedTuple):
@@ -12,6 +13,7 @@ class Sample(NamedTuple):
     y: Array 
 
 
+@jaxtyped(typechecker=typechecker)
 def sort_sample(
     train_mode: Literal["npe", "nle"], 
     simulations: Float[Array, "b x"],
@@ -91,7 +93,7 @@ class _InMemoryDataLoader(_AbstractDataLoader):
 
     def loop(
         self, batch_size: int
-    ) -> Generator[Tuple[Float[Array, "batch x"], Float[Array, "batch y"]], None, None]:
+    ) -> Generator[Tuple[Float[Array, "b x"], Float[Array, "b y"]], None, None]:
         """
         Generates batches of simulation and parameter data for training.
 
@@ -152,7 +154,6 @@ class _InMemoryDataLoader(_AbstractDataLoader):
                     )
                     start = end
                     end = start + batch_size
-
 
 
 class DataLoader(eqx.Module):

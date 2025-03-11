@@ -1,14 +1,11 @@
 import os 
 import numpy as np
 
-ALL_RADII = [
-    # "5.0", "10.0", "15.0", "20.0", "25.0", "30.0", "35.0"
-    5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0
-]
+ALL_RADII = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
 ALL_REDSHIFTS = [0., 0.5, 1., 2., 3.]
 REDSHIFT_STRINGS = ["0", "0.5", "1", "2", "3"] # Quijote filename strings
 
-RESOLUTION = 1024
+RESOLUTION = 1024 # NOTE: are hypercube realisations high resolution also?
 
 PARAMETER_STRINGS = [
     r"$\Omega_m$", r"$\Omega_b$", r"$h_m$", r"$n_s$", r"$\sigma_8$"
@@ -53,9 +50,7 @@ DELTAS = np.load(os.path.join(DATA_DIR, "deltas.npy"))
 
 
 def get_save_and_load_dirs():
-    return (
-        DATA_DIR, OUT_DIR, DERIVATIVES_DIR, FIGS_DIR
-    )
+    return DATA_DIR, DERIVATIVES_DIR, FIGS_DIR
 
 
 def get_quijote_parameters():

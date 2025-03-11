@@ -1,28 +1,35 @@
 import os
-# from shutil import rmtree
-from typing import Literal
+from typing import Literal, Optional
 import argparse
 import yaml
 import jax.random as jr 
 from equinox import Module
-from jaxtyping import Key, jaxtyped
+from jaxtyping import Key, PRNGKeyArray, jaxtyped
 from beartype import beartype as typechecker
 from ml_collections import ConfigDict
 from sbiax.ndes import CNF, MAF
+
+typecheck = jaxtyped(typechecker=typechecker)
 
 RESULTS_DIR = "/project/ls-gruen/users/jed.homer/sbiaxpdf/results/"
 
 POSTERIORS_DIR = "/project/ls-gruen/users/jed.homer/sbiaxpdf/results/posteriors/"
 
-typecheck = jaxtyped(typechecker=typechecker)
+
+def exists(v):
+    return v is not None
 
 
 def default(v, d):
-    return v if v is not None else d
+    return v if exists(v) else d
 
 
 def get_base_results_dir():
     return RESULTS_DIR
+
+
+def get_base_posteriors_dir():
+    return POSTERIORS_DIR
 
 
 def save_config(config: ConfigDict, filepath: str):
@@ -36,39 +43,28 @@ def load_config(filepath: str) -> ConfigDict:
     return ConfigDict(config_dict)
 
 
-def make_dirs(results_dir: str):
+def make_dirs(results_dir: str) -> None:
     if not os.path.exists(results_dir):
         os.makedirs(results_dir, exist_ok=True)
     print("RESULTS_DIR:\n", results_dir)
 
 
-def get_results_dir(config: ConfigDict, args) -> str:
+def get_results_dir(config: ConfigDict, args: dict) -> str:
 
-    if "cumulants" in config.dataset_name:
-        results_dir = "{}{}{}{}{}{}{}{}".format( # Import this from a constants file
-            RESULTS_DIR,
-            "cumulants/",
-            (config.sbi_type + "/") if config.sbi_type else "" ,
-            "linear/" if config.linearised else "",
-            (config.compression + "/") if config.compression else "",
-            "pretrain/" if config.pre_train else "",
-            (config.exp_name + "/") if config.exp_name else "",
-            (str(config.seed) + "/") if (config.seed is not None) else ""
-        )
-    if ("cumulants" in config.dataset_name) and ("reduced" in config.dataset_name):
-        results_dir = "{}{}{}{}{}{}{}{}".format( # Import this from a constants file
-            RESULTS_DIR,
-            "reduced_cumulants/",
-            (config.sbi_type + "/") if config.sbi_type else "" ,
-            "linear/" if config.linearised else "",
-            (config.compression + "/") if config.compression else "",
-            "pretrain/" if config.pre_train else "",
-            (config.exp_name + "/") if config.exp_name else "",
-            (str(config.seed) + "/") if (config.seed is not None) else ""
-        )
+    results_dir = "{}{}{}{}{}{}{}{}".format( # Import this from a constants file
+        RESULTS_DIR,
+        "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
+        (config.sbi_type + "/") if config.sbi_type else "" ,
+        "linearised/" if config.linearised else "nonlinearised/",
+        (config.compression + "/") if config.compression else "",
+        "pretrain/" if config.pre_train else "",
+        (config.exp_name + "/") if config.exp_name else "",
+        (str(config.seed) + "/") if (config.seed is not None) else ""
+    )
 
     make_dirs(results_dir)
 
+    # Save command line arguments and config together
     with open(os.path.join(results_dir, "config.yml"), "w") as f:
         yaml.dump({"args": ""}, f, default_flow_style=False)
         yaml.dump(vars(args), f, default_flow_style=False)
@@ -80,28 +76,16 @@ def get_results_dir(config: ConfigDict, args) -> str:
 
 def get_posteriors_dir(config: ConfigDict) -> str:
 
-    if "cumulants" in config.dataset_name:
-        results_dir = "{}{}{}{}{}{}{}{}".format( # Import this from a constants file
-            POSTERIORS_DIR,
-            "cumulants/",
-            (config.sbi_type + "/") if config.sbi_type else "" ,
-            "linear/" if config.linearised else "",
-            (config.compression + "/") if config.compression else "",
-            "pretrain/" if config.pre_train else "",
-            (config.exp_name + "/") if config.exp_name else "",
-            (str(config.seed) + "/") if (config.seed is not None) else ""
-        )
-    if ("cumulants" in config.dataset_name) and ("reduced" in config.dataset_name):
-        results_dir = "{}{}{}{}{}{}{}{}".format( # Import this from a constants file
-            RESULTS_DIR,
-            "reduced_cumulants/",
-            (config.sbi_type + "/") if config.sbi_type else "" ,
-            "linear/" if config.linearised else "",
-            (config.compression + "/") if config.compression else "",
-            "pretrain/" if config.pre_train else "",
-            (config.exp_name + "/") if config.exp_name else "",
-            (str(config.seed) + "/") if (config.seed is not None) else ""
-        )
+    results_dir = "{}{}{}{}{}{}{}{}".format( # Import this from a constants file
+        POSTERIORS_DIR,
+        "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
+        (config.sbi_type + "/") if config.sbi_type else "" ,
+        "linearised/" if config.linearised else "nonlinearised/",
+        (config.compression + "/") if config.compression else "",
+        "pretrain/" if config.pre_train else "",
+        (config.exp_name + "/") if config.exp_name else "",
+        (str(config.seed) + "/") if (config.seed is not None) else ""
+    )
 
     make_dirs(results_dir)
 
@@ -109,10 +93,11 @@ def get_posteriors_dir(config: ConfigDict) -> str:
 
 
 def get_multi_z_posterior_dir(config: ConfigDict, sbi_type: str = None) -> str:
-    posterior_save_dir = "{}cumulants/multi_z/{}/{}{}".format(
-        POSTERIORS_DIR, #RESULTS_DIR,
+    posterior_save_dir = "{}{}/multi_z/{}/{}{}".format(
+        POSTERIORS_DIR,
+        "reduced_cumulants" if config.reduced_cumulants else "cumulants",
         config.sbi_type if (hasattr(config, sbi_type) and (config.sbi_type is not None)) else sbi_type,
-        "linear/" if config.linearised else "",
+        "linearised/" if config.linearised else "nonlinearised/",
         "pretrain/" if config.pre_train else ""
     )
     return posterior_save_dir
@@ -244,21 +229,15 @@ def get_cumulants_multi_z_args():
         "-n",
         "--n_linear_sims", 
         type=int,
-        action=argparse.BooleanOptionalAction, 
+        default=100_000,
         help="Number of linearised simulations (used for pre-training if non-linear simulations and requested)."
     )
     parser.add_argument(
         "-p",
         "--pre-train", 
+        default=False,
         action=argparse.BooleanOptionalAction, 
         help="Pre-train (only) when using non-linearised model for datavector. Pre-train on linearised simulations."
-    )
-    parser.add_argument(
-        "-z",
-        "--redshift", 
-        choices=[0.0, 0.5, 1.0],
-        type=float,
-        help="Redshift of simulations."
     )
     parser.add_argument(
         "-o", 
@@ -272,8 +251,23 @@ def get_cumulants_multi_z_args():
         "-t",
         "--sbi_type", 
         choices=["nle", "npe"],
+        default="nle",
         type=str,
         help="Method of SBI: neural likelihood (NLE) or posterior (NPE)."
+    )
+    parser.add_argument(
+        "-n_d",
+        "--n_datavectors", 
+        type=int,
+        default=3,
+        help="Number of independent datavectors to measure at each redshift." # NOTE: possibly make this depend on redshift, a list of ints
+    )
+    parser.add_argument(
+        "-n_p",
+        "--n_posteriors_sample", 
+        type=int,
+        default=2,
+        help="Number of posteriors to sample (using different measurements for each)." 
     )
     parser.add_argument(
         "-v",
@@ -286,19 +280,23 @@ def get_cumulants_multi_z_args():
     return args
 
 
+@typecheck
 def get_ndes_from_config(
     config: ConfigDict, 
     event_dim: int, 
-    context_dim: int = None, 
-    scalers: list[Module] = None, 
+    context_dim: Optional[int] = None, 
+    scalers: Optional[list[Module] | Module] = None, 
     *, 
-    key: Key 
+    use_scalers: bool = False,
+    key: PRNGKeyArray 
 ) -> list[Module]:
-    # Scaler for each nde...
+
     keys = jr.split(key, len(config.ndes))
 
+    # Scaler for each nde...
     if not isinstance(scalers, list):
-        scalers = [scalers]
+        # Pack the single scaler for each NDE
+        scalers = [scalers] * len(config.ndes)
 
     ndes = []
     for nde, scaler, key in zip(config.ndes, scalers, keys):
@@ -311,9 +309,9 @@ def get_ndes_from_config(
         # Required to remove / add some arguments to specify NDEs
         nde_dict = dict(
             event_dim=event_dim, 
-            context_dim=context_dim if context_dim is not None else event_dim, 
+            context_dim=context_dim if (context_dim is not None) else event_dim, 
             key=key,
-            scaler=scaler,
+            scaler=scaler if use_scalers else None,
             **dict(nde)
         )
         nde_dict.pop("model_type")
@@ -334,35 +332,40 @@ def cumulants_config(
     compression: Literal["linear", "nn"] = "linear",
     order_idx: list[int] = [0, 1, 2],
     # nonlinearised: bool = True, 
-    n_linear_sims: int = 100_000,
+    n_linear_sims: Optional[int] = None,
     pre_train: bool = False
 ) -> ConfigDict:
 
     config = ConfigDict()
 
-    config.seed               = default(seed, 0) # For argparse script running without args!
+    config.seed               = seed # For argparse script running without args!
 
     # Data
-    # config.bulk               = False
-    config.dataset_name       = "cumulants" if not reduced_cumulants else "reduced cumulants"
-    # config.cumulants          = False
-    config.redshift           = default(redshift, 0.0)
+    config.dataset_name       = "reduced cumulants" if reduced_cumulants else "cumulants" 
+    config.redshift           = redshift
     config.scales             = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
-    config.order_idx          = default(order_idx, [0, 1, 2]) # Maximum index is 2
-    config.compression        = default(compression, "linear")
-    config.linearised         = default(linearised, True)
-    config.covariance_epsilon = None #1e-6
+    config.order_idx          = order_idx # Maximum index is 2
+    config.compression        = compression
+    config.linearised         = linearised
+    config.covariance_epsilon = None # 1e-6
     config.reduced_cumulants  = reduced_cumulants
-    # config.nonlinearised = default(nonlinearised, False)
-    config.pre_train          = default(pre_train, False) and (not linearised)
-    config.n_linear_sims      = default(n_linear_sims, 10_000) # This is for pre-train or linearised simulations 
+    # config.nonlinearised      = nonlinearised
+    config.pre_train          = pre_train and (not linearised)
+    config.n_linear_sims      = n_linear_sims # This is for pre-train or linearised simulations 
+    config.use_expectation    = False # Noiseless datavector
 
-    # assert not (not config.linearised and config.pre_train)
-    print(config.linearised, config.pre_train)
+    config.use_pca            = False # Need to add this into other scripts...
 
     # SBI
     config.sbi_type      = sbi_type
+
     config.exp_name      = "z={}_m={}".format(config.redshift, "".join(map(str, config.order_idx)))
+
+    # Posterior sampling
+    config.use_ema       = False # Use it and sample with it
+    config.n_steps       = 200
+    config.n_walkers     = 1000
+    config.burn          = int(0.1 * config.n_steps)
 
     if config.linearised:
         # NDEs
@@ -374,34 +377,28 @@ def cumulants_config(
         cnf.dropout_rate     = 0.
         cnf.dt               = 0.1
         cnf.t1               = 1.
-        cnf.solver           = "Euler" #dfx.Euler() 
+        cnf.solver           = "Euler" 
         cnf.exact_log_prob   = True
-        cnf.use_scaling      = False # Defaults to (mu, std) of (x, y)
+        cnf.use_scaling      = True # Defaults to (mu, std) of (x, y)
 
         config.maf = maf = ConfigDict()
         maf.model_type       = "maf" # = model.__class__.__name__
         maf.width_size       = 32
-        maf.n_layers         = 8
+        maf.n_layers         = 2
         maf.nn_depth         = 2
         maf.activation       = "tanh"
-        maf.use_scaling      = False # Defaults to (mu, std) of (x, y)
+        maf.use_scaling      = True # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf]
+        config.ndes          = [cnf]  
         config.n_ndes        = len(config.ndes)
-
-        # Posterior sampling
-        config.use_ema       = True # Use it and sample with it
-        config.n_steps       = 100
-        config.n_walkers     = 1000
-        config.burn          = int(0.1 * config.n_steps)
 
         # Optimisation hyperparameters (same for all NDEs...)
         config.start_step    = 0
         config.n_epochs      = 10_000
-        config.n_batch       = 50 
-        config.patience      = 20
+        config.n_batch       = 100 
+        config.patience      = 10
         config.lr            = 1e-3
-        config.opt           = "adamw" 
+        config.opt           = "adam" 
         config.opt_kwargs    = {}
     else:
         # NDEs
@@ -413,9 +410,9 @@ def cumulants_config(
         cnf.dropout_rate     = 0.
         cnf.dt               = 0.1
         cnf.t1               = 1.
-        cnf.solver           = "Euler" #dfx.Euler() 
+        cnf.solver           = "Euler"
         cnf.exact_log_prob   = True
-        cnf.use_scaling      = False # Defaults to (mu, std) of (x, y)
+        cnf.use_scaling      = True # Defaults to (mu, std) of (x, y)
 
         config.maf = maf = ConfigDict()
         maf.model_type       = "maf" # = model.__class__.__name__
@@ -423,29 +420,24 @@ def cumulants_config(
         maf.n_layers         = 8
         maf.nn_depth         = 2
         maf.activation       = "tanh"
-        maf.use_scaling      = False # Defaults to (mu, std) of (x, y)
+        maf.use_scaling      = True # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf]  
+        config.ndes          = [cnf] #maf, maf, maf]  
         config.n_ndes        = len(config.ndes)
-
-        # Posterior sampling
-        config.use_ema       = True # Use it and sample with it
-        config.n_steps       = 100
-        config.n_walkers     = 1000
-        config.burn          = int(0.1 * config.n_steps)
 
         # Optimisation hyperparameters (same for all NDEs...)
         config.start_step    = 0
         config.n_epochs      = 10_000
-        config.n_batch       = 50 
-        config.patience      = 40
+        config.n_batch       = 100 
+        config.patience      = 10
         config.lr            = 1e-3
-        config.opt           = "adamw" 
+        config.opt           = "adam" 
         config.opt_kwargs    = {}
 
     return config
 
 
+@typecheck
 def ensembles_cumulants_config(
     seed: int = 0, 
     exp_name: str = "",
@@ -459,14 +451,13 @@ def ensembles_cumulants_config(
 
     config = ConfigDict()
 
-    config.seed              = seed # Note: seed that ensemble configs run at also!
+    config.seed              = seed # NOTE: seed that ensemble configs run at also!
     config.sbi_type          = sbi_type
-    config.exp_name_format   = "z={}_m={}".format(config.redshift, "".join(map(str, config.order_idx)))
+    config.exp_name_format   = "z={}_m={}" #.format(config.redshift, "".join(map(str, config.order_idx)))
 
     config.compression       = compression
 
     # Data
-    config.bulk              = False
     config.dataset_name      = "cumulants" 
     config.redshifts         = [0.0, 0.5, 1.0] # Redshifts to combine
     config.scales            = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
@@ -475,5 +466,11 @@ def ensembles_cumulants_config(
     config.reduced_cumulants = reduced_cumulants
     config.linearised        = linearised 
     config.pre_train         = pre_train and (not linearised) # Load linearised or pre-trained models
+
+    # Posterior sampling
+    config.use_ema       = True # Use it and sample with it
+    config.n_steps       = 200
+    config.n_walkers     = 1000
+    config.burn          = int(0.1 * config.n_steps)
 
     return config

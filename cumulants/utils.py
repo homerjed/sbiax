@@ -8,18 +8,23 @@ from sbiax.utils import make_df, marker
 
 
 def plot_moments(fiducial_moments_z_R, config, results_dir):
+
+    moment_names = ["variance", "skewness", "kurtosis"]
+
+    fiducial_moments_z_R = np.clip(fiducial_moments_z_R, a_min=0., a_max=fiducial_moments_z_R.max())
+    bins = np.geomspace(fiducial_moments_z_R.min() + 1e-6, fiducial_moments_z_R.max(), 32)
+
     fig, axs = plt.subplots(
         1, len(config.order_idx), figsize=(1. + len(config.order_idx) * 3., 3.), sharex=True, sharey=True
     )
-    moment_names = ["variance", "skewness", "kurtosis"]
-    fiducial_moments_z_R = np.clip(fiducial_moments_z_R, a_min=0., a_max=fiducial_moments_z_R.max())
-    bins = np.geomspace(fiducial_moments_z_R.min() + 1e-6, fiducial_moments_z_R.max(), 8)
+
     if len(config.order_idx) == 1: axs = [axs]
     for i in config.order_idx:  
         for j in range(len(config.scales)):  
+            ix = i + j * len(config.order_idx) #(j % len(config.scales))
             axs[i].hist(
-                fiducial_moments_z_R[:, i + (j % len(config.scales))], 
-                range=[fiducial_moments_z_R.min(), fiducial_moments_z_R.max()], 
+                fiducial_moments_z_R[:, ix], 
+                range=[np.min(fiducial_moments_z_R), np.max(fiducial_moments_z_R)], 
                 bins=bins,
                 alpha=0.7, 
                 density=True,
@@ -36,18 +41,22 @@ def plot_moments(fiducial_moments_z_R, config, results_dir):
 
 
 def plot_latin_moments(latin_moments_z_R, config, results_dir):
+    moment_names = ["variance", "skewness", "kurtosis"]
+
+    latin_moments_z_R = np.clip(latin_moments_z_R, a_min=0., a_max=latin_moments_z_R.max())
+    bins = np.geomspace(latin_moments_z_R.min() + 1e-6, latin_moments_z_R.max(), 8)
+
     fig, axs = plt.subplots(
         1, len(config.order_idx), figsize=(1. + len(config.order_idx) * 3., 3.), sharex=True, sharey=True
     )
-    moment_names = ["variance", "skewness", "kurtosis"]
-    latin_moments_z_R = np.clip(latin_moments_z_R, a_min=0., a_max=latin_moments_z_R.max())
-    bins = np.geomspace(latin_moments_z_R.min() + 1e-6, latin_moments_z_R.max(), 8)
+
     if len(config.order_idx) == 1: axs = [axs]
     for i in config.order_idx:  
         for j in range(len(config.scales)):  
+            ix = i + j * len(config.order_idx) #(j % len(config.scales))
             axs[i].hist(
-                latin_moments_z_R[:, i + (j % len(config.scales))], 
-                range=[latin_moments_z_R.min(), latin_moments_z_R.max()], 
+                latin_moments_z_R[:, ix], 
+                range=[np.min(latin_moments_z_R), np.max(latin_moments_z_R)], 
                 bins=bins,
                 alpha=0.7, 
                 density=True,
