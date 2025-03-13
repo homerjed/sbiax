@@ -1,11 +1,14 @@
 import os
 from dataclasses import dataclass, replace
-from functools import partial
 from typing import Tuple, Callable, Optional
+
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-from jaxtyping import Key, PRNGKeyArray, Array, Float, jaxtyped
+from jaxtyping import PRNGKeyArray, Array, Float, jaxtyped
+
+import equinox as eqx
+import optax
 from beartype import beartype as typechecker
 import numpy as np
 from scipy.stats import qmc
@@ -17,7 +20,9 @@ import tensorflow_probability.substrates.jax.distributions as tfd
 from tqdm.auto import trange
 
 from constants import get_quijote_parameters, get_save_and_load_dirs
-from sbiax.utils import make_df, marker
+from nn import fit_nn
+from pca import PCA
+from sbiax.utils import marker
 from sbiax.compression.linear import mle
 
 typecheck = jaxtyped(typechecker=typechecker)
@@ -67,10 +72,8 @@ def get_raw_data(
     latin_pdfs = np.load(
         os.path.join(data_dir, "ALL_LATIN_CUMULANTS.npy") # (z, n, d, R)
     ) 
-    # latin_pdfs_parameters = np.load(
-        # os.path.join(data_dir, "ALL_LATIN_PDFS_PARAMETERS.npy") # (n, p)
     latin_pdfs_parameters = np.loadtxt(
-        "/project/ls-gruen/users/jed.homer/sbiaxpdf/latin_hypercube_params.txt"
+        os.path.join(data_dir, "latin_hypercube_params.txt")
     )
     derivatives = np.load(
         os.path.join(data_dir, "cumulants_derivatives_plus_minus.npy") # (n, p, z, R, pm, d)
@@ -662,8 +665,11 @@ def get_linear_compressor(
     return compressor
 
 
-def get_nn_compressor(key, D, P, data_preprocess_fn, results_dir):
+def get_nn_compressor(key, dataset, data_preprocess_fn=None, *, results_dir):
     net_key, train_key = jr.split(key)
+
+    if data_preprocess_fn is None:
+        data_preprocess_fn = lambda x: x
 
     net = eqx.nn.MLP(
         dataset.data.shape[-1], 
@@ -697,12 +703,12 @@ def get_nn_compressor(key, D, P, data_preprocess_fn, results_dir):
     return net, preprocess_fn
 
 
-def get_compression_fn(config, dataset, results_dir):
+def get_compression_fn(key, config, dataset, results_dir):
     # Get linear or neural network compressor
     if config.compression == "nn":
 
         net, preprocess_fn = get_nn_compressor(
-            key, dataset.data, dataset.parameters, results_dir=results_dir
+            key, dataset, results_dir=results_dir
         )
 
         compressor = lambda d, p: net(preprocess_fn(d)) # Ignore parameter kwarg!
@@ -733,9 +739,7 @@ def get_compression_fn(config, dataset, results_dir):
 
 @typecheck
 def get_datavector(
-    key: PRNGKeyArray, 
-    config: ConfigDict, 
-    n: int = 1, 
+    key: PRNGKeyArray, config: ConfigDict, n: int = 1
 ) -> Float[Array, "... d"]:
     """ Measurement: either Gaussian linear model or not """
 

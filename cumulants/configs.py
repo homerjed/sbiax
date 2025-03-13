@@ -1,19 +1,19 @@
 import os
+from collections import namedtuple
 from typing import Literal, Optional
 import argparse
 import yaml
 import jax.random as jr 
 from equinox import Module
-from jaxtyping import Key, PRNGKeyArray, jaxtyped
+from jaxtyping import PRNGKeyArray, jaxtyped
 from beartype import beartype as typechecker
 from ml_collections import ConfigDict
+
+from constants import get_base_results_dir, get_base_posteriors_dir
 from sbiax.ndes import CNF, MAF
 
+
 typecheck = jaxtyped(typechecker=typechecker)
-
-RESULTS_DIR = "/project/ls-gruen/users/jed.homer/sbiaxpdf/results/"
-
-POSTERIORS_DIR = "/project/ls-gruen/users/jed.homer/sbiaxpdf/results/posteriors/"
 
 
 def exists(v):
@@ -22,14 +22,6 @@ def exists(v):
 
 def default(v, d):
     return v if exists(v) else d
-
-
-def get_base_results_dir():
-    return RESULTS_DIR
-
-
-def get_base_posteriors_dir():
-    return POSTERIORS_DIR
 
 
 def save_config(config: ConfigDict, filepath: str):
@@ -57,7 +49,7 @@ def make_dirs(results_dir: str) -> None:
 def get_results_dir(config: ConfigDict, args: dict) -> str:
 
     results_dir = "{}{}{}{}{}{}{}{}".format( # Import this from a constants file
-        RESULTS_DIR,
+        get_base_results_dir(),
         "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
         (config.sbi_type + "/") if config.sbi_type else "" ,
         "linearised/" if config.linearised else "nonlinearised/",
@@ -82,7 +74,7 @@ def get_results_dir(config: ConfigDict, args: dict) -> str:
 def get_posteriors_dir(config: ConfigDict) -> str:
 
     results_dir = "{}{}{}{}{}{}{}{}".format( 
-        POSTERIORS_DIR,
+        get_base_posteriors_dir(),
         "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
         (config.sbi_type + "/") if config.sbi_type else "" ,
         "linearised/" if config.linearised else "nonlinearised/",
@@ -99,7 +91,7 @@ def get_posteriors_dir(config: ConfigDict) -> str:
 
 def get_multi_z_posterior_dir(config: ConfigDict, sbi_type: str = None) -> str:
     posterior_save_dir = "{}{}/multi_z/{}/{}{}".format(
-        POSTERIORS_DIR,
+        get_base_posteriors_dir(),
         "reduced_cumulants" if config.reduced_cumulants else "cumulants",
         config.sbi_type if (hasattr(config, sbi_type) and (config.sbi_type is not None)) else sbi_type,
         "linearised/" if config.linearised else "nonlinearised/",
@@ -113,7 +105,13 @@ def get_multi_z_posterior_dir(config: ConfigDict, sbi_type: str = None) -> str:
 """
 
 
-def get_cumulants_sbi_args():
+def args_to_namedtuple(args):
+    ArgsTuple = namedtuple("ArgsTuple", vars(args).keys())  # Create namedtuple type
+    args = ArgsTuple(**vars(args))  # Convert Namespace to namedtuple
+    return args
+
+
+def get_cumulants_sbi_args(using_notebook: bool = False):
     parser = argparse.ArgumentParser(
         description="Run SBI experiment with cumulants of the matter PDF."
     )
@@ -199,10 +197,14 @@ def get_cumulants_sbi_args():
         help="Say what's going on."
     )
     args = parser.parse_args()
+
+    if using_notebook:
+        args = args_to_namedtuple(args)
+
     return args
 
 
-def get_cumulants_multi_z_args():
+def get_cumulants_multi_z_args(using_notebook: bool = False):
     parser = argparse.ArgumentParser(
         description="Run SBI experiment with moments of the matter PDF."
     )
@@ -286,7 +288,13 @@ def get_cumulants_multi_z_args():
         action=argparse.BooleanOptionalAction, 
         help="Say what's going on."
     )
-    args = parser.parse_args()
+
+    if using_notebook:
+        args = parser.parse_args([])
+        args = args_to_namedtuple(args)
+    else:
+        args = parser.parse_args()
+
     return args
 
 

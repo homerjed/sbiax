@@ -6,9 +6,9 @@ on:
       - main
     tags:
       - '0.0.*'
-    paths:
-      - sbiax/**
-      - pyproject.toml
+    # paths:
+    #   - sbiax/**
+    #   - pyproject.toml
 
 jobs:
   test:

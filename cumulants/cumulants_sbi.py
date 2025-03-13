@@ -1,4 +1,3 @@
-import argparse
 import os
 import time
 import datetime
@@ -7,14 +6,12 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import equinox as eqx
-from jaxtyping import Key
 import optax
 
 import numpy as np 
 import matplotlib.pyplot as plt
 from chainconsumer import Chain, ChainConsumer, Truth
 from tensorflow_probability.substrates.jax.distributions import Distribution
-from ml_collections import ConfigDict
 
 from configs import (
     cumulants_config, get_results_dir, get_posteriors_dir, 
@@ -32,8 +29,6 @@ from sbiax.inference import nuts_sample
 
 from affine import affine_sample
 from utils import plot_moments, plot_latin_moments, plot_summaries, plot_fisher_summaries
-from pca import PCA
-from nn import fit_nn
 
 """ 
     Run NLE or NPE SBI with the moments of the 1pt matter PDF.
@@ -117,7 +112,7 @@ plot_latin_moments(dataset.data, config, results_dir)
 # X_whitened = (X - mean_X) @ cov_sqrt_inv
 
 scaler = Scaler(
-    X, dataset.parameters, use_scaling=config.maf.use_scaling
+    X, dataset.parameters, use_scaling=config.use_scaling
 )
 
 ndes = get_ndes_from_config(

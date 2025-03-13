@@ -3,20 +3,14 @@ import os
 import numpy as np 
 from tqdm.auto import trange
 
-from constants import get_quijote_parameters, get_save_and_load_dirs
+from constants import get_quijote_parameters, get_save_and_load_dirs, get_raw_quijote_dir
 
 """
     Get fiducial and latin moments, plus/minus derivatives
     from raw Quijote files.
+    -> raw files on cluster only
 """
 
-""" 
-    Scale derivatives like this, use autodiff for jacobian: dc/dp = dc/dm * dm/dp 
-    - Quijote calculates: (smoothing, var, mom2, mom3, mom4) where mom's are sample cumulants (kstats)
-"""
-
-quijote_dir = "/project/ls-gruen/users/jed.homer/quijote_pdfs/" 
-# quijote_dir = "/project/ls-gruen/users/jed.homer/fresh_quijote_pdfs/" 
 
 (
     data_dir, 

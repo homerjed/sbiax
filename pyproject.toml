@@ -44,7 +44,8 @@ dependencies = [
     'tensorflow_probability==0.24.0',
     'flowjax==16.0.0',
     'optuna==4.0.0',
-    'plotly==5.24.1' 
+    'plotly==5.24.1',
+    'jax-tqdm'
 ]
 
 [build-system]
