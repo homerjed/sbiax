@@ -2,13 +2,14 @@ from typing import Tuple, Optional
 from copy import deepcopy
 from dataclasses import replace
 import os
+
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-import jax.tree_util as jtu
 from jax.sharding import NamedSharding, PositionalSharding
 import equinox as eqx
 from jaxtyping import Key, PRNGKeyArray, Array, PyTree, Float, jaxtyped
+
 from beartype import beartype as typechecker
 import optax
 import numpy as np
@@ -52,7 +53,7 @@ def shard_batch(
 def apply_ema(
     ema_model: eqx.Module, 
     model: eqx.Module, 
-    ema_rate: float = 0.9999
+    ema_rate: float = 0.999
 ) -> eqx.Module:
     """
     Updates an Exponential Moving Average (EMA) model based on the current model parameters.
@@ -74,11 +75,11 @@ def apply_ema(
     ema_fn = lambda p_ema, p: p_ema * ema_rate + p * (1. - ema_rate)
     m_, _m = eqx.partition(model, eqx.is_inexact_array)
     e_, _e = eqx.partition(ema_model, eqx.is_inexact_array)
-    e_ = jtu.tree_map(ema_fn, e_, m_)
+    e_ = jax.tree.map(ema_fn, e_, m_)
     return eqx.combine(e_, _m)
 
 
-def clip_grad_norm(grads: PyTree, max_norm: float) -> PyTree:
+def clip_grad_norm(grads: PyTree, max_norm: float, eps: float = 1e-6) -> PyTree:
     """
     Clips the gradient norm of a PyTree of gradients to a specified maximum.
 
@@ -95,11 +96,11 @@ def clip_grad_norm(grads: PyTree, max_norm: float) -> PyTree:
         - Avoids division by zero by adding a small epsilon (`1e-6`) to the denominator.
     """
     norm = jnp.linalg.norm(
-        jax.tree.leaves(
-            jax.tree.map(jnp.linalg.norm, grads)
-        )
+        jax.tree.leaves(jax.tree.map(jnp.linalg.norm, grads))
     )
-    factor = jnp.minimum(max_norm, max_norm / (norm + 1e-6))
+
+    factor = jnp.minimum(max_norm, max_norm / (norm + eps))
+
     return jax.tree.map(lambda x: x * factor, grads)
 
 
@@ -111,7 +112,7 @@ def make_step(
     y: Float[Array, "b y"], 
     opt_state: PyTree,
     opt: Optimiser,
-    key: Key[jnp.ndarray, "..."],
+    key: PRNGKeyArray,
     *,
     clip_max_norm: Optional[float] = None,
     replicated_sharding: Optional[PositionalSharding] = None,
@@ -141,24 +142,30 @@ def make_step(
         - Supports distributed computations using sharding for model parameters and optimizer states.
     """
     _fn = eqx.filter_value_and_grad(batch_loss_fn)
+    
     if replicated_sharding is not None:
         nde, opt_state = eqx.filter_shard(
             (nde, opt_state), replicated_sharding
         )
+
     L, grads = _fn(nde, x, y, key=key)
+
     if clip_max_norm is not None:
         grads = clip_grad_norm(grads, clip_max_norm)
+
     updates, opt_state = opt.update(grads, opt_state, nde)
     nde = eqx.apply_updates(nde, updates)
+
     if replicated_sharding is not None:
         nde, opt_state = eqx.filter_shard(
             (nde, opt_state), replicated_sharding
         )
+
     return nde, opt_state, L 
 
 
 def count_params(nde: eqx.Module) -> int:
-    return sum(x.size for x in jtu.tree_leaves(nde) if eqx.is_array(x))
+    return sum(x.size for x in jax.tree.leaves(nde) if eqx.is_array(x))
 
 
 def get_n_split_keys(key: Key, n: int) -> Tuple[Key, PRNGKeyArray]:
@@ -168,7 +175,7 @@ def get_n_split_keys(key: Key, n: int) -> Tuple[Key, PRNGKeyArray]:
 
 @jaxtyped(typechecker=typechecker)
 def partition_and_preprocess_data(
-    key: Key[jnp.ndarray, "..."],
+    key: PRNGKeyArray,
     train_data: Tuple[Float[Array, "n x"], Float[Array, "n y"]], 
     valid_fraction: float, 
     n_batch: int, 
@@ -246,18 +253,22 @@ def partition_and_preprocess_data(
 
 @jaxtyped(typechecker=typechecker)
 def get_loaders(
-    key: Key[jnp.ndarray, "..."],
+    key: PRNGKeyArray,
     data_train: Tuple[Float[Array, "nt x"], Float[Array, "nt y"]], 
     data_valid: Tuple[Float[Array, "nv x"], Float[Array, "nv y"]], 
+    *,
     train_mode: str
 ) -> Tuple[_InMemoryDataLoader, _InMemoryDataLoader]:
+
     train_dl_key, valid_dl_key = jr.split(key)
+
     train_dataloader = _InMemoryDataLoader(
         *data_train, train_mode=train_mode, key=train_dl_key
     )
     valid_dataloader = _InMemoryDataLoader(
         *data_valid, train_mode=train_mode, key=valid_dl_key
     )
+
     return train_dataloader, valid_dataloader
 
 
@@ -281,7 +292,7 @@ def count_epochs_since_best(losses: list[float]) -> int:
 
 @jaxtyped(typechecker=typechecker)
 def train_nde(
-    key: Key[jnp.ndarray, "..."], 
+    key: PRNGKeyArray, 
     # NDE
     model: eqx.Module,
     train_mode: str,
@@ -295,6 +306,8 @@ def train_nde(
     n_batch: int = 100,
     patience: int = 50,
     clip_max_norm: Optional[float] = None,
+    use_ema: bool = False,
+    ema_rate: float = 0.999,
     # Sharding
     sharding: Optional[NamedSharding] = None,
     replicated_sharding: Optional[PositionalSharding] = None,
@@ -363,6 +376,9 @@ def train_nde(
 
     opt_state = opt.init(eqx.filter(model, eqx.is_array)) 
 
+    if use_ema:
+        ema_model = deepcopy(model)
+
     # Stats for training and NDE
     stats = get_initial_stats()
 
@@ -397,7 +413,7 @@ def train_nde(
                 xy.y, 
                 opt_state, 
                 opt, 
-                key, 
+                key=key, 
                 clip_max_norm=clip_max_norm, 
                 replicated_sharding=replicated_sharding
             )
@@ -405,6 +421,9 @@ def train_nde(
             epoch_train_loss += train_loss 
 
         stats["train_losses"].append(epoch_train_loss / (s + 1)) 
+
+        if use_ema:
+            ema_model = apply_ema(ema_model, model, ema_rate=ema_rate)
 
         # Validate 
         epoch_valid_loss = 0.
@@ -417,7 +436,11 @@ def train_nde(
                 xy = eqx.filter_shard(xy, sharding)
 
             valid_loss = batch_eval_fn(
-                model, xy.x, xy.y, key=key, replicated_sharding=replicated_sharding
+                ema_model if use_ema else model, 
+                xy.x, 
+                xy.y, 
+                key=key, 
+                replicated_sharding=replicated_sharding
             )
 
             epoch_valid_loss += valid_loss
@@ -436,11 +459,14 @@ def train_nde(
             )
 
         # Break training for any broken NDEs
-        if not jnp.isfinite(stats["valid_losses"][-1]) or not jnp.isfinite(stats["train_losses"][-1]):
+        if (
+            not jnp.isfinite(stats["valid_losses"][-1])
+        ) or (
+            not jnp.isfinite(stats["train_losses"][-1])
+        ):
             if show_tqdm:
                 epochs.set_description_str(
-                    "\nTraining terminated early at epoch {} (NaN loss).".format(epoch + 1), 
-                    # end="\n\n"
+                    "\nTraining terminated early at epoch {} (NaN loss).".format(epoch + 1)
                 )
             break
 
@@ -522,10 +548,16 @@ def train_nde(
 
     xy = sort_sample(train_mode, X, Y) # Arrange for NLE or NPE
 
-    all_valid_loss = batch_eval_fn(model, x=xy.x, y=xy.y, key=key)
+    all_valid_loss = batch_eval_fn(
+        ema_model if use_ema else model, 
+        x=xy.x, 
+        y=xy.y, 
+        key=key
+    )
+
     stats["all_valid_loss"] = all_valid_loss
 
-    return model, stats
+    return ema_model if use_ema else model, stats
 
 
 def plot_losses(ensemble, filename, fisher=False):
@@ -557,7 +589,7 @@ def plot_losses(ensemble, filename, fisher=False):
 
 
 def train_ensemble(
-    key: Key,
+    key: PRNGKeyArray,
     # NDE
     ensemble: Ensemble,
     train_mode: str,
@@ -571,6 +603,8 @@ def train_ensemble(
     n_batch: int = 100,
     patience: int = 50,
     clip_max_norm: Optional[float] = None,
+    use_ema: bool = False,
+    ema_rate: float = 0.999,
     # Sharding
     sharding: Optional[NamedSharding] = None,
     replicated_sharding: Optional[NamedSharding] = None,
@@ -635,12 +669,14 @@ def train_ensemble(
             train_mode,
             train_data,
             test_data,
-            opt,
-            valid_fraction,
-            n_epochs,
-            n_batch,
-            patience,
-            clip_max_norm,
+            opt=opt,
+            valid_fraction=valid_fraction,
+            n_epochs=n_epochs,
+            n_batch=n_batch,
+            patience=patience,
+            clip_max_norm=clip_max_norm,
+            use_ema=use_ema,
+            ema_rate=ema_rate,
             sharding=sharding,
             replicated_sharding=replicated_sharding,
             trial=trial,
@@ -660,8 +696,12 @@ def train_ensemble(
             stats[n]["all_valid_loss"] for n, _ in enumerate(ensemble.ndes)
         ]
     )
+    weights = jnp.atleast_1d(weights)
+
     ensemble = replace(ensemble, weights=weights)
 
     print("Weights:", ensemble.weights)
+
+    eqx.tree_serialise_leaves(os.path.join(results_dir, "ensemble.eqx"), ensemble)
 
     return ensemble, stats

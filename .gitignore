@@ -34,3 +34,6 @@ examples/shear_no_config.ipynb
 examples/single_layer_net.ipynb
 
 notes.txt
+
+quijote_data/
+latin_hypercube_params.txt

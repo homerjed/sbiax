@@ -16,8 +16,14 @@ from chainconsumer import Chain, ChainConsumer, Truth
 from tensorflow_probability.substrates.jax.distributions import Distribution
 from ml_collections import ConfigDict
 
-from configs import cumulants_config, get_results_dir, get_posteriors_dir, get_cumulants_sbi_args, get_ndes_from_config
-from cumulants import Dataset, get_data, get_prior, get_linear_compressor, get_datavector, get_linearised_data
+from configs import (
+    cumulants_config, get_results_dir, get_posteriors_dir, 
+    get_cumulants_sbi_args, get_ndes_from_config
+)
+from cumulants import (
+    Dataset, get_data, get_prior, 
+    get_compression_fn, get_datavector, get_linearised_data
+)
 
 from sbiax.utils import make_df, marker
 from sbiax.ndes import Scaler, Ensemble, CNF, MAF 
@@ -41,46 +47,10 @@ from nn import fit_nn
         - Default quijote is cumulants (k-stats are sample cumulants, unbiased estimators)?
 
     - scaling of inputs? summaries seem to be high magnitude ... PCA whitening?
-    - covariance c1onditioning?
-    
-    - pretraining with linear sims vs fisher summaries is the same thing?
+    - covariance conditioning?
 """ 
 
-def get_nn_compressor(key, D, P, data_preprocess_fn, results_dir):
-    net_key, train_key = jr.split(key)
-
-    net = eqx.nn.MLP(
-        dataset.data.shape[-1], 
-        dataset.parameters.shape[-1], 
-        width_size=32, 
-        depth=1, 
-        activation=jax.nn.tanh,
-        key=net_key
-    )
-
-    def preprocess_fn(x): 
-        # Preprocess with covariance?
-        return (jnp.asarray(x) - jnp.mean(dataset.data, axis=0)) / jnp.std(dataset.data, axis=0)
-
-    net, losses = fit_nn(
-        train_key, 
-        net, 
-        (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
-        opt=optax.adam(1e-3), 
-        precision=jnp.linalg.inv(dataset.Finv),
-        n_batch=500, 
-        patience=1000,
-        n_steps=50_000
-    )
-
-    plt.figure()
-    plt.loglog(losses)
-    plt.savefig(os.path.join(results_dir, "losses_nn.png"))
-    plt.close()
-
-    return net, preprocess_fn
-
-# jax.config.update("jax_enable_x64", True) # Moments require this?
+t0 = time.time()
 
 args = get_cumulants_sbi_args()
 
@@ -89,7 +59,9 @@ print("SEED:", args.seed)
 print("MOMENTS:", args.order_idx)
 print("LINEARISED:", args.linearised)
 
-t0 = time.time()
+"""
+    Config
+"""
 
 config = cumulants_config(
     seed=args.seed, 
@@ -110,51 +82,28 @@ key = jr.key(config.seed)
     key_datavector, key_state, key_sample
 ) = jr.split(key, 6)
 
-results_dir: str = get_results_dir(config, args)
+results_dir = get_results_dir(config, args)
 
-posteriors_dir: str = get_posteriors_dir(config)
+posteriors_dir = get_posteriors_dir(config)
 
 # Dataset of simulations, parameters, covariance, ...
-dataset: Dataset = get_data(config, verbose=args.verbose)
+dataset: Dataset = get_data(config, verbose=args.verbose, results_dir=results_dir)
 
 print("DATA:", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (dataset.fiducial_data, dataset.data)])
 print("DATA:", [_.shape for _ in (dataset.fiducial_data, dataset.data)])
 
 parameter_prior: Distribution = get_prior(config)
 
-# Get linear or neural network compressor
-if config.compression == "nn":
-
-    net, preprocess_fn = get_nn_compressor(
-        key, dataset.data, dataset.parameters, results_dir=results_dir
-    )
-
-    compressor = lambda d, p: net(preprocess_fn(d)) # Ignore parameter kwarg!
-
-if config.compression == "linear":
-    compressor = get_linear_compressor(config)
-
-# Fit PCA transform to simulated data and apply after compressing
-if config.use_pca:
-
-    # Compress simulations as usual 
-    X = jax.vmap(compressor)(dataset.data, dataset.parameters)
-
-    # Standardise before PCA (don't get tricked by high variance due to units)
-    X = (X - jnp.mean(X, axis=0)) / jnp.std(X, axis=0)
-
-    # Fit whitening-PCA to compressed simulations
-    pca = PCA(num_components=dataset.alpha.size) 
-    pca.fit(X) # Fit on fiducial data?
-    
-    # Reparameterize compression with both transforms
-    compression_fn = lambda d, p: pca.transform(compressor(d, p))
-else:
-    compression_fn = lambda d, p: compressor(d, p)
+"""
+    Compression
+"""
 
 # Compress simulations
+compression_fn = get_compression_fn(config, dataset, results_dir=results_dir)
+
 X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
 
+# Plot summaries
 plot_summaries(X, dataset.parameters, dataset, results_dir)
 
 plot_moments(dataset.fiducial_data, config, results_dir)
@@ -164,6 +113,8 @@ plot_latin_moments(dataset.data, config, results_dir)
 """
     Build NDEs
 """
+# cov_sqrt_inv = fractional_matrix_power(cov_X, -0.5)
+# X_whitened = (X - mean_X) @ cov_sqrt_inv
 
 scaler = Scaler(
     X, dataset.parameters, use_scaling=config.maf.use_scaling
@@ -172,8 +123,8 @@ scaler = Scaler(
 ndes = get_ndes_from_config(
     config, 
     event_dim=dataset.alpha.size, 
-    scalers=scaler, 
-    use_scalers=config.ndes[0].use_scaling, # NOTE: not to be trusted
+    scalers=scaler, # Same scaler for all NDEs 
+    use_scalers=config.use_scalers, # NOTE: not to be trusted
     key=model_key
 )
 
@@ -205,7 +156,7 @@ if (
 
     plot_fisher_summaries(X_l, Y_l, dataset, results_dir)
 
-    opt = getattr(optax, config.opt)(config.lr)
+    opt = getattr(optax, config.pretrain.opt)(config.pretrain.lr)
 
     ensemble, stats = train_ensemble(
         pre_train_key, 
@@ -213,9 +164,12 @@ if (
         train_mode=config.sbi_type,
         train_data=(data_preprocess_fn(X_l), Y_l), 
         opt=opt,
-        n_batch=config.n_batch,
-        patience=config.patience,
-        n_epochs=config.n_epochs,
+        use_ema=config.use_ema,
+        ema_rate=config.ema_rate,
+        n_batch=config.pretrain.n_batch,
+        patience=config.pretrain.patience,
+        n_epochs=config.pretrain.n_epochs,
+        valid_fraction=config.valid_fraction,
         tqdm_description="Training (pre-train)",
         show_tqdm=args.use_tqdm,
         results_dir=results_dir
@@ -292,7 +246,7 @@ if (
     Train NDE on data
 """
 
-opt = getattr(optax, config.opt)(config.lr)
+opt = getattr(optax, config.train.opt)(config.train.lr)
 
 print("Data / Parameters", [_.shape for _ in (X, dataset.parameters)])
 
@@ -302,17 +256,18 @@ ensemble, stats = train_ensemble(
     train_mode=config.sbi_type,
     train_data=(data_preprocess_fn(X), dataset.parameters), 
     opt=opt,
-    n_batch=config.n_batch,
-    patience=config.patience,
-    n_epochs=config.n_epochs,
+    use_ema=config.use_ema,
+    ema_rate=config.ema_rate,
+    n_batch=config.train.n_batch,
+    patience=config.train.patience,
+    n_epochs=config.train.n_epochs,
+    valid_fraction=config.valid_fraction,
     tqdm_description="Training (data)",
     show_tqdm=args.use_tqdm,
     results_dir=results_dir
 )
 
 print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None)
-
-eqx.tree_serialise_leaves(os.path.join(results_dir, "ensemble.eqx"), ensemble)
 
 """ 
     Sample and plot posterior for NDE with noisy datavectors
@@ -390,10 +345,11 @@ if 1:
         fig = c.plotter.plot()
         fig.suptitle(
             r"$k_n/k_2^{n-1}$ SBI & $F_{{\Sigma}}^{{-1}}$" + "\n" +
-            r"(z={}, R={} Mpc, $k_n$={})".format(
+            r"z={},\n $n_s$={},\n R={} Mpc,\n $k_n$={}".format(
                 config.redshift, 
+                config.n_linear_sims, 
                 "[{}]".format(", ".join(map(str, config.scales))),
-                ", ".join(map(str, [["var.", "skew.", "kurt."][_] for _ in config.order_idx]))
+                "[{}]".format(",".join(map(str, [["var.", "skew.", "kurt."][_] for _ in config.order_idx])))
                 ),
             multialignment='center'
         )
@@ -405,7 +361,7 @@ if 1:
         print("(!) Shit posterior")
         pass
 
-if 1:
+if 0:
     try:
         # BLACKJAX SAMPLE IS FUNNY WITH float64
         samples, samples_log_prob = nuts_sample(
@@ -455,10 +411,11 @@ if 1:
         fig = c.plotter.plot()
         fig.suptitle(
             r"$k_n/k_2^{n-1}$ SBI & $F_{{\Sigma}}^{{-1}}$" + "\n" +
-            r"(z={}, R={} Mpc, $k_n$={})".format(
+            r"z={},\n $n_s$={},\n R={} Mpc,\n $k_n$={}".format(
                 config.redshift, 
+                config.n_linear_sims, 
                 "[{}]".format(", ".join(map(str, config.scales))),
-                ", ".join(map(str, [["var.", "skew.", "kurt."][_] for _ in config.order_idx]))
+                "[{}]".format(",".join(map(str, [["var.", "skew.", "kurt."][_] for _ in config.order_idx])))
                 ),
             multialignment='center'
         )
@@ -468,20 +425,4 @@ if 1:
         print("(!) Shit posterior")
         pass
 
-print(f"Time={(time.time() - t0) / 60.:.1} mins.")
-
-
-# # Generates datavector d ~ G[d|xi[pi], Sigma]
-# mu = fiducial_pdfs.mean(axis=0)
-# datavector = jr.multivariate_normal(key, mean=mu, cov=C)
-# # datavector = fiducial_pdfs[0]
-
-# Chi^2 min would be performed for each different universe where alpha is sampled
-# X_ = _mle(
-#     datavector,
-#     pi=alpha,
-#     Finv=Finv, 
-#     mu=mu, 
-#     dmu=derivatives.mean(axis=0), 
-#     precision=Cinv
-# )
+print("Time={:.1} mins.".format((time.time() - t0) / 60.))

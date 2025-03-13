@@ -21,10 +21,7 @@ def default(v, d):
     return v if exists(v) else d
 
 
-def default_weights(
-    weights: Float[Array, "n"], 
-    ndes: list[eqx.Module]
-) -> Float[Array, "n"]:
+def default_weights(weights: Float[Array, "n"], ndes: list[eqx.Module]) -> Float[Array, "n"]:
     assert len(ndes) > 0
     return weights if exists(weights) else jnp.ones((len(ndes),)) / len(ndes)
 
@@ -60,10 +57,9 @@ class Ensemble(eqx.Module):
             Get log-probability function for NDE at given observation.
         """
         def _nde_log_prob_fn(
-            theta: Float[Array, "p"], 
-            key: Optional[PRNGKeyArray] = None
+            theta: Float[Array, "p"], key: Optional[PRNGKeyArray] = None
         ) -> Scalar: 
-            if  self.sbi_type == "nle":
+            if self.sbi_type == "nle":
                 l = nde.log_prob(x=data, y=theta, key=key) + prior.prior.log_prob(theta)
             else:
                 l = nde.log_prob(x=theta, y=data, key=key)
@@ -88,6 +84,7 @@ class Ensemble(eqx.Module):
             nde: eqx.Module, 
             data: Float[Array, "d"] | Float[Array, "n d"], 
             theta: Float[Array, "p"], 
+            *,
             key: Optional[PRNGKeyArray] = None
         ) -> Scalar:
             # Add log-likelihoods of datavectors together 
@@ -111,8 +108,7 @@ class Ensemble(eqx.Module):
         if self.sbi_type == "nle":
             @typecheck
             def _joint_log_prob_fn(
-                theta: Float[Array, "p"], 
-                key: Optional[PRNGKeyArray] = None
+                theta: Float[Array, "p"], key: Optional[PRNGKeyArray] = None
             ) -> Scalar:
                 L = jnp.zeros(())
                 for n, (nde, weight) in enumerate(zip(self.ndes, self.weights)): # NOTE: lax.scan
@@ -120,7 +116,7 @@ class Ensemble(eqx.Module):
                     if exists(key):
                         key = jr.fold_in(key, n)
 
-                    nde_log_L = _maybe_vmap_nde_log_L(nde, data, theta, key) 
+                    nde_log_L = _maybe_vmap_nde_log_L(nde, data, theta, key=key) 
 
                     # Add likelihoods together for ensemble ndes
                     L_nde = weight * jnp.exp(nde_log_L) # NOTE: weight inside log-prob fun?! weighting doesn't distribute over batches of datavecotrs?
@@ -141,11 +137,16 @@ class Ensemble(eqx.Module):
             ) -> Scalar:
                 L = jnp.zeros(())
                 for n, (nde, weight) in enumerate(zip(self.ndes, self.weights)):
+
                     if exists(key):
                         key = jr.fold_in(key, n)
+
                     nde_log_L = nde.log_prob(x=theta, y=data, key=key)
+
                     L_nde = weight * jnp.exp(nde_log_L)
+
                     L = L + L_nde
+
                 return jnp.log(L) 
 
         return _joint_log_prob_fn
@@ -169,7 +170,7 @@ class Ensemble(eqx.Module):
         nde_Ls = jnp.array([-losses[n] for n, _ in enumerate(self.ndes)])
         nde_weights = jnp.exp(nde_Ls) / jnp.sum(jnp.exp(nde_Ls)) #jax.nn.softmax(Ls)
         assert nde_weights.shape == (self.n_ndes,)
-        return nde_weights
+        return jnp.atleast_1d(nde_weights)
 
     def save_ensemble(self, path: str) -> None:
         eqx.tree_serialise_leaves(path, self)
@@ -210,12 +211,15 @@ class MultiEnsemble(eqx.Module):
         def _multi_ensemble_log_prob_fn(theta: Float[Array, "p"]) -> Scalar:
             # Loop over matched ensembles / datavectors NOTE: vmap over datavectors (when have multiple per redshift)?
             L = jnp.zeros(())
+
             # Don't need this loop? tree map or something?
             for ensemble, _datavectors in zip(self.ensembles, datavectors):
                 ensemble_log_L = ensemble.ensemble_likelihood(_datavectors)(theta) 
                 L = L + ensemble_log_L
+
             if self.sbi_type == "nle":
                 L = L + _prior.log_prob(theta) # NOTE: only if NLE!
+
             return L 
 
         return _multi_ensemble_log_prob_fn
@@ -232,58 +236,3 @@ class MultiEnsemble(eqx.Module):
 
     def load_ensemble(self, path: str) -> Self:
         return eqx.tree_deserialise_leaves(path, self)
-
-"""
-    @typecheck
-    def _ensemble_log_prob_fn(
-        self, 
-        datavectors: list[Float[Array, "n d"]] | Float[Array, "n d"], 
-        prior: Optional[Distribution] = None
-    ) -> LogProbFn:
-
-        # if datavectors is a list, jax.tree_map(lambda x: nde.log_prob(x=x, y=theta, key=key))
-        # > assert isinstance(datavectors, list[Array, ...])
-        # if its an array, check if it has a 'batch dim' 
-        # 
-
-        if self.sbi_type == "nle":
-
-            # def _joint_log_prob_fn(theta, key=None):
-            #     Ls = jax.tree_map(
-            #         lambda nde, x: jnp.exp(nde.log_prob(x=x, y=theta, key=key)), self.ndes
-            #     )
-            #     return Ls
-
-            @typecheck
-            def _joint_log_prob_fn(
-                theta: Float[Array, "p"], key: Optional[PRNGKeyArray] = None
-            ) -> Scalar:
-                L = 0.
-                for n, (nde, weight) in enumerate(zip(self.ndes, self.weights)):
-                    if key is not None:
-                        key = jr.fold_in(key, n)
-                    nde_log_L = nde.log_prob(x=data, y=theta, key=key)
-                    L_nde = weight * jnp.exp(nde_log_L)
-                    L = L + L_nde
-                L = jnp.log(L) 
-                if prior is not None:
-                    L = L + prior.log_prob(theta)
-                return L
-
-        if self.sbi_type == "npe":
-            @typecheck
-            def _joint_log_prob_fn(
-                theta: Float[Array, "p"], key: Optional[PRNGKeyArray] = None
-            ) -> Scalar:
-                L = 0.
-                for n, (nde, weight) in enumerate(zip(self.ndes, self.weights)):
-                    if key is not None:
-                        key = jr.fold_in(key, n)
-                    nde_log_L = nde.log_prob(x=theta, y=data, key=key)
-                    L_nde = weight * jnp.exp(nde_log_L)
-                    L = L + L_nde
-                return jnp.log(L) 
-
-        return _joint_log_prob_fn
-
-"""

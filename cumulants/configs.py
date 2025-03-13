@@ -43,6 +43,11 @@ def load_config(filepath: str) -> ConfigDict:
     return ConfigDict(config_dict)
 
 
+"""
+    Save & load directories
+"""
+
+
 def make_dirs(results_dir: str) -> None:
     if not os.path.exists(results_dir):
         os.makedirs(results_dir, exist_ok=True)
@@ -76,7 +81,7 @@ def get_results_dir(config: ConfigDict, args: dict) -> str:
 
 def get_posteriors_dir(config: ConfigDict) -> str:
 
-    results_dir = "{}{}{}{}{}{}{}{}".format( # Import this from a constants file
+    results_dir = "{}{}{}{}{}{}{}{}".format( 
         POSTERIORS_DIR,
         "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
         (config.sbi_type + "/") if config.sbi_type else "" ,
@@ -101,6 +106,11 @@ def get_multi_z_posterior_dir(config: ConfigDict, sbi_type: str = None) -> str:
         "pretrain/" if config.pre_train else ""
     )
     return posterior_save_dir
+
+
+"""
+    CLI args 
+"""
 
 
 def get_cumulants_sbi_args():
@@ -280,6 +290,11 @@ def get_cumulants_multi_z_args():
     return args
 
 
+"""
+    Configs
+"""
+
+
 @typecheck
 def get_ndes_from_config(
     config: ConfigDict, 
@@ -349,23 +364,27 @@ def cumulants_config(
     config.linearised         = linearised
     config.covariance_epsilon = None # 1e-6
     config.reduced_cumulants  = reduced_cumulants
-    # config.nonlinearised      = nonlinearised
     config.pre_train          = pre_train and (not linearised)
     config.n_linear_sims      = n_linear_sims # This is for pre-train or linearised simulations 
     config.use_expectation    = False # Noiseless datavector
+    config.valid_fraction     = 0.1
 
+    # Miscallaneous
+    config.use_scalers        = True # Input scalers for (xi, pi) in NDEs (NOTE: checked that scalings aren't optimised!)
     config.use_pca            = False # Need to add this into other scripts...
+    config.ema_rate           = 0.995
+    config.use_ema            = False # Use it and sample with it
 
     # SBI
-    config.sbi_type      = sbi_type
+    config.sbi_type           = sbi_type
 
-    config.exp_name      = "z={}_m={}".format(config.redshift, "".join(map(str, config.order_idx)))
+    # Experiments
+    config.exp_name           = "z={}_m={}".format(config.redshift, "".join(map(str, config.order_idx)))
 
     # Posterior sampling
-    config.use_ema       = False # Use it and sample with it
-    config.n_steps       = 200
-    config.n_walkers     = 1000
-    config.burn          = int(0.1 * config.n_steps)
+    config.n_steps            = 100
+    config.n_walkers          = 1000
+    config.burn               = int(0.1 * config.n_steps)
 
     if config.linearised:
         # NDEs
@@ -389,23 +408,24 @@ def cumulants_config(
         maf.activation       = "tanh"
         maf.use_scaling      = True # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [cnf]  
+        config.ndes          = [cnf]#, cnf, cnf]  
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
-        config.start_step    = 0
-        config.n_epochs      = 10_000
-        config.n_batch       = 100 
-        config.patience      = 10
-        config.lr            = 1e-3
-        config.opt           = "adam" 
-        config.opt_kwargs    = {}
+        config.train = train = ConfigDict()
+        train.start_step     = 0
+        train.n_epochs       = 10_000
+        train.n_batch        = 100 
+        train.patience       = 100
+        train.lr             = 1e-3
+        train.opt            = "adam" 
+        train.opt_kwargs     = {}
     else:
         # NDEs
         config.cnf = cnf = ConfigDict()
         cnf.model_type       = "cnf"
-        cnf.width_size       = 32
-        cnf.depth            = 2
+        cnf.width_size       = 8 
+        cnf.depth            = 0
         cnf.activation       = "tanh"
         cnf.dropout_rate     = 0.
         cnf.dt               = 0.1
@@ -422,17 +442,27 @@ def cumulants_config(
         maf.activation       = "tanh"
         maf.use_scaling      = True # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [cnf] #maf, maf, maf]  
+        config.ndes          = [cnf]#, cnf, cnf] #maf, maf, maf]  
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
-        config.start_step    = 0
-        config.n_epochs      = 10_000
-        config.n_batch       = 100 
-        config.patience      = 10
-        config.lr            = 1e-3
-        config.opt           = "adam" 
-        config.opt_kwargs    = {}
+        config.pretrain = pretrain = ConfigDict()
+        pretrain.start_step  = 0
+        pretrain.n_epochs    = 10_000
+        pretrain.n_batch     = 100 
+        pretrain.patience    = 10
+        pretrain.lr          = 1e-3
+        pretrain.opt         = "adam" 
+        pretrain.opt_kwargs  = {}
+
+        config.train = train = ConfigDict()
+        train.start_step     = 0
+        train.n_epochs       = 10_000
+        train.n_batch        = 100 
+        train.patience       = 10
+        train.lr             = 1e-3
+        train.opt            = "adam" 
+        train.opt_kwargs     = {}
 
     return config
 
@@ -467,10 +497,11 @@ def ensembles_cumulants_config(
     config.linearised        = linearised 
     config.pre_train         = pre_train and (not linearised) # Load linearised or pre-trained models
 
+    config.use_ema           = True # Use it and sample with it
+
     # Posterior sampling
-    config.use_ema       = True # Use it and sample with it
-    config.n_steps       = 200
-    config.n_walkers     = 1000
-    config.burn          = int(0.1 * config.n_steps)
+    config.n_steps           = 200
+    config.n_walkers         = 1000
+    config.burn              = int(0.1 * config.n_steps)
 
     return config

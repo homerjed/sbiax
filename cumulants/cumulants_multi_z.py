@@ -106,7 +106,6 @@ def get_z_config_and_datavector(
     key_datavector, key_model = jr.split(key)
 
     # Get config and change redshift to load each ensemble and datavector
-    # config_z = cumulants_config(seed=seed,)
     config_z = cumulants_config(
         seed=args.seed, 
         redshift=redshift, 
@@ -128,7 +127,7 @@ def get_z_config_and_datavector(
     config_z.reduced_cumulants = reduced_cumulants
     config_z.compression = compression
 
-    # Get datas, compressor
+    # Get dataset, compressor
     dataset: Dataset = get_data(config_z)
 
     compressor = get_linear_compressor(config_z)
@@ -156,8 +155,8 @@ def get_z_config_and_datavector(
     if datavectors.ndim == 1:
         datavectors = datavectors[jnp.newaxis, ...]
 
-    # Compressed datavector
-    x_ = jax.vmap(s, in_axes=(0, None))(datavectors, dataset.alpha) # NOTE: at true parameters
+    # Compressed datavectors (each simulated at alpha parameters)
+    x_ = jax.vmap(compression_fn, in_axes=(0, None))(datavectors, dataset.alpha) # NOTE: at true parameters
 
     # Compress whole simulation dataset 
     X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
@@ -182,7 +181,7 @@ def get_z_config_and_datavector(
     )
     ensemble = eqx.tree_deserialise_leaves(ensemble_path, ensemble)
 
-    # Quijote prior (same for all z)
+    # Quijote prior (same for all z, only applied once with combined z-likelihoods)
     prior = get_prior(config_z) 
 
     return (

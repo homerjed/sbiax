@@ -249,7 +249,9 @@ def remove_nuisances(dataset: Dataset) -> Dataset:
     return dataset
 
 
-def get_moment_data(config: ConfigDict, *, verbose: bool = False) -> Dataset:
+def get_cumulant_data(
+    config: ConfigDict, *, verbose: bool = False, results_dir: Optional[str] = None
+) -> Dataset:
 
     data_dir, *_ = get_save_and_load_dirs()
 
@@ -321,6 +323,9 @@ def get_moment_data(config: ConfigDict, *, verbose: bool = False) -> Dataset:
 
     # Condition number regularisation
     if config.covariance_epsilon is not None:
+        if verbose:
+            print("Covariance conditioning...")
+
         L = jnp.trace(C) / data_dim * config.covariance_epsilon
 
         # U, S, Vt = jnp.linalg.svd(C)
@@ -330,32 +335,16 @@ def get_moment_data(config: ConfigDict, *, verbose: bool = False) -> Dataset:
         C = jnp.identity(data_dim) * L + C
 
     assert np.all(np.isfinite(C)), "Bad covariance."
-    assert derivatives.ndim == 3, "Do derivatives have batch axis? Required."
+    assert derivatives.shape[:-1] == (500, 5), "Do derivatives have batch axis? Required."
 
     H = hartlap(n_fiducial_pdfs, data_dim)
-    # Cinv = H * np.linalg.inv(C)
-    Cinv = np.linalg.inv(C)
-    # Cinv = jnp.linalg.svd(C) * H
+    Cinv = H * np.linalg.inv(C) # Cinv = jnp.linalg.svd(C) * H
 
     # Fisher information matrix, all scales, one redshift
     dmu = np.mean(derivatives, axis=0)
     F = np.linalg.multi_dot([dmu, Cinv, dmu.T])
     Finv = np.linalg.inv(F)
 
-    if verbose:
-        corr_matrix = np.corrcoef(fiducial_moments_z_R, rowvar=False) + 1e-6 # Log colouring
-
-        print("Covariance condition number: {:.3E}".format(jnp.linalg.cond(C)))
-        print("Dtype of moments", fiducial_moments_z_R.dtype)
-
-        plt.figure()
-        norm = mcolors.LogNorm(vmin=np.min(corr_matrix[corr_matrix > 0]), vmax=np.max(corr_matrix)) 
-        plt.imshow(corr_matrix, norm=norm)
-        plt.colorbar()
-        plt.axis("off")
-        plt.savefig("moments_corr_matrix.png", bbox_inches="tight")
-        plt.close()
-     
     dataset = Dataset(
         alpha=jnp.asarray(alpha),
         lower=jnp.asarray(lower),
@@ -371,6 +360,31 @@ def get_moment_data(config: ConfigDict, *, verbose: bool = False) -> Dataset:
     )
 
     if verbose:
+        corr_matrix = np.corrcoef(fiducial_moments_z_R, rowvar=False) + 1e-6 # Log colouring
+
+        print("Covariance condition number: {:.3E}".format(jnp.linalg.cond(C)))
+        print("Dtype of moments", fiducial_moments_z_R.dtype)
+
+        plt.figure()
+        norm = mcolors.LogNorm(vmin=np.min(corr_matrix[corr_matrix > 0]), vmax=np.max(corr_matrix)) 
+        plt.imshow(corr_matrix, norm=norm, cmap="bwr")
+        plt.colorbar()
+        plt.axis("off")
+        plt.savefig("moments_corr_matrix_log.png", bbox_inches="tight")
+        plt.close()
+
+        plt.figure()
+        plt.imshow(corr_matrix, cmap="bwr", vmin=-1., vmax=1.)
+        plt.colorbar()
+        plt.axis("off")
+        plt.savefig(
+            os.path.join(
+                results_dir if results_dir is not None else "", "moments_corr_matrix.png"
+            ), 
+            bbox_inches="tight"
+        )
+        plt.close()
+
         # Plot Fisher forecast
         c = ChainConsumer()
         c.add_chain(
@@ -391,12 +405,15 @@ def get_moment_data(config: ConfigDict, *, verbose: bool = False) -> Dataset:
         )
         fig = c.plotter.plot()
         plt.savefig(
-            "fisher_forecasts/fisher_forecast_{}_z={}_R={}_m={}.png".format(
-                config.linearised, 
-                config.redshift, 
-                "".join(map(str, config.order_idx)),
-                "".join(map(str, config.scales))
-            )
+            os.path.join(
+                results_dir if results_dir is not None else "fisher_forecasts/", 
+                "fisher_forecast_{}_z={}_R={}_m={}.png".format(
+                    config.linearised, 
+                    config.redshift, 
+                    "".join(map(str, config.order_idx)),
+                    "".join(map(str, config.scales))
+                )
+            ), 
         )
         plt.close()
 
@@ -494,7 +511,7 @@ def get_linearised_data(
 
     key_parameters, key_simulations = jr.split(key)
 
-    dataset: Dataset = get_moment_data(config)
+    dataset: Dataset = get_cumulant_data(config)
 
     if config.n_linear_sims is not None:
         Y = sample_prior(
@@ -504,6 +521,8 @@ def get_linearised_data(
             dataset.lower, 
             dataset.upper
         )
+    else:
+        Y = dataset.parameters
 
     assert dataset.derivatives.ndim == 3, (
         "Do derivatives [{}] have batch axis? Required.".format(dataset.derivatives.shape)
@@ -512,10 +531,7 @@ def get_linearised_data(
     dmu = jnp.mean(dataset.derivatives, axis=0)
     mu = jnp.mean(dataset.fiducial_data, axis=0)
 
-    def _simulator(
-        key: PRNGKeyArray, 
-        pi: Float[Array, "p"]
-    ) -> Float[Array, "d"]:
+    def _simulator(key: PRNGKeyArray, pi: Float[Array, "p"]) -> Float[Array, "d"]:
         # Data model with linearised expectation
         _mu = linearised_model(alpha=dataset.alpha, alpha_=pi, mu=mu, dmu=dmu)
         return jr.multivariate_normal(key, mean=_mu, cov=dataset.C)
@@ -544,7 +560,7 @@ def get_nonlinearised_data(
 
     # NOTE: This is not simply returning fiducials, latins from Quijote...
     if 0:
-        dataset: Dataset = get_moment_data(config)
+        dataset: Dataset = get_cumulant_data(config)
 
         if config.n_linear_sims is not None:
             Y = sample_prior(
@@ -575,7 +591,7 @@ def get_nonlinearised_data(
         D = jax.vmap(_simulator)(keys, dataset.fiducial_data[:len(Y)], Y) 
 
     # Use latin dataset straight out of Quijote
-    dataset: Dataset = get_moment_data(config)
+    dataset: Dataset = get_cumulant_data(config)
 
     # Default dataset is non-linear Quijote data
     D = dataset.data
@@ -584,14 +600,16 @@ def get_nonlinearised_data(
     return D, Y 
 
 
-def get_data(config: ConfigDict, *, verbose: bool = False) -> Dataset:
+def get_data(config: ConfigDict, *, verbose: bool = False, results_dir: Optional[str] = None) -> Dataset:
     """ 
         Get data for linearised-model data or full simulation data. 
         - Start with Quijote default data; linearise or nonlinearise 
           if required
     """
 
-    dataset: Dataset = get_moment_data(config, verbose=verbose)
+    dataset: Dataset = get_cumulant_data(
+        config, verbose=verbose, results_dir=results_dir
+    )
 
     if hasattr(config, "linearised"):
         if config.linearised:
@@ -642,6 +660,75 @@ def get_linear_compressor(
         return p_
 
     return compressor
+
+
+def get_nn_compressor(key, D, P, data_preprocess_fn, results_dir):
+    net_key, train_key = jr.split(key)
+
+    net = eqx.nn.MLP(
+        dataset.data.shape[-1], 
+        dataset.parameters.shape[-1], 
+        width_size=32, 
+        depth=1, 
+        activation=jax.nn.tanh,
+        key=net_key
+    )
+
+    def preprocess_fn(x): 
+        # Preprocess with covariance?
+        return (jnp.asarray(x) - jnp.mean(dataset.data, axis=0)) / jnp.std(dataset.data, axis=0)
+
+    net, losses = fit_nn(
+        train_key, 
+        net, 
+        (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
+        opt=optax.adam(1e-3), 
+        precision=jnp.linalg.inv(dataset.Finv),
+        n_batch=500, 
+        patience=1000,
+        n_steps=50_000
+    )
+
+    plt.figure()
+    plt.loglog(losses)
+    plt.savefig(os.path.join(results_dir, "losses_nn.png"))
+    plt.close()
+
+    return net, preprocess_fn
+
+
+def get_compression_fn(config, dataset, results_dir):
+    # Get linear or neural network compressor
+    if config.compression == "nn":
+
+        net, preprocess_fn = get_nn_compressor(
+            key, dataset.data, dataset.parameters, results_dir=results_dir
+        )
+
+        compressor = lambda d, p: net(preprocess_fn(d)) # Ignore parameter kwarg!
+
+    if config.compression == "linear":
+        compressor = get_linear_compressor(config)
+
+    # Fit PCA transform to simulated data and apply after compressing
+    if config.use_pca:
+
+        # Compress simulations as usual 
+        X = jax.vmap(compressor)(dataset.data, dataset.parameters)
+
+        # Standardise before PCA (don't get tricked by high variance due to units)
+        X = (X - jnp.mean(X, axis=0)) / jnp.std(X, axis=0)
+
+        # Fit whitening-PCA to compressed simulations
+        pca = PCA(num_components=dataset.alpha.size) 
+        pca.fit(X) # Fit on fiducial data?
+        
+        # Reparameterize compression with both transforms
+        compression_fn = lambda d, p: pca.transform(compressor(d, p))
+    else:
+        compression_fn = lambda d, p: compressor(d, p)
+
+    return compression_fn 
 
 
 @typecheck
