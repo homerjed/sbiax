@@ -112,7 +112,7 @@ plot_latin_moments(dataset.data, config, results_dir)
 # X_whitened = (X - mean_X) @ cov_sqrt_inv
 
 scaler = Scaler(
-    X, dataset.parameters, use_scaling=config.use_scaling
+    X, dataset.parameters, use_scaling=config.use_scalers
 )
 
 ndes = get_ndes_from_config(

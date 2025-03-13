@@ -252,6 +252,32 @@ def remove_nuisances(dataset: Dataset) -> Dataset:
     return dataset
 
 
+@typecheck
+def calculate_derivatives(
+    derivatives_pm: Float[np.ndarray, "500 5 z R 2 d"], 
+    alpha: Float[np.ndarray, "p"], 
+    dparams: Float[np.ndarray, "p"], 
+    parameter_strings: list[str], 
+    parameter_derivative_names: list[list[str]], 
+    *, 
+    verbose: bool = False
+) -> Float[np.ndarray, "500 5 z R d"]:
+
+    derivatives = derivatives_pm[..., 1, :] - derivatives_pm[..., 0, :] 
+
+    for p in range(alpha.size):
+        if verbose:
+            print(
+                "Parameter strings / dp / dp_name", 
+                parameter_strings[p], dparams[p], parameter_derivative_names[p]
+            )
+        derivatives[:, p, ...] = derivatives[:, p, ...] / dparams[p] # NOTE: OK before or after reducing cumulants
+
+    assert derivatives.ndim == 5, "{}".format(derivatives.shape)
+
+    return derivatives
+
+
 def get_cumulant_data(
     config: ConfigDict, *, verbose: bool = False, results_dir: Optional[str] = None
 ) -> Dataset:
@@ -292,16 +318,14 @@ def get_cumulant_data(
     ) = get_raw_data(data_dir, verbose=verbose)
 
     # Euler derivative from plus minus statistics (NOTE: derivatives: Float[np.ndarray, "500 p z R 2 d"])
-    derivatives = derivatives[..., 1, :] - derivatives[..., 0, :] 
-    for p in range(alpha.size):
-        if verbose:
-            print(
-                "Parameter strings / alpha / dp / dp_name", 
-                parameter_strings[p], alpha[p], dparams[p], parameter_derivative_names[p]
-            )
-        derivatives[:, p, ...] = derivatives[:, p, ...] / dparams[p] # NOTE: OK before or after reducing cumulants
-
-    assert derivatives.ndim == 5, "{}".format(derivatives.shape)
+    derivatives = calculate_derivatives(
+        derivatives, 
+        alpha, 
+        dparams, 
+        parameter_strings, 
+        parameter_derivative_names, 
+        verbose=verbose
+    )
 
     # Grab and stack by redshift and scales
     (
@@ -467,7 +491,7 @@ def sample_prior(
     lower = lower.astype(jnp.float32)
     upper = upper.astype(jnp.float32)
 
-    assert jnp.all(upper - lower > 0.)
+    assert jnp.all((upper - lower) > 0.)
 
     keys_p = jr.split(key, alpha.size)
 
@@ -648,7 +672,8 @@ def get_linear_compressor(
     mu = jnp.mean(dataset.fiducial_data, axis=0)
     dmu = jnp.mean(dataset.derivatives, axis=0)
 
-    def compressor(d, p): 
+    @typecheck
+    def compressor(d: Float[Array, "d"], p: Float[Array, "p"]) -> Float[Array, "p"]: 
         mu_p = linearised_model(
             alpha=dataset.alpha, alpha_=p, mu=mu, dmu=dmu
         )
@@ -703,7 +728,7 @@ def get_nn_compressor(key, dataset, data_preprocess_fn=None, *, results_dir):
     return net, preprocess_fn
 
 
-def get_compression_fn(key, config, dataset, results_dir):
+def get_compression_fn(key, config, dataset, *, results_dir):
     # Get linear or neural network compressor
     if config.compression == "nn":
 

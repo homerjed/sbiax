@@ -334,7 +334,7 @@ def get_ndes_from_config(
             event_dim=event_dim, 
             context_dim=context_dim if (context_dim is not None) else event_dim, 
             key=key,
-            scaler=scaler if use_scalers else None,
+            scaler=scaler if (nde.use_scaling and use_scalers) else None,
             **dict(nde)
         )
         nde_dict.pop("model_type")
@@ -458,7 +458,7 @@ def cumulants_config(
         pretrain.start_step  = 0
         pretrain.n_epochs    = 10_000
         pretrain.n_batch     = 100 
-        pretrain.patience    = 10
+        pretrain.patience    = 100
         pretrain.lr          = 1e-3
         pretrain.opt         = "adam" 
         pretrain.opt_kwargs  = {}
@@ -467,8 +467,8 @@ def cumulants_config(
         train.start_step     = 0
         train.n_epochs       = 10_000
         train.n_batch        = 100 
-        train.patience       = 10
-        train.lr             = 1e-3
+        train.patience       = 100
+        train.lr             = 1e-4
         train.opt            = "adam" 
         train.opt_kwargs     = {}
 

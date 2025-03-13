@@ -532,7 +532,9 @@ def train_nde(
     plt.legend()
     if results_dir is not None:
         plt.savefig(os.path.join(results_dir, "losses.png"))
-    plt.close()
+        plt.close()
+    else:
+        plt.show()
 
     # Save NDE model
     if results_dir is not None:
@@ -702,6 +704,7 @@ def train_ensemble(
 
     print("Weights:", ensemble.weights)
 
-    eqx.tree_serialise_leaves(os.path.join(results_dir, "ensemble.eqx"), ensemble)
+    if results_dir is not None:
+        eqx.tree_serialise_leaves(os.path.join(results_dir, "ensemble.eqx"), ensemble)
 
     return ensemble, stats

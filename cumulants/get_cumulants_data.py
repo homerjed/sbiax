@@ -11,6 +11,7 @@ from constants import get_quijote_parameters, get_save_and_load_dirs, get_raw_qu
     -> raw files on cluster only
 """
 
+quijote_dir = get_raw_quijote_dir()
 
 (
     data_dir, 
@@ -88,7 +89,7 @@ for n in trange(n_fiducials, desc="Fiducials"):
         ALL_FIDUCIAL_CUMULANTS[n_z, n, :, :] = cumulants_n[:, n_moments_start:]
         
 np.save(
-    os.path.join(data_dir, f"ALL_FIDUCIAL_CUMULANTS.npy"), 
+    os.path.join(data_dir, "ALL_FIDUCIAL_CUMULANTS.npy"), 
     ALL_FIDUCIAL_CUMULANTS
 )
 print("\nDONE.")
@@ -124,7 +125,7 @@ for n in trange(n_latins, desc="Latins"):
         ALL_LATIN_CUMULANTS[n_z, n, :, :] = cumulants_n[:, n_moments_start:]
 
 np.save(
-    os.path.join(data_dir, f"ALL_LATIN_CUMULANTS.npy"), 
+    os.path.join(data_dir, "ALL_LATIN_CUMULANTS.npy"), 
     ALL_LATIN_CUMULANTS
 )
 print("\nDONE.")
@@ -176,54 +177,8 @@ if len(bad_idx) > 0:
 
 # Derivatives: plus and minus, all scales and redshifts
 np.save(
-    os.path.join(data_dir, f"cumulants_derivatives_plus_minus.npy"), 
+    os.path.join(data_dir, "cumulants_derivatives_plus_minus.npy"), 
     derivatives
 )
 print("Derivatives:", derivatives.shape)
 print("Done.")
-
-
-"""
-# Each realisation's derivative
-for n_d in range(n_derivatives):
-
-    for n_z, z in enumerate(redshifts):
-        # Each parameter
-        z_string = redshift_strings[n_z]
-
-        for p, parameter_derivative in enumerate(parameter_derivative_names):
-
-            # Each plus/minus derivative (minus derivative is first, then plus derivative)
-            for pm, p_or_m in enumerate(parameter_derivative):
-
-                # Directory of a realisation with all parameter derivatives in
-                derivative_dir = os.path.join(derivatives_dir, p_or_m, str(n_d) + "/")
-
-                for R, R_value in enumerate(R_values):
-                    # Derivative of pdf w.r.t. param
-                    msg = f"\rderivatives: z={redshifts[0]:.1f} ({z_string}) R={R_value} n_d={n_d:04d}"
-                    try:
-                        d_cumulant_dparam = np.loadtxt(
-                            os.path.join(
-                                derivative_dir, f"moments_PDF_m_z={z_string}.txt"
-                            ), 
-                            unpack=True
-                        ).T
-                        d_reducedcumulant_dparam = get_reduced_cumulants(d_cumulant_dparam) # NOTE: why are cumulant/moment derivatives the same?
-
-                        # n-th derivative of parameter p, pdf at scale R, +/- derivative
-                        derivatives[n_d, p, n_z, :, pm, :] = d_cumulant_dparam[:, 2:] # Assuming ordered by moment n
-                        derivatives_cumulants[n_d, p, n_z, :, pm, :] = d_reducedcumulant_dparam[:, 2:] 
-                    except ValueError:
-                        msg += f" (BAD PDF {n_d:04d})"
-                        bad_idx.append(n_d)
-                        pass
-
-def get_reduced_cumulants(cumulants):
-    var = moments[:, 2]
-    reduced_cumulants = np.zeros_like(cumulants)
-    for n in range(2, 5):
-        reduced_cumulants[:, n] = cumulants[:, n] / (var ** (n - 2))
-    return cumulants 
-
-"""
