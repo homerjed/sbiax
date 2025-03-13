@@ -424,7 +424,7 @@ def cumulants_config(
         train.start_step     = 0
         train.n_epochs       = 10_000
         train.n_batch        = 100 
-        train.patience       = 100
+        train.patience       = 10
         train.lr             = 1e-3
         train.opt            = "adam" 
         train.opt_kwargs     = {}
@@ -458,7 +458,7 @@ def cumulants_config(
         pretrain.start_step  = 0
         pretrain.n_epochs    = 10_000
         pretrain.n_batch     = 100 
-        pretrain.patience    = 100
+        pretrain.patience    = 10
         pretrain.lr          = 1e-3
         pretrain.opt         = "adam" 
         pretrain.opt_kwargs  = {}
@@ -467,7 +467,7 @@ def cumulants_config(
         train.start_step     = 0
         train.n_epochs       = 10_000
         train.n_batch        = 100 
-        train.patience       = 100
+        train.patience       = 10
         train.lr             = 1e-4
         train.opt            = "adam" 
         train.opt_kwargs     = {}

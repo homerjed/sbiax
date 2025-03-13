@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 import numpy as np
 
-ROOT_DIR = str(Path(__file__).resolve().parent.parent.parent) # This file is in repo/subfolder/
+ROOT_DIR = str(Path(__file__).resolve().parent.parent) # This file is in repo/subfolder/
 
 # Results and plots directories
 RESULTS_DIR = os.path.join(ROOT_DIR, "results/") # "/Users/Jed.Homer/phd/sbiaxpdf/results/"

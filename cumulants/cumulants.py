@@ -73,7 +73,7 @@ def get_raw_data(
         os.path.join(data_dir, "ALL_LATIN_CUMULANTS.npy") # (z, n, d, R)
     ) 
     latin_pdfs_parameters = np.loadtxt(
-        os.path.join(data_dir, "latin_hypercube_params.txt")
+        os.path.join(data_dir, "latin_hypercube_params.txt") # (n, p)
     )
     derivatives = np.load(
         os.path.join(data_dir, "cumulants_derivatives_plus_minus.npy") # (n, p, z, R, pm, d)
@@ -188,7 +188,6 @@ def get_R_and_z_moments(
                 for r, r_i in enumerate(R_idx):
 
                     _slice = z * n_scales + r # NOTE: These must be positions in new array
-                    # print(z, r, _slice, _slice * n_cumulants, (_slice + 1) * n_cumulants)
 
                     if are_derivatives:
                         # Shape (5, 3)
@@ -322,8 +321,8 @@ def get_cumulant_data(
         derivatives, 
         alpha, 
         dparams, 
-        parameter_strings, 
-        parameter_derivative_names, 
+        parameter_strings=parameter_strings, 
+        parameter_derivative_names=parameter_derivative_names, 
         verbose=verbose
     )
 
@@ -714,7 +713,7 @@ def get_nn_compressor(key, dataset, data_preprocess_fn=None, *, results_dir):
         net, 
         (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
         opt=optax.adam(1e-3), 
-        precision=jnp.linalg.inv(dataset.Finv),
+        precision=jnp.linalg.inv(dataset.Finv), # In reality this varies with parameters
         n_batch=500, 
         patience=1000,
         n_steps=50_000

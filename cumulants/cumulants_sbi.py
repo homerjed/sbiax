@@ -30,6 +30,20 @@ from sbiax.inference import nuts_sample
 from affine import affine_sample
 from utils import plot_moments, plot_latin_moments, plot_summaries, plot_fisher_summaries
 
+def replace_scalers(ensemble, *, X, P):
+    is_scaler = lambda x: isinstance(x, Scaler)
+    get_scalers = lambda m: [
+        x
+        for x in jax.tree.leaves(m, is_leaf=is_scaler)
+        if is_scaler(x)
+    ]
+    ensemble = eqx.tree_at(
+        get_scalers, 
+        ensemble, 
+        [Scaler(X, P)] * sum(int(nde.use_scaling) for nde in config.ndes) 
+    )
+    return ensemble
+
 """ 
     Run NLE or NPE SBI with the moments of the 1pt matter PDF.
 
@@ -94,7 +108,7 @@ parameter_prior: Distribution = get_prior(config)
 """
 
 # Compress simulations
-compression_fn = get_compression_fn(config, dataset, results_dir=results_dir)
+compression_fn = get_compression_fn(key, config, dataset, results_dir=results_dir)
 
 X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
 
@@ -150,6 +164,9 @@ if (
     print("Pre-training with", X_l.shape, Y_l.shape)
 
     plot_fisher_summaries(X_l, Y_l, dataset, results_dir)
+
+    if config.use_scalers:
+        ensemble = replace_scalers(ensemble, X=X_l, P=dataset.parameters)
 
     opt = getattr(optax, config.pretrain.opt)(config.pretrain.lr)
 
@@ -244,6 +261,9 @@ if (
 opt = getattr(optax, config.train.opt)(config.train.lr)
 
 print("Data / Parameters", [_.shape for _ in (X, dataset.parameters)])
+
+if config.use_scalers:
+    ensemble = replace_scalers(ensemble, X=X, P=dataset.parameters)
 
 ensemble, stats = train_ensemble(
     train_key, 
