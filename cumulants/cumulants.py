@@ -9,7 +9,8 @@ from jaxtyping import PRNGKeyArray, Array, Float, jaxtyped
 
 import equinox as eqx
 import optax
-from beartype import beartype as typechecker
+from beartype import beartype as typechecker 
+from beartype.door import is_bearable
 import numpy as np
 from scipy.stats import qmc
 from ml_collections import ConfigDict
@@ -23,7 +24,6 @@ from constants import get_quijote_parameters, get_save_and_load_dirs
 from nn import fit_nn
 from pca import PCA
 from sbiax.utils import marker
-from sbiax.compression.linear import mle
 
 typecheck = jaxtyped(typechecker=typechecker)
 
@@ -45,11 +45,11 @@ class Dataset:
 
 
 def convert_dataset_to_jax(dataset: Dataset) -> Dataset:
-    def convert_to_jax_array(a):
-        if isinstance(a, np.ndarray):
-            a = jnp.asarray(a)
-        return a
-    return jax.tree.map(convert_to_jax_array, dataset)
+    return jax.tree.map(
+        lambda a: jnp.asarray(a), 
+        dataset, 
+        is_leaf=lambda a: isinstance(a, np.ndarray)
+    )
 
 
 @typecheck
@@ -232,7 +232,10 @@ def get_R_and_z_moments(
     )
 
     if verbose:
-        print("Processed data shapes:", [_.shape for _ in [fiducial_pdfs_z_R, latin_pdfs_z_R, derivatives]])
+        print(
+            "Processed data shapes:", 
+            [_.shape for _ in [fiducial_pdfs_z_R, latin_pdfs_z_R, derivatives]]
+        )
 
     return fiducial_pdfs_z_R, latin_pdfs_z_R, derivatives_z_R
 
@@ -251,35 +254,34 @@ def remove_nuisances(dataset: Dataset) -> Dataset:
     return dataset
 
 
-@typecheck
-def calculate_derivatives(
-    derivatives_pm: Float[np.ndarray, "500 5 z R 2 d"], 
-    alpha: Float[np.ndarray, "p"], 
-    dparams: Float[np.ndarray, "p"], 
-    parameter_strings: list[str], 
-    parameter_derivative_names: list[list[str]], 
-    *, 
-    verbose: bool = False
-) -> Float[np.ndarray, "500 5 z R d"]:
-
-    derivatives = derivatives_pm[..., 1, :] - derivatives_pm[..., 0, :] 
-
-    for p in range(alpha.size):
-        if verbose:
-            print(
-                "Parameter strings / dp / dp_name", 
-                parameter_strings[p], dparams[p], parameter_derivative_names[p]
-            )
-        derivatives[:, p, ...] = derivatives[:, p, ...] / dparams[p] # NOTE: OK before or after reducing cumulants
-
-    assert derivatives.ndim == 5, "{}".format(derivatives.shape)
-
-    return derivatives
-
-
 def get_cumulant_data(
     config: ConfigDict, *, verbose: bool = False, results_dir: Optional[str] = None
 ) -> Dataset:
+
+    @typecheck
+    def calculate_derivatives(
+        derivatives_pm: Float[np.ndarray, "500 5 z R 2 d"], 
+        alpha: Float[np.ndarray, "p"], 
+        dparams: Float[np.ndarray, "p"], 
+        parameter_strings: list[str], 
+        parameter_derivative_names: list[list[str]], 
+        *, 
+        verbose: bool = False
+    ) -> Float[np.ndarray, "500 5 z R d"]:
+
+        derivatives = derivatives_pm[..., 1, :] - derivatives_pm[..., 0, :] 
+
+        for p in range(alpha.size):
+            if verbose:
+                print(
+                    "Parameter strings / dp / dp_name", 
+                    parameter_strings[p], dparams[p], parameter_derivative_names[p]
+                )
+            derivatives[:, p, ...] = derivatives[:, p, ...] / dparams[p] # NOTE: OK before or after reducing cumulants
+
+        assert derivatives.ndim == 5, "{}".format(derivatives.shape)
+
+        return derivatives
 
     data_dir, *_ = get_save_and_load_dirs()
 
@@ -313,12 +315,12 @@ def get_cumulant_data(
         fiducial_moments,
         latin_moments, 
         latin_moments_parameters,
-        derivatives
+        derivatives_pm
     ) = get_raw_data(data_dir, verbose=verbose)
 
     # Euler derivative from plus minus statistics (NOTE: derivatives: Float[np.ndarray, "500 p z R 2 d"])
     derivatives = calculate_derivatives(
-        derivatives, 
+        derivatives_pm, 
         alpha, 
         dparams, 
         parameter_strings=parameter_strings, 
@@ -371,6 +373,20 @@ def get_cumulant_data(
     F = np.linalg.multi_dot([dmu, Cinv, dmu.T])
     Finv = np.linalg.inv(F)
 
+    # dataset = Dataset(
+    #     alpha=alpha,
+    #     lower=lower,
+    #     upper=upper,
+    #     parameter_strings=parameter_strings,
+    #     Finv=Finv,
+    #     Cinv=Cinv,
+    #     C=C,
+    #     fiducial_data=fiducial_moments_z_R,
+    #     data=latin_moments_z_R,
+    #     parameters=latin_moments_parameters,
+    #     derivatives=derivatives
+    # )
+
     dataset = Dataset(
         alpha=jnp.asarray(alpha),
         lower=jnp.asarray(lower),
@@ -384,6 +400,9 @@ def get_cumulant_data(
         parameters=jnp.asarray(latin_moments_parameters),
         derivatives=jnp.asarray(derivatives)  
     )
+
+    # dataset = convert_dataset_to_jax(dataset)
+    # assert is_bearable(dataset, Dataset)
 
     if verbose:
         corr_matrix = np.corrcoef(fiducial_moments_z_R, rowvar=False) + 1e-6 # Log colouring
@@ -446,9 +465,7 @@ def get_cumulant_data(
     return dataset
 
 
-def get_prior(config: ConfigDict) -> tfd.Distribution:
-
-    dataset: Dataset = get_data(config)
+def get_prior(config: ConfigDict, dataset: Dataset) -> tfd.Distribution:
 
     lower = jnp.asarray(dataset.lower)
     upper = jnp.asarray(dataset.upper)
@@ -519,7 +536,7 @@ def sample_prior(
 
 @typecheck
 def get_linearised_data(
-    config: ConfigDict
+    config: ConfigDict, dataset: Dataset
 ) -> Tuple[Float[Array, "n d"], Float[Array, "n p"]]:
     """
         Get linearised PDFs and get their MLEs 
@@ -536,8 +553,6 @@ def get_linearised_data(
     key = jr.key(config.seed)
 
     key_parameters, key_simulations = jr.split(key)
-
-    dataset: Dataset = get_cumulant_data(config)
 
     if config.n_linear_sims is not None:
         Y = sample_prior(
@@ -640,7 +655,7 @@ def get_data(config: ConfigDict, *, verbose: bool = False, results_dir: Optional
     if hasattr(config, "linearised"):
         if config.linearised:
             print("Using linearised model, Gaussian noise.")
-            D, Y = get_linearised_data(config) 
+            D, Y = get_linearised_data(config, dataset) 
 
             dataset = replace(dataset, data=D, parameters=Y)
 
@@ -658,15 +673,42 @@ def get_data(config: ConfigDict, *, verbose: bool = False, results_dir: Optional
 
 
 @typecheck
+def mle(
+    d: Float[Array, "d"], 
+    pi: Float[Array, "p"], 
+    Finv: Float[Array, "p p"], 
+    mu: Float[Array, "d"], 
+    dmu: Float[Array, "p d"], 
+    precision: Float[Array, "d d"]
+) -> Float[Array, "p"]:
+    """
+        Calculates a maximum likelihood estimator (MLE) from a datavector by
+        assuming a linear model `mu` in parameters `pi` and using
+
+        Args:
+            d (`Array`): The datavector to compress.
+            p (`Array`): The estimated parameters of the datavector (e.g. a fiducial set).
+            Finv (`Array`): The Fisher matrix. Calculated with a precision matrix (e.g. `precision`) and 
+                theory derivatives.
+            mu (`Array`): The model evaluated at the estimated set of parameters `pi`.
+            dmu (`Array`): The first-order theory derivatives (for the implicitly assumed linear model, 
+                these are parameter independent!)
+            precision (`Array`): The precision matrix - defined as the inverse of the data covariance matrix.
+
+        Returns:
+            `Array`: the MLE.
+    """
+    return pi + jnp.linalg.multi_dot([Finv, dmu, precision, d - mu])
+
+
+@typecheck
 def get_linear_compressor(
-    config: ConfigDict
+    config: ConfigDict, dataset: Dataset
 ) -> Callable[[Float[Array, "d"], Float[Array, "p"]], Float[Array, "p"]]:
     """ 
         Get Chi^2 minimisation function; compressing datavector 
         at estimated parameters to summary 
     """
-
-    dataset: Dataset = get_data(config)
 
     mu = jnp.mean(dataset.fiducial_data, axis=0)
     dmu = jnp.mean(dataset.derivatives, axis=0)
@@ -738,7 +780,7 @@ def get_compression_fn(key, config, dataset, *, results_dir):
         compressor = lambda d, p: net(preprocess_fn(d)) # Ignore parameter kwarg!
 
     if config.compression == "linear":
-        compressor = get_linear_compressor(config)
+        compressor = get_linear_compressor(config, dataset)
 
     # Fit PCA transform to simulated data and apply after compressing
     if config.use_pca:
@@ -763,12 +805,9 @@ def get_compression_fn(key, config, dataset, *, results_dir):
 
 @typecheck
 def get_datavector(
-    key: PRNGKeyArray, config: ConfigDict, n: int = 1
+    key: PRNGKeyArray, config: ConfigDict, dataset: Dataset, n: int = 1
 ) -> Float[Array, "... d"]:
     """ Measurement: either Gaussian linear model or not """
-
-    # NOTE: must be working with fiducial parameters!
-    dataset: Dataset = get_data(config)
 
     # Choose a linearised model datavector or simply one of the Quijote realisations
     # which corresponds to a non-linearised datavector with Gaussian noise
@@ -789,3 +828,70 @@ def get_datavector(
         datavector = jnp.squeeze(datavector, axis=0) 
 
     return datavector # Remove batch axis by default
+
+
+@dataclass
+class CumulantsDataset:
+    """ Dataset for Simulation-Based Inference with cumulants of the matter PDF """
+    config: ConfigDict
+    data: Dataset
+    prior: tfd.Distribution
+    compression_fn: Callable
+    results_dir: str
+
+    def __init__(
+        self, 
+        config: ConfigDict, 
+        *, 
+        verbose: bool = False, 
+        results_dir: Optional[str] = None
+    ):
+        self.config = config
+        self.data = get_data(
+            config, verbose=verbose, results_dir=results_dir
+        )
+        self.prior = get_prior(config, self.data) # Possibly not equal to Quijote prior
+        self.results_dir = results_dir
+
+        key = jr.key(config.seed)
+        self.compression_fn = get_compression_fn(
+            key, self.config, self.data, results_dir=self.results_dir
+        )
+
+    def get_parameter_strings(self):
+        return get_parameter_strings()
+
+    def sample_prior(self, key: PRNGKeyArray, n: int, *, hypercube: bool = True) -> Float[Array, "n p"]:
+        # Sample Quijote prior which may not be the same as inference prior
+        P = sample_prior(
+            key, 
+            n, 
+            self.data.alpha, 
+            self.data.lower, 
+            self.data.upper, 
+            hypercube=hypercube
+        )
+        return P
+
+    def get_compression_fn(self):
+        return self.compression_fn
+
+    def get_datavector(self, key: PRNGKeyArray, n: int = 1) -> Float[Array, "... d"]:
+        d = get_datavector(key, self.config, self.data, n)
+        return d
+
+    def get_linearised_datavector(self, key: PRNGKeyArray, n: int = 1) -> Float[Array, "... d"]:
+        # Sample datavector from linearised Gaussian model
+        mu = jnp.mean(self.data.fiducial_data, axis=0) 
+        d = jr.multivariate_normal(key, mu, self.data.C, (n,))
+        if not (n > 1):
+            d = jnp.squeeze(d, axis=0) 
+        return d
+
+    def get_linearised_data(self):
+        # Get linearised data (e.g. pre-training), where config only sets how many simulations
+        return get_linearised_data(self.config, self.data)
+
+    def get_preprocess_fn(self):
+        # Get (X, P) preprocessor?
+        ...

@@ -56,7 +56,8 @@ PARAMETER_DERIVATIVE_STRINGS = [
   ["s8_m", "s8_p"]
 ]
 
-# dOm, dOb, dh, dn_s, ds8
+# Derivative: dS/dp = (S(p + dp) - S(p - dp)) / 2dp
+# > below are 2dp values for dOm, dOb, dh, dn_s, ds8
 DPARAMS = np.array(
     [
         0.3275 - 0.3075, 

@@ -18,7 +18,7 @@ from configs import (
     get_cumulants_sbi_args, get_ndes_from_config
 )
 from cumulants import (
-    Dataset, get_data, get_prior, 
+    CumulantsDataset, Dataset, get_data, get_prior, 
     get_compression_fn, get_datavector, get_linearised_data
 )
 
@@ -96,19 +96,21 @@ results_dir = get_results_dir(config, args)
 posteriors_dir = get_posteriors_dir(config)
 
 # Dataset of simulations, parameters, covariance, ...
-dataset: Dataset = get_data(config, verbose=args.verbose, results_dir=results_dir)
+cumulants_dataset = CumulantsDataset(config, results_dir=results_dir)
+
+dataset: Dataset = cumulants_dataset.data
+
+parameter_prior: Distribution = cumulants_dataset.prior
 
 print("DATA:", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (dataset.fiducial_data, dataset.data)])
 print("DATA:", [_.shape for _ in (dataset.fiducial_data, dataset.data)])
-
-parameter_prior: Distribution = get_prior(config)
 
 """
     Compression
 """
 
 # Compress simulations
-compression_fn = get_compression_fn(key, config, dataset, results_dir=results_dir)
+compression_fn = cumulants_dataset.compression_fn
 
 X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
 
@@ -158,10 +160,10 @@ if (
     pre_train_key, summaries_key = jr.split(key)
 
     # Pre-train data = linearised simulations
-    X_l, Y_l = get_linearised_data(config)
-    X_l = jax.vmap(compression_fn)(X_l, Y_l)
+    D_l, Y_l = cumulants_dataset.get_linearised_data()
+    X_l = jax.vmap(compression_fn)(D_l, Y_l)
 
-    print("Pre-training with", X_l.shape, Y_l.shape)
+    print("Pre-training with", D_l.shape, X_l.shape, Y_l.shape)
 
     plot_fisher_summaries(X_l, Y_l, dataset, results_dir)
 
@@ -187,7 +189,7 @@ if (
         results_dir=results_dir
     )
 
-    datavector = get_datavector(key_datavector, config)
+    datavector = cumulants_dataset.get_datavector(key_datavector)
 
     x_ = compression_fn(datavector, dataset.alpha)
 
@@ -291,7 +293,7 @@ print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None)
 ensemble = eqx.nn.inference_mode(ensemble)
 
 # Generates linearised (or not) datavector at fiducial parameters
-datavector = get_datavector(key_datavector, config)
+datavector = cumulants_dataset.get_datavector(key_datavector)
 
 x_ = compression_fn(datavector, dataset.alpha)
 
