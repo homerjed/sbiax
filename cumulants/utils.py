@@ -81,6 +81,7 @@ def plot_latin_moments(latin_moments_z_R, config, results_dir=None):
 
 
 def plot_summaries(X, P, dataset, results_dir=None):
+    # Corner plot of summaries
     c = ChainConsumer()
     c.add_chain(
         Chain(
@@ -110,12 +111,15 @@ def plot_summaries(X, P, dataset, results_dir=None):
     else:
         plt.show()
 
-    fig, axs = plt.subplots(1, dataset.alpha.size, figsize=(2. * dataset.alpha.size, 2.))
+    # Scatter plot
+    fig, axs = plt.subplots(1, dataset.alpha.size, figsize=(2. + 2. * dataset.alpha.size, 2.5))
     for p, ax in enumerate(axs):
-        ax.scatter(P[:, p], X[:, p])
+        ax.scatter(dataset.parameters[:, p], X[:, p], s=0.1)
         ax.axline((0, 0), slope=1., color="k", linestyle="--")
         ax.set_xlim(dataset.lower[p], dataset.upper[p])
         ax.set_ylim(dataset.lower[p], dataset.upper[p])
+        ax.set_xlabel(dataset.parameter_strings[p])
+        ax.set_ylabel(dataset.parameter_strings[p] + "'")
 
     if results_dir is not None:
         plt.savefig(os.path.join(results_dir, "scatter.png"))

@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass, replace
+from functools import partial
 from typing import Tuple, Callable, Optional
 
 import jax
@@ -26,6 +27,25 @@ from pca import PCA
 from sbiax.utils import marker
 
 typecheck = jaxtyped(typechecker=typechecker)
+
+
+def hartlap(n_s: int, n_d: int) -> float: 
+    return (n_s - n_d - 2) / (n_s - 1)
+
+
+def get_parameter_strings() -> list[str]:
+    (_, _, _, _, _, _, parameter_strings, *_) = get_quijote_parameters()
+    return parameter_strings
+
+
+# def remove_nuisances(dataset: Dataset) -> Dataset:
+#     # Remove 'nuisance' parameters not constrained by the moments/cumulants
+#     return dataset
+
+
+"""
+    Data
+"""
 
 
 @typecheck
@@ -106,32 +126,20 @@ def get_R_and_z_moments(
         - select for moment order (e.g. var, skewness, kurtosis ... before final reshape)
     """
 
-    if isinstance(z_idx, int):
-        z_idx = [z_idx]
-
-    n_scales = len(R_idx)
-    n_redshifts = len(z_idx)
-
-    if verbose:
-        print("z_idx:", z_idx)
-        print("R_idx:", R_idx)
-
-    if order_idx is not None:
-        n_cumulants = len(order_idx)
-    else:
-        order_idx = [0, 1, 2]
-        n_cumulants = 3
-
     def get_R_z(
         simulations: Float[Array, "z n R d"] | Float[Array, "n 5 z R d"], 
         z_idx: int, 
         R_idx: list[int], 
+        order_idx: list[int],
         *,
+        n_scales: int,
         reduced_cumulants: bool = False,
         are_derivatives: bool = False
     ) -> Array:
         # Obtain fiducial/latin/derivative cumulants at chosen redshift and scales
         # > `simulations` is either simulations or derivatives
+
+        n_cumulants = len(order_idx)
 
         if verbose:
             print("Are derivatives?", are_derivatives)
@@ -148,23 +156,22 @@ def get_R_and_z_moments(
             # Order of input cumulants (e.g. variance, skewness, kurtosis)
             cumulant_orders = [2, 3, 4] 
 
+            var = cumulants[0] # Broadcast? e.g. [..., :1]
+
             # Derivatives or sims => choose last axis, last axis is `order_idx` length
             # for cumulant_index in range(cumulants.shape[-1]): 
-            for cumulant_index, _ in zip(range(cumulants.shape[-1]), order_idx): 
-                # Only reduce cumulants of higher order than variance
-                cumulant_n = cumulants[..., cumulant_index]
+            for cumulant_index, _ in zip(range(cumulants.shape[0]), order_idx): 
 
-                # Skip variance (do not divide it by itself)
+                # Only reduce cumulants of higher order than variance
                 if reduce and (cumulant_index > 0):
-                    var = cumulants[..., 0] # Broadcast? e.g. [..., :1]
 
                     # E.g. for skewness (n=3); skewness_reduced = skewness / (var ** 2)
                     order = cumulant_orders[cumulant_index]
-                    cumulant_n = cumulants[..., cumulant_index] / (var ** (order - 1)) 
 
-                cumulants[..., cumulant_index] = cumulant_n
+                    # S_n = k_n / (k_2 ** (n - 1)) 
+                    cumulants[cumulant_index] = cumulants[cumulant_index] / (var ** (order - 1))
 
-            return cumulants # Reduced
+            return cumulants 
 
         # n_s is number of derivatives or number of simulations (latin / fiducial)
         if are_derivatives:
@@ -211,22 +218,40 @@ def get_R_and_z_moments(
 
         return R_z_simulations
 
+    if isinstance(z_idx, int):
+        z_idx = [z_idx]
+
+    n_scales = len(R_idx)
+    n_redshifts = len(z_idx)
+
+    if verbose:
+        print("z_idx:", z_idx)
+        print("R_idx:", R_idx)
+
+    n_cumulants = len(order_idx)
+
     fiducial_pdfs_z_R = get_R_z(
         fiducial_pdfs, 
         z_idx=z_idx, 
         R_idx=R_idx, 
+        order_idx=order_idx,
+        n_scales=n_scales,
         reduced_cumulants=reduced_cumulants
     )
     latin_pdfs_z_R = get_R_z(
         latin_pdfs, 
         z_idx=z_idx, 
         R_idx=R_idx, 
+        order_idx=order_idx,
+        n_scales=n_scales,
         reduced_cumulants=reduced_cumulants
     )
     derivatives_z_R = get_R_z(
         derivatives, 
         z_idx=z_idx, 
         R_idx=R_idx, 
+        order_idx=order_idx,
+        n_scales=n_scales,
         reduced_cumulants=reduced_cumulants, 
         are_derivatives=True
     )
@@ -238,20 +263,6 @@ def get_R_and_z_moments(
         )
 
     return fiducial_pdfs_z_R, latin_pdfs_z_R, derivatives_z_R
-
-
-def hartlap(n_s: int, n_d: int) -> float: 
-    return (n_s - n_d - 2) / (n_s - 1)
-
-
-def get_parameter_strings() -> list[str]:
-    (_, _, _, _, _, _, parameter_strings, *_) = get_quijote_parameters()
-    return parameter_strings
-
-
-def remove_nuisances(dataset: Dataset) -> Dataset:
-    # Remove 'nuisance' parameters not constrained by the moments/cumulants
-    return dataset
 
 
 def get_cumulant_data(
@@ -301,10 +312,8 @@ def get_cumulant_data(
         D_deltas 
     ) = get_quijote_parameters()
 
-    R_values = config.scales
-    redshift = config.redshift
-    R_idx    = [all_R_values.index(R) for R in R_values]
-    z_idx    = all_redshifts.index(redshift)
+    R_idx = [all_R_values.index(R) for R in config.scales]
+    z_idx = all_redshifts.index(config.redshift)
 
     if verbose:
         print("z_idx:", z_idx)
@@ -344,7 +353,7 @@ def get_cumulant_data(
         verbose=verbose
     )
 
-    n_fiducial_pdfs, data_dim = fiducial_moments_z_R.shape 
+    n_s, n_d = fiducial_moments_z_R.shape 
 
     # Calculate covariance for datavector of each fiducial pdfs for all chosen scales 
     C = np.cov(fiducial_moments_z_R, rowvar=False) # NOTE: correctly calculates covariance of reduced or not
@@ -354,38 +363,25 @@ def get_cumulant_data(
         if verbose:
             print("Covariance conditioning...")
 
-        L = jnp.trace(C) / data_dim * config.covariance_epsilon
+        L = jnp.trace(C) / n_d * config.covariance_epsilon
 
         # U, S, Vt = jnp.linalg.svd(C)
         # L = 0.01 * S.min()
         # L = S.max() / 1000
 
-        C = jnp.identity(data_dim) * L + C
+        C = jnp.identity(n_d) * L + C
 
     assert np.all(np.isfinite(C)), "Bad covariance."
     assert derivatives.shape[:-1] == (500, 5), "Do derivatives have batch axis? Required."
 
-    H = hartlap(n_fiducial_pdfs, data_dim)
+    # Precision, corrected with Hartlap
+    H = hartlap(n_s, n_d)
     Cinv = H * np.linalg.inv(C) # Cinv = jnp.linalg.svd(C) * H
 
-    # Fisher information matrix, all scales, one redshift
+    # Fisher information matrix; all scales, one redshift
     dmu = np.mean(derivatives, axis=0)
     F = np.linalg.multi_dot([dmu, Cinv, dmu.T])
     Finv = np.linalg.inv(F)
-
-    # dataset = Dataset(
-    #     alpha=alpha,
-    #     lower=lower,
-    #     upper=upper,
-    #     parameter_strings=parameter_strings,
-    #     Finv=Finv,
-    #     Cinv=Cinv,
-    #     C=C,
-    #     fiducial_data=fiducial_moments_z_R,
-    #     data=latin_moments_z_R,
-    #     parameters=latin_moments_parameters,
-    #     derivatives=derivatives
-    # )
 
     dataset = Dataset(
         alpha=jnp.asarray(alpha),
@@ -400,9 +396,6 @@ def get_cumulant_data(
         parameters=jnp.asarray(latin_moments_parameters),
         derivatives=jnp.asarray(derivatives)  
     )
-
-    # dataset = convert_dataset_to_jax(dataset)
-    # assert is_bearable(dataset, Dataset)
 
     if verbose:
         corr_matrix = np.corrcoef(fiducial_moments_z_R, rowvar=False) + 1e-6 # Log colouring
@@ -465,6 +458,7 @@ def get_cumulant_data(
     return dataset
 
 
+@typecheck
 def get_prior(config: ConfigDict, dataset: Dataset) -> tfd.Distribution:
 
     lower = jnp.asarray(dataset.lower)
@@ -535,9 +529,7 @@ def sample_prior(
 
 
 @typecheck
-def get_linearised_data(
-    config: ConfigDict, dataset: Dataset
-) -> Tuple[Float[Array, "n d"], Float[Array, "n p"]]:
+def get_linearised_data(config: ConfigDict, dataset: Dataset) -> Tuple[Float[Array, "n d"], Float[Array, "n p"]]:
     """
         Get linearised PDFs and get their MLEs 
 
@@ -586,9 +578,7 @@ def get_linearised_data(
 
 
 @typecheck
-def get_nonlinearised_data(
-    config: ConfigDict
-) -> Tuple[Float[Array, "n d"], Float[Array, "n p"]]:
+def get_nonlinearised_data(config: ConfigDict) -> Tuple[Float[Array, "n d"], Float[Array, "n p"]]:
     """
         Get non-linearised PDFs. 
         - use linearised model at a random fiducial pdf noise realisation
@@ -641,6 +631,7 @@ def get_nonlinearised_data(
     return D, Y 
 
 
+@typecheck
 def get_data(config: ConfigDict, *, verbose: bool = False, results_dir: Optional[str] = None) -> Dataset:
     """ 
         Get data for linearised-model data or full simulation data. 
@@ -660,7 +651,6 @@ def get_data(config: ConfigDict, *, verbose: bool = False, results_dir: Optional
             dataset = replace(dataset, data=D, parameters=Y)
 
     # E.g. using non-linear model and Gaussian noise or what?
-    # NOTE: make Literal[""] for each situation...
     if hasattr(config, "nonlinearised"):
         if config.nonlinearised:
             print("Using linearised model, non-Gaussian noise.") 
@@ -673,32 +663,35 @@ def get_data(config: ConfigDict, *, verbose: bool = False, results_dir: Optional
 
 
 @typecheck
-def mle(
-    d: Float[Array, "d"], 
-    pi: Float[Array, "p"], 
-    Finv: Float[Array, "p p"], 
-    mu: Float[Array, "d"], 
-    dmu: Float[Array, "p d"], 
-    precision: Float[Array, "d d"]
-) -> Float[Array, "p"]:
-    """
-        Calculates a maximum likelihood estimator (MLE) from a datavector by
-        assuming a linear model `mu` in parameters `pi` and using
+def get_datavector(
+    key: PRNGKeyArray, config: ConfigDict, dataset: Dataset, n: int = 1
+) -> Float[Array, "... d"]:
+    """ Measurement: either Gaussian linear model or not """
 
-        Args:
-            d (`Array`): The datavector to compress.
-            p (`Array`): The estimated parameters of the datavector (e.g. a fiducial set).
-            Finv (`Array`): The Fisher matrix. Calculated with a precision matrix (e.g. `precision`) and 
-                theory derivatives.
-            mu (`Array`): The model evaluated at the estimated set of parameters `pi`.
-            dmu (`Array`): The first-order theory derivatives (for the implicitly assumed linear model, 
-                these are parameter independent!)
-            precision (`Array`): The precision matrix - defined as the inverse of the data covariance matrix.
+    # Choose a linearised model datavector or simply one of the Quijote realisations
+    # which corresponds to a non-linearised datavector with Gaussian noise
+    if not config.use_expectation:
+        if config.linearised:
+            mu = jnp.mean(dataset.fiducial_data, axis=0)
 
-        Returns:
-            `Array`: the MLE.
-    """
-    return pi + jnp.linalg.multi_dot([Finv, dmu, precision, d - mu])
+            print("Using linearised datavector")
+            datavector = jr.multivariate_normal(key, mean=mu, cov=dataset.C, shape=(n,))
+        else:
+            print("Using non-linearised datavector")
+            datavector = jr.choice(key, dataset.fiducial_data, shape=(n,))
+    else:
+        print("Using expectation (noiseless datavector)")
+        datavector = jnp.mean(dataset.fiducial_data, axis=0, keepdims=True)
+
+    if not (n > 1):
+        datavector = jnp.squeeze(datavector, axis=0) 
+
+    return datavector # Remove batch axis by default
+
+
+"""
+    Compression
+"""
 
 
 @typecheck
@@ -710,11 +703,41 @@ def get_linear_compressor(
         at estimated parameters to summary 
     """
 
-    mu = jnp.mean(dataset.fiducial_data, axis=0)
-    dmu = jnp.mean(dataset.derivatives, axis=0)
+    @typecheck
+    def mle(
+        d: Float[Array, "d"], 
+        pi: Float[Array, "p"], 
+        Finv: Float[Array, "p p"], 
+        mu: Float[Array, "d"], 
+        dmu: Float[Array, "p d"], 
+        precision: Float[Array, "d d"]
+    ) -> Float[Array, "p"]:
+        """
+            Calculates a maximum likelihood estimator (MLE) from a datavector by
+            assuming a linear model `mu` in parameters `pi` and using
+
+            Args:
+                d (`Array`): The datavector to compress.
+                p (`Array`): The estimated parameters of the datavector (e.g. a fiducial set).
+                Finv (`Array`): The Fisher matrix. Calculated with a precision matrix (e.g. `precision`) and 
+                    theory derivatives.
+                mu (`Array`): The model evaluated at the estimated set of parameters `pi`.
+                dmu (`Array`): The first-order theory derivatives (for the implicitly assumed linear model, 
+                    these are parameter independent!)
+                precision (`Array`): The precision matrix - defined as the inverse of the data covariance matrix.
+
+            Returns:
+                `Array`: the MLE.
+        """
+        return pi + jnp.linalg.multi_dot([Finv, dmu, precision, d - mu])
 
     @typecheck
-    def compressor(d: Float[Array, "d"], p: Float[Array, "p"]) -> Float[Array, "p"]: 
+    def compressor(
+        d: Float[Array, "d"], 
+        p: Float[Array, "p"],
+        mu: Float[Array, "d"], 
+        dmu: Float[Array, "p d"]
+    ) -> Float[Array, "p"]: 
         mu_p = linearised_model(
             alpha=dataset.alpha, alpha_=p, mu=mu, dmu=dmu
         )
@@ -728,7 +751,10 @@ def get_linear_compressor(
         )
         return p_
 
-    return compressor
+    mu = jnp.mean(dataset.fiducial_data, axis=0)
+    dmu = jnp.mean(dataset.derivatives, axis=0)
+
+    return partial(compressor, mu=mu, dmu=dmu)
 
 
 def get_nn_compressor(key, dataset, data_preprocess_fn=None, *, results_dir):
@@ -803,36 +829,17 @@ def get_compression_fn(key, config, dataset, *, results_dir):
     return compression_fn 
 
 
-@typecheck
-def get_datavector(
-    key: PRNGKeyArray, config: ConfigDict, dataset: Dataset, n: int = 1
-) -> Float[Array, "... d"]:
-    """ Measurement: either Gaussian linear model or not """
-
-    # Choose a linearised model datavector or simply one of the Quijote realisations
-    # which corresponds to a non-linearised datavector with Gaussian noise
-    if not config.use_expectation:
-        if config.linearised:
-            mu = jnp.mean(dataset.fiducial_data, axis=0)
-
-            print("Using linearised datavector")
-            datavector = jr.multivariate_normal(key, mean=mu, cov=dataset.C, shape=(n,))
-        else:
-            print("Using non-linearised datavector")
-            datavector = jr.choice(key, dataset.fiducial_data, shape=(n,))
-    else:
-        print("Using expectation (noiseless datavector)")
-        datavector = jnp.mean(dataset.fiducial_data, axis=0, keepdims=True)
-
-    if not (n > 1):
-        datavector = jnp.squeeze(datavector, axis=0) 
-
-    return datavector # Remove batch axis by default
+"""
+    Dataset
+"""
 
 
 @dataclass
 class CumulantsDataset:
-    """ Dataset for Simulation-Based Inference with cumulants of the matter PDF """
+    """ 
+        Dataset for Simulation-Based Inference with cumulants of the matter PDF 
+    """
+
     config: ConfigDict
     data: Dataset
     prior: tfd.Distribution
@@ -847,16 +854,19 @@ class CumulantsDataset:
         results_dir: Optional[str] = None
     ):
         self.config = config
+
         self.data = get_data(
             config, verbose=verbose, results_dir=results_dir
         )
+
         self.prior = get_prior(config, self.data) # Possibly not equal to Quijote prior
-        self.results_dir = results_dir
 
         key = jr.key(config.seed)
         self.compression_fn = get_compression_fn(
-            key, self.config, self.data, results_dir=self.results_dir
+            key, self.config, self.data, results_dir=results_dir
         )
+
+        self.results_dir = results_dir
 
     def get_parameter_strings(self):
         return get_parameter_strings()

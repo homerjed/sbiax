@@ -197,6 +197,7 @@ class Ensemble(eqx.Module):
                 validation losses.
         """
         Ls = jnp.array([-losses[n] for n, _ in enumerate(self.ndes)])
+        Ls = Ls - jnp.max(Ls)
         nde_weights = jnp.exp(Ls) / jnp.sum(jnp.exp(Ls)) 
         return nde_weights
 
