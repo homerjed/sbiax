@@ -23,7 +23,8 @@ from cumulants import (
 )
 
 from sbiax.utils import make_df, marker
-from sbiax.ndes import Scaler, Ensemble, CNF, MAF 
+from sbiax.ndes import Scaler, CNF, MAF 
+from cumulants_ensemble import Ensemble
 from sbiax.train import train_ensemble
 from sbiax.inference import nuts_sample
 
@@ -441,5 +442,8 @@ if 0:
     except Exception as e:
         print("(!) Shit posterior")
         pass
+
+# ensemble = Ensemble(ndes, sbi_type=config.sbi_type)
+# eqx.tree_deserialise_leaves(os.path.join(results_dir, "ensemble.eqx"), ensemble)
 
 print("Time={:.1} mins.".format((time.time() - t0) / 60.))

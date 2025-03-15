@@ -29,7 +29,8 @@ def default_weights(weights: Float[Array, "n"], ndes: list[eqx.Module]) -> Float
 class Ensemble(eqx.Module):
     sbi_type: str
     ndes: Tuple[eqx.Module]
-    weights: Float[Array, "{self.n_ndes}"]
+    n_ndes: int
+    weights: list[float]
 
     @typecheck
     def __init__(
@@ -41,10 +42,11 @@ class Ensemble(eqx.Module):
         self.ndes = ndes
         self.sbi_type = sbi_type
         self.weights = default_weights(weights, ndes)
+        self.n_ndes = len(ndes)
 
-    @property
-    def n_ndes(self):
-        return len(self.ndes)
+    # @property
+    # def n_ndes(self):
+    #     return len(self.ndes)
 
     @typecheck
     def nde_log_prob_fn(
@@ -105,49 +107,30 @@ class Ensemble(eqx.Module):
 
             return L
 
-        if self.sbi_type == "nle":
-            @typecheck
-            def _joint_log_prob_fn(
-                theta: Float[Array, "p"], key: Optional[PRNGKeyArray] = None
-            ) -> Scalar:
-                L = jnp.zeros(())
-                for n, (nde, weight) in enumerate(zip(self.ndes, self.weights)): # NOTE: lax.scan
+        @typecheck
+        def _joint_log_prob_fn(
+            theta: Float[Array, "p"], key: Optional[PRNGKeyArray] = None
+        ) -> Scalar:
 
-                    if exists(key):
-                        key = jr.fold_in(key, n)
+            L = jnp.zeros(())
+            for n, (nde, weight) in enumerate(zip(self.ndes, jnp.atleast_1d(self.weights))): # NOTE: lax.scan
 
-                    nde_log_L = _maybe_vmap_nde_log_L(nde, data, theta, key=key) 
+                if exists(key):
+                    key = jr.fold_in(key, n)
 
-                    # Add likelihoods together for ensemble ndes
-                    L_nde = weight * jnp.exp(nde_log_L) # NOTE: weight inside log-prob fun?! weighting doesn't distribute over batches of datavecotrs?
+                nde_log_L = _maybe_vmap_nde_log_L(nde, data, theta, key=key) 
 
-                    L = L + L_nde
+                # Add likelihoods together for ensemble ndes
+                L_nde = weight * jnp.exp(nde_log_L) # NOTE: weight inside log-prob fun?! weighting doesn't distribute over batches of datavecotrs?
 
-                L = jnp.log(L) 
+                L = L + L_nde
 
-                if exists(prior):
-                    L = L + prior.log_prob(theta) # NOTE: just adding prior is the difference between NPE and NLE?
+            L = jnp.log(L) 
 
-                return L
+            if exists(prior) and self.sbi_type == "nle":
+                L = L + prior.log_prob(theta) # NOTE: just adding prior is the difference between NPE and NLE?
 
-        if self.sbi_type == "npe":
-            @typecheck
-            def _joint_log_prob_fn(
-                theta: Float[Array, "p"], key: Optional[PRNGKeyArray] = None
-            ) -> Scalar:
-                L = jnp.zeros(())
-                for n, (nde, weight) in enumerate(zip(self.ndes, self.weights)):
-
-                    if exists(key):
-                        key = jr.fold_in(key, n)
-
-                    nde_log_L = nde.log_prob(x=theta, y=data, key=key)
-
-                    L_nde = weight * jnp.exp(nde_log_L)
-
-                    L = L + L_nde
-
-                return jnp.log(L) 
+            return L
 
         return _joint_log_prob_fn
 
@@ -161,16 +144,22 @@ class Ensemble(eqx.Module):
     @typecheck
     def calculate_stacking_weights(
         self, 
-        losses: list[Float[Array, "_"]]
+        losses: list[Scalar]
     ) -> Float[Array, "{self.n_ndes}"]:
         """
             Calculate weightings of NDEs in ensemble
             - losses is a list of final-epoch validation losses
+            - never used in gradient calculations
         """
         nde_Ls = jnp.array([-losses[n] for n, _ in enumerate(self.ndes)])
+
         nde_weights = jnp.exp(nde_Ls) / jnp.sum(jnp.exp(nde_Ls)) #jax.nn.softmax(Ls)
+
         assert nde_weights.shape == (self.n_ndes,)
-        return jnp.atleast_1d(nde_weights)
+
+        nde_weights = jnp.atleast_1d(nde_weights.astype(jnp.float32))
+
+        return nde_weights
 
     def save_ensemble(self, path: str) -> None:
         eqx.tree_serialise_leaves(path, self)

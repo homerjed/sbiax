@@ -41,7 +41,7 @@ from cumulants import (
     get_linearised_data,
     get_parameter_strings
 )
-from ensemble import Ensemble, MultiEnsemble
+from cumulants_ensemble import Ensemble, MultiEnsemble
 from pca import PCA
 from affine import affine_sample
 
@@ -127,7 +127,7 @@ def get_z_config_and_datavector(
     config_z.reduced_cumulants = reduced_cumulants
     config_z.compression = compression
 
-    cumulants_dataset = CumulantsDataset(config, results_dir=None, verbose=verbose)
+    cumulants_dataset = CumulantsDataset(config_z, results_dir=None, verbose=verbose)
 
     dataset: Dataset = cumulants_dataset.data
 
@@ -162,11 +162,22 @@ def get_z_config_and_datavector(
     # Ensemble of NDEs
     ensemble = Ensemble(ndes, sbi_type=config_z.sbi_type)
 
+    print(ensemble)
+    breakpoint()
+
+    ensemble = eqx.tree_at(
+        lambda e: e.weights, 
+        ensemble, 
+        ensemble.weights.squeeze().astype(jnp.int32)
+    )
+
     # Load Ensemble
     ensemble_path = os.path.join(
         get_results_dir(config_z, args=args), "ensemble.eqx"
     )
     ensemble = eqx.tree_deserialise_leaves(ensemble_path, ensemble)
+
+    print(ensemble)
 
     if verbose:
         print("Datavectors", datavectors.shape)
@@ -236,7 +247,7 @@ def maybe_vmap_multi_redshift_mle(
     # Shape: (n, z, d)
     datavectors = jnp.stack(datavectors, axis=1) # Stack list of datavectors ... NOTE: may be wrongly shaped...
 
-    assert datavectors.shape.ndim == 3
+    assert datavectors.ndim == 3 # (n, n_cumulants, n_scales)
 
     if verbose:
         print("DATAVECTORS", datavectors.shape)
@@ -372,7 +383,7 @@ if __name__ == "__main__":
         # )
 
         state = jr.multivariate_normal(
-            key_state, x_, Finv, (2 * config.n_walkers,) # x_
+            key_state, alpha, Finv, (2 * config.n_walkers,) # x_
         )
 
         if args.verbose:

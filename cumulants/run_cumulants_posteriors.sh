@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=cumulants_posteriors
-#SBATCH --output=/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/%A/cumulants_exps_%a.out
-#SBATCH --error=/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/%A/cumulants_exps_%a.err
-#SBATCH --array=0,1%2
+#SBATCH --output=/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/%A/cumulants_posteriors_%a.out
+#SBATCH --error=/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/%A/cumulants_posteriors_%a.err
+#SBATCH --array=0-49%5
 #SBATCH --time=02:00:00
 #SBATCH --partition=cluster
 #SBATCH --ntasks=1
@@ -32,22 +32,22 @@ for i in {0..2}; do
     for z in 0.0 0.5 1.0; do
         order_idx_args=$(seq -s " " 0 $i)  # Generate "0", "0 1", "0 1 2" 
 
-        echo "Running seed=$id, redshift $z, cumulants=$order_idx_args..."
+        echo ">>Running seed=$id, redshift $z, cumulants=$order_idx_args..."
 
         # Sample multi-z posteriors with linear datavectors
-        echo "Sampling multi-z with linear datavectors..."
+        echo ">>Sampling multi-z with linear datavectors..."
         python cumulants_multi_z.py --seed $id --sbi_type "nle" --linearised --order_idx $order_idx_args --compression "linear"
-        echo "Sampling multi-z with linear datavectors... Completed."
+        echo ">>Sampling multi-z with linear datavectors... Completed."
 
-        # Sample multi-z posteriors with non-linear datavectors
-        echo "Sampling multi-z with non-linear datavectors..."
-        python cumulants_multi_z.py --seed $id --sbi_type "nle" --no-linearised --order_idx $order_idx_args --compression "linear"
-        echo "Sampling multi-z with non-linear datavectors... Completed."
+        # # Sample multi-z posteriors with non-linear datavectors
+        # echo "Sampling multi-z with non-linear datavectors..."
+        # python cumulants_multi_z.py --seed $id --sbi_type "nle" --no-linearised --order_idx $order_idx_args --compression "linear"
+        # echo "Sampling multi-z with non-linear datavectors... Completed."
 
         # Sample multi-z posteriors with non-linear datavectors (pre-train)
-        echo "Sampling multi-z with non-linear datavectors..."
-        python cumulants_multi_z.py --seed $id --sbi_type "nle" --no-linearised --order_idx $order_idx_args --compression "linear" --pre-train
-        echo "Sampling multi-z with non-linear datavectors... Completed."
+        echo ">>Sampling multi-z with non-linear datavectors..."
+        python cumulants_multi_z.py --seed $id --sbi_type "nle" --compression "linear" --no-linearised --pre-train --n_linear_sims 10000 --order_idx $order_idx_args
+        echo ">>Sampling multi-z with non-linear datavectors... Completed."
 
         current_time=$(date +"%H:%M:%S")
         echo "The current time is: $current_time"
