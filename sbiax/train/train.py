@@ -700,7 +700,8 @@ def train_ensemble(
     )
     weights = jnp.atleast_1d(weights)
 
-    ensemble = replace(ensemble, weights=weights)
+    # ensemble = replace(ensemble, weights=weights)
+    ensemble = eqx.tree_at(lambda e: e.weights, ensemble, weights)
 
     print("Weights:", ensemble.weights)
 
