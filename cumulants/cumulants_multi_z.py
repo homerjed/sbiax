@@ -15,6 +15,10 @@ import matplotlib.pyplot as plt
 from chainconsumer import ChainConsumer, Chain, Truth
 from tensorflow_probability.substrates.jax.distributions import Distribution
 
+from sbiax.ndes import CNF, MAF, Scaler
+from sbiax.compression.linear import mle
+from sbiax.inference import nuts_sample
+from sbiax.utils import make_df, marker
 from configs import (
     cumulants_config, 
     ensembles_cumulants_config,
@@ -28,6 +32,7 @@ from configs import (
     get_ndes_from_config
 )
 from cumulants import (
+    CumulantsDataset,
     Dataset, 
     get_data, 
     get_prior, 
@@ -36,13 +41,6 @@ from cumulants import (
     get_linearised_data,
     get_parameter_strings
 )
-
-from sbiax.ndes import CNF, MAF, Scaler
-from sbiax.compression.linear import mle
-from sbiax.inference import nuts_sample
-from sbiax.utils import make_df, marker
-
-from cumulants import CumulantsDataset
 from ensemble import Ensemble, MultiEnsemble
 from pca import PCA
 from affine import affine_sample
@@ -90,7 +88,9 @@ def get_z_config_and_datavector(
     pre_train: bool = False, 
     sbi_type: str = "nle",
     exp_name_format: str = "z={}_m={}",
-    n_datavectors: int = 1
+    n_datavectors: int = 1,
+    *,
+    verbose: bool = False
 ) -> tuple[
     Ensemble,
     Float[Array, "n p"],
@@ -119,31 +119,32 @@ def get_z_config_and_datavector(
         pre_train=pre_train
     )
 
-    # Set to current redshift
+    # Set to current redshift, ensure matching NLE or NPE and linearisation
     config_z.exp_name = exp_name_format.format(redshift, "".join(map(str, config.order_idx)))
     config_z.redshift = redshift
-
-    # Ensure matching NLE or NPE and linearisation
     config_z.sbi_type = config.sbi_type
     config_z.linearised = config.linearised
-
     config_z.reduced_cumulants = reduced_cumulants
     config_z.compression = compression
 
-    cumulants_dataset = CumulantsDataset(config, results_dir=None)
+    cumulants_dataset = CumulantsDataset(config, results_dir=None, verbose=verbose)
 
     dataset: Dataset = cumulants_dataset.data
 
-    parameter_prior: Distribution = cumulants_dataset.prior # Quijote prior (same for all z, only applied once with combined z-likelihoods)
+    # Quijote prior (same for all z, only applied once with combined z-likelihoods)
+    parameter_prior: Distribution = cumulants_dataset.prior 
 
-    compression_fn = cumulants_dataset.get_compression_fn() # NOTE: not supported for NN compression
+    # NOTE: not supported for NN compression
+    compression_fn = cumulants_dataset.get_compression_fn() 
  
-    datavectors = cumulants_dataset.get_datavector(key_datavector, n=n_datavectors) # Generates linearised (or not) datavector 
+    # Generates linearised (or not) datavector 
+    datavectors = cumulants_dataset.get_datavector(key_datavector, n=n_datavectors) 
 
     if datavectors.ndim == 1:
         datavectors = datavectors[jnp.newaxis, ...] # Add axis for vmapping...
 
-    x_ = jax.vmap(compression_fn, in_axes=(0, None))(datavectors, dataset.alpha) # Compressed datavectors, NOTE: at true parameters
+    # Compressed datavectors, NOTE: at true parameters
+    x_ = jax.vmap(compression_fn, in_axes=(0, None))(datavectors, dataset.alpha) 
 
     X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
 
@@ -167,6 +168,9 @@ def get_z_config_and_datavector(
     )
     ensemble = eqx.tree_deserialise_leaves(ensemble_path, ensemble)
 
+    if verbose:
+        print("Datavectors", datavectors.shape)
+
     return (
         ensemble, 
         x_, 
@@ -187,7 +191,9 @@ def get_multi_redshift_mle(
     Finv: Float[Array, "p p"], 
     mus: list[Float[Array, "d"]], 
     covariances: list[Float[Array, "d d"]], 
-    derivatives: list[Float[Array, "p d"]]
+    derivatives: list[Float[Array, "p d"]],
+    *,
+    verbose: bool = False
 ) -> Float[Array, "p"]:
     """ Chi2 minimisation using block-diagonalised simulation-estimated data covariance """
 
@@ -200,7 +206,8 @@ def get_multi_redshift_mle(
     mu = jnp.concatenate(mus)
     d = jnp.concatenate(d)
 
-    print("D, mu, C, dmu:", d.shape, mu.shape, C.shape, derivatives.shape)
+    if verbose:
+        print("D, mu, C, dmu:", d.shape, mu.shape, C.shape, derivatives.shape)
 
     return pi + jnp.linalg.multi_dot([Finv, derivatives, Cinv, d - mu]) # d is z-concatenated datavector
 
@@ -212,23 +219,27 @@ def maybe_vmap_multi_redshift_mle(
     Finv: Float[Array, "p p"], 
     mus: list[Float[Array, "d"]], 
     covariances: list[Float[Array, "d d"]], 
-    derivatives: list[Float[Array, "p d"]]
+    derivatives: list[Float[Array, "p d"]],
+    *,
+    verbose: bool = False
 ) -> Float[Array, "n p"]:
 
     # Vmap MLE function over datavectors if plural
     # datavectors multiple per redshift, covariances are one per redshift...
     fn = lambda d: get_multi_redshift_mle(
-        pi, d, Finv, mus, covariances, derivatives
+        pi, d, Finv, mus, covariances, derivatives, verbose=verbose
     )
 
-    print("DATAVECTORS", [_.shape for _ in datavectors])
+    if verbose:
+        print("DATAVECTORS", [_.shape for _ in datavectors])
 
     # Shape: (n, z, d)
     datavectors = jnp.stack(datavectors, axis=1) # Stack list of datavectors ... NOTE: may be wrongly shaped...
 
     assert datavectors.shape.ndim == 3
 
-    print("DATAVECTORS", datavectors.shape)
+    if verbose:
+        print("DATAVECTORS", datavectors.shape)
 
     # Vmaps over first axis, concatenates them inside 'fn'
     x = jax.vmap(fn)(datavectors) 
@@ -288,7 +299,7 @@ if __name__ == "__main__":
             ensemble, 
             x_z, 
             datavector, 
-            prior, 
+            prior, # Same prior for each z
             alpha, 
             Finv_z, 
             C, 
@@ -303,10 +314,11 @@ if __name__ == "__main__":
             reduced_cumulants=args.reduced_cumulants,
             redshift=redshift, 
             n_datavectors=args.n_datavectors,
-            pre_train=args.pre_train
-        ) # x_ norm'd in model
+            pre_train=args.pre_train,
+            verbose=args.verbose
+        ) 
 
-        # Add Fisher information from redshift (independent)
+        # Add Fisher information from redshift (independent; Limber)
         F += jnp.linalg.inv(Finv_z)
 
         derivatives_.append(derivatives)
@@ -318,7 +330,7 @@ if __name__ == "__main__":
 
     multi_ensemble = MultiEnsemble(
         ensembles, prior=prior, sbi_type=config.sbi_type
-    ) # Same prior for each z
+    ) 
 
     Finv = jnp.linalg.inv(F) # Combined Fisher information over all redshifts
 
@@ -360,7 +372,7 @@ if __name__ == "__main__":
         # )
 
         state = jr.multivariate_normal(
-            key_state, alpha, Finv, (2 * config.n_walkers,) # x_
+            key_state, x_, Finv, (2 * config.n_walkers,) # x_
         )
 
         if args.verbose:
