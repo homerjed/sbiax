@@ -2,12 +2,13 @@ import os
 from pathlib import Path
 import numpy as np
 
-ROOT_DIR = str(Path(__file__).resolve().parent.parent) # This file is in repo/subfolder/
+# This file is in repo/subfolder/ w.r.t. .git root
+ROOT_DIR = str(Path(__file__).resolve().parent.parent) 
 
 # Results and plots directories
-RESULTS_DIR = os.path.join(ROOT_DIR, "results/") # "/Users/Jed.Homer/phd/sbiaxpdf/results/"
-POSTERIORS_DIR = os.path.join(ROOT_DIR, "results/posteriors/") #"/Users/Jed.Homer/phd/sbiaxpdf/results/posteriors/"
-FIGS_DIR = os.path.join(ROOT_DIR, "results/") #"/Users/Jed.Homer/phd/sbiaxpdf/results/figs/" # General plots
+RESULTS_DIR = os.path.join(ROOT_DIR, "results/") 
+POSTERIORS_DIR = os.path.join(ROOT_DIR, "results/posteriors/") 
+FIGS_DIR = os.path.join(ROOT_DIR, "results/") 
 
 # Save and load directories for quijote data
 DATA_DIR = os.path.join(ROOT_DIR, "quijote_data/") # "/Users/Jed.Homer/phd/sbiaxpdf/sbiax/quijote_data/"

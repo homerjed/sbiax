@@ -1,11 +1,12 @@
-import argparse
 from typing import Tuple, Optional, Literal
 import os
+
 import jax
 import jax.numpy as jnp
 import jax.random as jr
 import equinox as eqx
 from jaxtyping import PRNGKeyArray, Float, Array, jaxtyped
+
 from beartype import beartype as typechecker
 import numpy as np
 from ml_collections import ConfigDict
@@ -13,8 +14,6 @@ from scipy.linalg import block_diag
 import matplotlib.pyplot as plt
 from chainconsumer import ChainConsumer, Chain, Truth
 from tensorflow_probability.substrates.jax.distributions import Distribution
-
-typecheck = jaxtyped(typechecker=typechecker)
 
 from configs import (
     cumulants_config, 
@@ -43,8 +42,12 @@ from sbiax.compression.linear import mle
 from sbiax.inference import nuts_sample
 from sbiax.utils import make_df, marker
 
+from cumulants import CumulantsDataset
 from ensemble import Ensemble, MultiEnsemble
+from pca import PCA
 from affine import affine_sample
+
+typecheck = jaxtyped(typechecker=typechecker)
 
 
 def default(v, d):
@@ -127,41 +130,26 @@ def get_z_config_and_datavector(
     config_z.reduced_cumulants = reduced_cumulants
     config_z.compression = compression
 
-    # Get dataset, compressor
+    cumulants_dataset = CumulantsDataset(config, results_dir=None)
+
+    dataset: Dataset = cumulants_dataset.data
+
+    parameter_prior: Distribution = cumulants_dataset.prior # Quijote prior (same for all z, only applied once with combined z-likelihoods)
+
     dataset: Dataset = get_data(config_z)
 
-    compressor = get_linear_compressor(config_z)
-
-    # NOTE: not supported for NN compression
-    if config_z.use_pca:
-        # Compress simulations as usual 
-        X = jax.vmap(compressor)(dataset.data, dataset.parameters)
-
-        # Standardise before PCA (don't get tricked by high variance due to units)
-        X = (X - jnp.mean(X, axis=0)) / jnp.std(X, axis=0)
-
-        # Fit whitening-PCA to compressed simulations
-        pca = PCA(num_components=dataset.alpha.size)
-        pca.fit(X)
-        
-        # Reparameterize compression with both transforms
-        compression_fn = lambda d, p: pca.transform(compressor(d, p))
-    else:
-        compression_fn = lambda d, p: compressor(d, p)
-
-    # Generates linearised (or not) datavector 
-    datavectors = get_datavector(key_datavector, config_z, n=n_datavectors)
+    compression_fn = cumulants_dataset.get_compression_fn() # NOTE: not supported for NN compression
+ 
+    datavectors = cumulants_dataset.get_datavector(key_datavector, n=n_datavectors) # Generates linearised (or not) datavector 
 
     if datavectors.ndim == 1:
-        datavectors = datavectors[jnp.newaxis, ...]
+        datavectors = datavectors[jnp.newaxis, ...] # Add axis for vmapping...
 
-    # Compressed datavectors (each simulated at alpha parameters)
-    x_ = jax.vmap(compression_fn, in_axes=(0, None))(datavectors, dataset.alpha) # NOTE: at true parameters
+    x_ = jax.vmap(compression_fn, in_axes=(0, None))(datavectors, dataset.alpha) # Compressed datavectors, NOTE: at true parameters
 
-    # Compress whole simulation dataset 
     X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
 
-    # Input scaler functions for individual NDEs
+    # Input scaler functions for individual NDEs (NOTE: scaling on X which may need to be linearised or not)
     scalers = [
         Scaler(X, dataset.parameters, use_scaling=nde.use_scaling)
         for nde in config_z.ndes
@@ -181,14 +169,11 @@ def get_z_config_and_datavector(
     )
     ensemble = eqx.tree_deserialise_leaves(ensemble_path, ensemble)
 
-    # Quijote prior (same for all z, only applied once with combined z-likelihoods)
-    prior = get_prior(config_z) 
-
     return (
         ensemble, 
         x_, 
         datavectors,
-        prior, 
+        parameter_prior, 
         jnp.asarray(dataset.alpha), 
         jnp.asarray(dataset.Finv), 
         jnp.asarray(dataset.C), 
@@ -242,8 +227,8 @@ def maybe_vmap_multi_redshift_mle(
 
     # Shape: (n, z, d)
     datavectors = jnp.stack(datavectors, axis=1) # Stack list of datavectors ... NOTE: may be wrongly shaped...
+
     assert datavectors.shape.ndim == 3
-    n_realisations, *_ = datavectors.shape
 
     print("DATAVECTORS", datavectors.shape)
 
@@ -275,10 +260,12 @@ if __name__ == "__main__":
 
     # Where SBI's are saved (add on suffix for experiment details)
     posteriors_dir = get_base_posteriors_dir()
+
     if config.reduced_cumulants:
         exps_dir = "{}reduced_cumulants_multi_z/".format(posteriors_dir) # Import this from a constants file
     else:
         exps_dir = "{}cumulants_multi_z/".format(posteriors_dir) # Import this from a constants file
+
     figs_dir = "{}figs/".format(posteriors_dir)
 
     if not os.path.exists(figs_dir):
