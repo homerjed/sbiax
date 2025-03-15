@@ -136,8 +136,6 @@ def get_z_config_and_datavector(
 
     parameter_prior: Distribution = cumulants_dataset.prior # Quijote prior (same for all z, only applied once with combined z-likelihoods)
 
-    dataset: Dataset = get_data(config_z)
-
     compression_fn = cumulants_dataset.get_compression_fn() # NOTE: not supported for NN compression
  
     datavectors = cumulants_dataset.get_datavector(key_datavector, n=n_datavectors) # Generates linearised (or not) datavector 
