@@ -28,6 +28,8 @@ from sbiax.utils import marker
 
 typecheck = jaxtyped(typechecker=typechecker)
 
+CompressionFn = Callable[[Float[Array, "d"], Float[Array, "p"]], Float[Array, "p"]]
+
 
 def hartlap(n_s: int, n_d: int) -> float: 
     return (n_s - n_d - 2) / (n_s - 1)
@@ -757,34 +759,55 @@ def get_linear_compressor(
     return partial(compressor, mu=mu, dmu=dmu)
 
 
-def get_nn_compressor(key, dataset, data_preprocess_fn=None, *, results_dir):
+@typecheck
+def get_nn_compressor(
+    key: PRNGKeyArray, 
+    dataset: Dataset, 
+    data_preprocess_fn: Optional[Callable] = None, 
+    *, 
+    net: Optional[eqx.Module] = None,
+    use_precision: bool = False, # Use parameter precision in loss (e.g. minimise chi2 or not)
+    n_batch: int = 500,
+    n_steps: int = 50_000,
+    patience: int = 1000,
+    optimiser: optax.GradientTransformation = optax.adam(1e-3),
+    results_dir: str
+) -> tuple[eqx.Module, Callable]:
+
     net_key, train_key = jr.split(key)
 
     if data_preprocess_fn is None:
         data_preprocess_fn = lambda x: x
 
-    net = eqx.nn.MLP(
-        dataset.data.shape[-1], 
-        dataset.parameters.shape[-1], 
-        width_size=32, 
-        depth=1, 
-        activation=jax.nn.tanh,
-        key=net_key
-    )
+    if net is None:
+        net = eqx.nn.MLP(
+            dataset.data.shape[-1], 
+            dataset.parameters.shape[-1], 
+            width_size=32, 
+            depth=1, 
+            activation=jax.nn.tanh,
+            key=net_key
+        )
 
     def preprocess_fn(x): 
         # Preprocess with covariance?
         return (jnp.asarray(x) - jnp.mean(dataset.data, axis=0)) / jnp.std(dataset.data, axis=0)
 
+    # Optimal chi2 loss or not
+    if use_precision:
+        precision = jnp.linalg.inv(dataset.Finv)
+    else: 
+        precision = None
+
     net, losses = fit_nn(
         train_key, 
         net, 
         (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
-        opt=optax.adam(1e-3), 
-        precision=jnp.linalg.inv(dataset.Finv), # In reality this varies with parameters
-        n_batch=500, 
-        patience=1000,
-        n_steps=50_000
+        opt=optimiser, 
+        precision=precision, # In reality this varies with parameters
+        n_batch=n_batch, 
+        n_steps=n_steps,
+        patience=patience,
     )
 
     plt.figure()
@@ -795,15 +818,29 @@ def get_nn_compressor(key, dataset, data_preprocess_fn=None, *, results_dir):
     return net, preprocess_fn
 
 
-def get_compression_fn(key, config, dataset, *, results_dir):
+@typecheck
+def get_compression_fn(
+    key: PRNGKeyArray, 
+    config: ConfigDict, 
+    dataset: Dataset, 
+    *, 
+    net_kwargs: dict = {}, 
+    data_preprocess_fn: Optional[Callable] = None, 
+    results_dir: str
+) -> CompressionFn:
+    
     # Get linear or neural network compressor
     if config.compression == "nn":
 
         net, preprocess_fn = get_nn_compressor(
-            key, dataset, results_dir=results_dir
+            key, 
+            dataset, 
+            data_preprocess_fn=data_preprocess_fn, 
+            **net_kwargs, 
+            results_dir=results_dir
         )
 
-        compressor = lambda d, p: net(preprocess_fn(d)) # Ignore parameter kwarg!
+        compressor = lambda d, p: net(preprocess_fn(d)) # Ignore parameter kwarg for NN
 
     if config.compression == "linear":
         compressor = get_linear_compressor(config, dataset)
@@ -843,13 +880,15 @@ class CumulantsDataset:
     config: ConfigDict
     data: Dataset
     prior: tfd.Distribution
-    compression_fn: Callable
+    compression_fn: CompressionFn
     results_dir: str
 
     def __init__(
         self, 
         config: ConfigDict, 
         *, 
+        net_kwargs: dict = {},
+        data_preprocess_fn: Optional[Callable] = None,
         verbose: bool = False, 
         results_dir: Optional[str] = None
     ):
@@ -863,10 +902,30 @@ class CumulantsDataset:
 
         key = jr.key(config.seed)
         self.compression_fn = get_compression_fn(
-            key, self.config, self.data, results_dir=results_dir
+            key, 
+            self.config, 
+            self.data, 
+            net_kwargs=net_kwargs, 
+            data_preprocess_fn=data_preprocess_fn, 
+            results_dir=results_dir
         )
 
         self.results_dir = results_dir
+
+    def get_compression_fn(
+        self, 
+        key: PRNGKeyArray, 
+        *, 
+        net_kwargs: dict = {},
+    ):
+        # Get compression function (e.g. supply more args than default)
+        return get_compression_fn(
+            key, 
+            self.config, 
+            self.data, 
+            net_kwargs=net_kwargs, 
+            results_dir=self.results_dir
+        )
 
     def get_parameter_strings(self):
         return get_parameter_strings()
@@ -876,9 +935,9 @@ class CumulantsDataset:
         P = sample_prior(
             key, 
             n, 
-            self.data.alpha, 
-            self.data.lower, 
-            self.data.upper, 
+            alpha=self.data.alpha, 
+            lower=self.data.lower, 
+            upper=self.data.upper, 
             hypercube=hypercube
         )
         return P
