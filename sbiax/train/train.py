@@ -536,12 +536,6 @@ def train_nde(
     else:
         plt.show()
 
-    # Save NDE model
-    if results_dir is not None:
-        eqx.tree_serialise_leaves(
-            os.path.join(results_dir, "cnf.eqx"), model
-        )
-
     # Use test data for validation else just validation set
     if test_data is not None:
         X, Y = test_data 
@@ -706,6 +700,8 @@ def train_ensemble(
     print("Weights:", ensemble.weights)
 
     if results_dir is not None:
-        eqx.tree_serialise_leaves(os.path.join(results_dir, "ensemble.eqx"), ensemble)
+        ensemble_save_path = os.path.join(results_dir, "ensemble.eqx")
+        eqx.tree_serialise_leaves(ensemble_save_path, ensemble)
+        print("Saved ensemble at {}".format(ensemble_save_path))
 
     return ensemble, stats

@@ -203,7 +203,7 @@ class MultiEnsemble(eqx.Module):
 
             # Don't need this loop? tree map or something?
             for ensemble, _datavectors in zip(self.ensembles, datavectors):
-                ensemble_log_L = ensemble.ensemble_likelihood(_datavectors)(theta) 
+                ensemble_log_L = ensemble.ensemble_likelihood(_datavectors)(theta) # No use of prior
                 L = L + ensemble_log_L
 
             if self.sbi_type == "nle":

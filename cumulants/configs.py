@@ -46,10 +46,11 @@ def make_dirs(results_dir: str) -> None:
     print("RESULTS_DIR:\n", results_dir)
 
 
-def get_results_dir(config: ConfigDict, args: dict) -> str:
+def get_results_dir(config: ConfigDict, args: dict, *, arch_search: bool = False) -> str:
 
     results_dir = "{}{}{}{}{}{}{}{}".format( # Import this from a constants file
         get_base_results_dir(),
+        "arch_search/" if arch_search else "",
         "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
         (config.sbi_type + "/") if config.sbi_type else "" ,
         "linearised/" if config.linearised else "nonlinearised/",
@@ -71,10 +72,11 @@ def get_results_dir(config: ConfigDict, args: dict) -> str:
     return results_dir
 
 
-def get_posteriors_dir(config: ConfigDict) -> str:
+def get_posteriors_dir(config: ConfigDict, *, arch_search: bool = False) -> str:
 
     results_dir = "{}{}{}{}{}{}{}{}".format( 
         get_base_posteriors_dir(),
+        "arch_search/" if arch_search else "",
         "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
         (config.sbi_type + "/") if config.sbi_type else "" ,
         "linearised/" if config.linearised else "nonlinearised/",
@@ -106,8 +108,8 @@ def get_multi_z_posterior_dir(config: ConfigDict, sbi_type: str = None) -> str:
 
 
 def args_to_namedtuple(args):
-    ArgsTuple = namedtuple("ArgsTuple", vars(args).keys())  # Create namedtuple type
-    args = ArgsTuple(**vars(args))  # Convert Namespace to namedtuple
+    ArgsTuple = namedtuple("ArgsTuple", vars(args).keys()) # Create namedtuple type
+    args = ArgsTuple(**vars(args)) # Convert Namespace to namedtuple
     return args
 
 
@@ -147,7 +149,7 @@ def get_cumulants_sbi_args(using_notebook: bool = False):
     parser.add_argument(
         "-n",
         "--n_linear_sims", 
-        default=100_000,
+        default=10_000,
         type=int,
         help="Number of linearised simulations (used for pre-training if non-linear simulations and requested)."
     )
@@ -241,7 +243,7 @@ def get_cumulants_multi_z_args(using_notebook: bool = False):
         "-n",
         "--n_linear_sims", 
         type=int,
-        default=100_000,
+        default=10_000,
         help="Number of linearised simulations (used for pre-training if non-linear simulations and requested)."
     )
     parser.add_argument(
@@ -250,6 +252,14 @@ def get_cumulants_multi_z_args(using_notebook: bool = False):
         default=False,
         action=argparse.BooleanOptionalAction, 
         help="Pre-train (only) when using non-linearised model for datavector. Pre-train on linearised simulations."
+    )
+    parser.add_argument(
+        "-z", 
+        "--redshifts",
+        default=[0.0, 0.5, 1.0],
+        nargs="+", 
+        type=float,
+        help="Redshifts."
     )
     parser.add_argument(
         "-o", 
@@ -271,7 +281,7 @@ def get_cumulants_multi_z_args(using_notebook: bool = False):
         "-n_d",
         "--n_datavectors", 
         type=int,
-        default=3,
+        default=2,
         help="Number of independent datavectors to measure at each redshift." # NOTE: possibly make this depend on redshift, a list of ints
     )
     parser.add_argument(
@@ -390,7 +400,7 @@ def cumulants_config(
     config.exp_name           = "z={}_m={}".format(config.redshift, "".join(map(str, config.order_idx)))
 
     # Posterior sampling
-    config.n_steps            = 100
+    config.n_steps            = 200
     config.n_walkers          = 1000
     config.burn               = int(0.1 * config.n_steps)
 
@@ -432,11 +442,11 @@ def cumulants_config(
         # NDEs
         config.cnf = cnf = ConfigDict()
         cnf.model_type       = "cnf"
-        cnf.width_size       = 8 
-        cnf.depth            = 0
+        cnf.width_size       = 32 # 8
+        cnf.depth            = 2 # 0
         cnf.activation       = "tanh"
         cnf.dropout_rate     = 0.
-        cnf.dt               = 0.1
+        cnf.dt               = 0.01
         cnf.t1               = 1.
         cnf.solver           = "Euler"
         cnf.exact_log_prob   = True
@@ -467,8 +477,8 @@ def cumulants_config(
         train.start_step     = 0
         train.n_epochs       = 10_000
         train.n_batch        = 100 
-        train.patience       = 10
-        train.lr             = 1e-4
+        train.patience       = 100
+        train.lr             = 1e-3
         train.opt            = "adam" 
         train.opt_kwargs     = {}
 
@@ -481,8 +491,10 @@ def ensembles_cumulants_config(
     exp_name: str = "",
     sbi_type: str = "nle", 
     linearised: bool = True, 
+    n_linear_sims: int = 10_000,
     compression: Literal["linear", "nn"] = "linear",
     reduced_cumulants: bool = True,
+    redshifts: list[float] = [0.0, 0.5, 1.0],
     order_idx: list[int] = [0, 1, 2],
     pre_train: bool = False
 ) -> ConfigDict:
@@ -497,15 +509,16 @@ def ensembles_cumulants_config(
 
     # Data
     config.dataset_name      = "cumulants" 
-    config.redshifts         = [0.0, 0.5, 1.0] # Redshifts to combine
+    config.redshifts         = redshifts # Redshifts to combine
     config.scales            = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
     config.order_idx         = order_idx
+    config.n_linear_sims     = n_linear_sims
     config.compression       = compression
     config.reduced_cumulants = reduced_cumulants
     config.linearised        = linearised 
     config.pre_train         = pre_train and (not linearised) # Load linearised or pre-trained models
 
-    config.use_ema           = True # Use it and sample with it
+    config.use_ema           = False # Use it and sample with it
 
     # Posterior sampling
     config.n_steps           = 200
@@ -513,3 +526,177 @@ def ensembles_cumulants_config(
     config.burn              = int(0.1 * config.n_steps)
 
     return config
+
+
+@typecheck
+def arch_search_config(
+    seed: int = 0, 
+    exp_name: str = "",
+    sbi_type: str = "nle", 
+    linearised: bool = True, 
+    n_linear_sims: int = 10_000,
+    compression: Literal["linear", "nn"] = "linear",
+    reduced_cumulants: bool = True,
+    redshifts: list[float] = [0.0, 0.5, 1.0],
+    order_idx: list[int] = [0, 1, 2],
+    pre_train: bool = False
+) -> ConfigDict:
+
+    config = ConfigDict()
+
+    config.seed              = seed # NOTE: seed that ensemble configs run at also!
+    config.sbi_type          = sbi_type
+    config.exp_name_format   = "z={}_m={}" #.format(config.redshift, "".join(map(str, config.order_idx)))
+
+    config.compression       = compression
+
+    # Data
+    config.dataset_name      = "cumulants" 
+    config.redshifts         = redshifts # Redshifts to combine
+    config.scales            = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
+    config.order_idx         = order_idx
+    config.n_linear_sims     = n_linear_sims
+    config.compression       = compression
+    config.reduced_cumulants = reduced_cumulants
+    config.linearised        = linearised 
+    config.pre_train         = pre_train and (not linearised) # Load linearised or pre-trained models
+
+    # Trials
+    config.n_trials         = 500 # Number of trials in hyperparameter optimisation (per process)
+    config.n_startup_trials = 50 # Number of warmup trials in hyperparameter optimisation
+    config.n_processes      = 10
+
+    return config
+
+
+
+def get_arch_search_args(using_notebook: bool = False):
+    # parser = argparse.ArgumentParser(
+    #     description="Run architecture and hyperparameters search for cumulants SBI."
+    # )
+    # parser.add_argument(
+    #     "-s", 
+    #     "--seed", 
+    #     type=int, 
+    #     help="Seed for random number generation.", 
+    #     default=0
+    # )
+    # parser.add_argument(
+    #     "-l",
+    #     "--linearised", 
+    #     default=True,
+    #     action=argparse.BooleanOptionalAction, 
+    #     help="Linearised model for datavector."
+    # )
+    # parser.add_argument(
+    #     "-r",
+    #     "--reduced-cumulants", 
+    #     default=True,
+    #     action=argparse.BooleanOptionalAction, 
+    #     help="Reduced cumulants or not."
+    # )
+    # parser.add_argument(
+    #     "-c",
+    #     "--compression", 
+    #     default="linear",
+    #     choices=["linear", "nn"],
+    #     type=str,
+    #     help="Compression with neural network or MOPED."
+    # )
+    # parser.add_argument(
+    #     "-n",
+    #     "--n_linear_sims", 
+    #     type=int,
+    #     default=10_000,
+    #     help="Number of linearised simulations (used for pre-training if non-linear simulations and requested)."
+    # )
+    # parser.add_argument(
+    #     "-p",
+    #     "--pre-train", 
+    #     default=False,
+    #     action=argparse.BooleanOptionalAction, 
+    #     help="Pre-train (only) when using non-linearised model for datavector. Pre-train on linearised simulations."
+    # )
+    # parser.add_argument(
+    #     "-z", 
+    #     "--redshifts",
+    #     default=[0.0, 0.5, 1.0],
+    #     nargs="+", 
+    #     type=float,
+    #     help="Redshifts."
+    # )
+    # parser.add_argument(
+    #     "-o", 
+    #     "--order_idx",
+    #     default=[0, 1, 2],
+    #     nargs="+", 
+    #     type=int,
+    #     help="Indices of variance, skewness and kurtosis sample cumulants."
+    # )
+    # parser.add_argument(
+    #     "-t",
+    #     "--sbi_type", 
+    #     choices=["nle", "npe"],
+    #     default="nle",
+    #     type=str,
+    #     help="Method of SBI: neural likelihood (NLE) or posterior (NPE)."
+    # )
+    # parser.add_argument(
+    #     "-n_t",
+    #     "--n_trials", 
+    #     type=int,
+    #     default=100,
+    #     help="" 
+    # )
+    # parser.add_argument(
+    #     "-n_st",
+    #     "--n_startup_trials", 
+    #     type=int,
+    #     default=10,
+    #     help="" 
+    # )
+    # parser.add_argument(
+    #     "-m",
+    #     "--multiprocess", 
+    #     default=True,
+    #     action=argparse.BooleanOptionalAction, 
+    #     help="Reduced cumulants or not."
+    # )
+    # parser.add_argument(
+    #     "-n_pro",
+    #     "--n_processes", 
+    #     type=int,
+    #     default=10,
+    #     help="" 
+    # )
+    # parser.add_argument(
+    #     "-n_par",
+    #     "--n_parallel", 
+    #     type=int,
+    #     default=10,
+    #     help="" 
+    # )
+    # parser.add_argument(
+    #     "-v",
+    #     "--verbose", 
+    #     default=False,
+    #     action=argparse.BooleanOptionalAction, 
+    #     help="Say what's going on."
+    # )
+
+    # if using_notebook:
+    #     args = parser.parse_args([])
+    #     args = args_to_namedtuple(args)
+    # else:
+    #     args = parser.parse_args()
+
+    class Args:
+        n_parallel = 10
+        n_processes = 10
+        multiprocess = True
+        n_trials = 100
+        n_startup_trials = 10
+
+    args = Args()
+
+    return args

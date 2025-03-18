@@ -664,13 +664,18 @@ def get_data(config: ConfigDict, *, verbose: bool = False, results_dir: Optional
 
 @typecheck
 def get_datavector(
-    key: PRNGKeyArray, config: ConfigDict, dataset: Dataset, n: int = 1
+    key: PRNGKeyArray, 
+    config: ConfigDict, 
+    dataset: Dataset, 
+    n: int = 1, 
+    *, 
+    use_expectation: bool = False
 ) -> Float[Array, "... d"]:
     """ Measurement: either Gaussian linear model or not """
 
     # Choose a linearised model datavector or simply one of the Quijote realisations
     # which corresponds to a non-linearised datavector with Gaussian noise
-    if not config.use_expectation:
+    if (not config.use_expectation) or (not use_expectation):
         if config.linearised:
             mu = jnp.mean(dataset.fiducial_data, axis=0)
 
@@ -876,9 +881,9 @@ class CumulantsDataset:
         P = sample_prior(
             key, 
             n, 
-            self.data.alpha, 
-            self.data.lower, 
-            self.data.upper, 
+            alpha=self.data.alpha, 
+            lower=self.data.lower, 
+            upper=self.data.upper, 
             hypercube=hypercube
         )
         return P

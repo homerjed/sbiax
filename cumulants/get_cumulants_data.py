@@ -80,7 +80,6 @@ for n in trange(n_fiducials, desc="Fiducials"):
 
             print(cumulants_n[:, n_moments_start:])
             assert cumulants_n[:, n_moments_start:].shape == (7, 3)
-            breakpoint()
 
         except FileNotFoundError:
             print("bad", n)
