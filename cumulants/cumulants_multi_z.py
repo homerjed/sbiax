@@ -23,6 +23,7 @@ from sbiax.utils import make_df, marker
 from configs import (
     cumulants_config, 
     ensembles_cumulants_config,
+    ensembles_bulk_cumulants_config,
     get_base_results_dir, 
     get_base_posteriors_dir,
     get_results_dir, 
@@ -42,6 +43,7 @@ from cumulants import (
     get_linearised_data,
     get_parameter_strings
 )
+from pdfs import BulkCumulantsDataset, get_bulk_dataset
 from cumulants_ensemble import Ensemble, MultiEnsemble
 from pca import PCA
 from affine import affine_sample
@@ -93,6 +95,7 @@ def get_z_config_and_datavector(
     sbi_type: str = "nle",
     exp_name_format: str = "z={}_m={}",
     n_datavectors: int = 1,
+    bulk_or_tails: Literal["tails", "bulk"] = "tails",
     *,
     verbose: bool = False
 ) -> tuple[
@@ -108,13 +111,36 @@ def get_z_config_and_datavector(
 ]:
     """ 
         Get config and datavector associated with a redshift z to load the experiment 
+        for use in an ensemble of SBI likelihoods at different redshifts
     """
+
+    def get_dataset_and_config(bulk_or_tails):
+        if bulk_or_tails == "bulk":
+            dataset_constructor = BulkCumulantsDataset
+            config = bulk_cumulants_config 
+        if bulk_or_tails == "tails":
+            dataset_constructor = CumulantsDataset
+            config = cumulants_config 
+        return dataset_constructor 
 
     key_datavector, key_model = jr.split(key)
 
+    _dataset, _config = get_dataset_and_config(bulk_or_tails) 
+
     # Get config and change redshift to load each ensemble and datavector
     config_z = cumulants_config(
-        seed=args.seed, 
+        seed=seed, 
+        redshift=redshift, 
+        linearised=linearised, 
+        compression=compression,
+        reduced_cumulants=reduced_cumulants,
+        n_linear_sims=n_linear_sims,
+        order_idx=order_idx,
+        pre_train=pre_train
+    )
+
+    bulk_config_z = bulk_cumulants_config(
+        seed=seed, 
         redshift=redshift, 
         linearised=linearised, 
         compression=compression,
@@ -125,6 +151,7 @@ def get_z_config_and_datavector(
     )
 
     if verbose: 
+        print("bulk or tails", bulk_or_tails)
         print(config_z)
 
     # Set to current redshift, ensure matching NLE or NPE and linearisation
@@ -132,7 +159,14 @@ def get_z_config_and_datavector(
 
     cumulants_dataset = CumulantsDataset(config_z, results_dir=None, verbose=verbose)
 
+    bulk_cumulants_dataset = BulkCumulantsDataset(bulk_config_z, results_dir=None, verbose=verbose)
+
     dataset: Dataset = cumulants_dataset.data
+
+    bulk_dataset: Dataset = bulk_cumulants_dataset.data
+
+    # bulk_pdfs = True
+    # bulk_dataset: Dataset = get_bulk_dataset(args, pdfs=bulk_pdfs) # For Fisher forecast comparisons
 
     parameter_prior: Distribution = cumulants_dataset.prior # Quijote prior (same for all z, only applied once with combined z-likelihoods)
 
@@ -187,8 +221,10 @@ def get_z_config_and_datavector(
         datavectors,
         parameter_prior, 
         jnp.asarray(dataset.alpha), 
-        jnp.asarray(dataset.Finv), 
-        jnp.asarray(dataset.C), 
+        # Scale data and parameter covariances by number of measurements
+        jnp.asarray(bulk_dataset.Finv) / n_datavectors, 
+        jnp.asarray(dataset.Finv) / n_datavectors, 
+        jnp.asarray(dataset.C) / n_datavectors, 
         jnp.mean(dataset.fiducial_data, axis=0), 
         jnp.mean(dataset.derivatives, axis=0)
     )
@@ -263,7 +299,13 @@ if __name__ == "__main__":
 
     args = get_cumulants_multi_z_args()
 
-    config = ensembles_cumulants_config(
+    # Multi-z inference concerning the bulk or bulk + tails
+    if args.bulk_or_tails == "tails":
+        ensembles_config = ensembles_cumulants_config
+    if args.bulk_or_tails == "bulk":
+        ensembles_config = ensembles_bulk_cumulants_config
+
+    config = ensembles_config(
         seed=args.seed, # Defaults if run without argparse args
         sbi_type=args.sbi_type, 
         linearised=args.linearised,
@@ -312,7 +354,9 @@ if __name__ == "__main__":
         derivatives_ = [] # Derivatives of theory model at each redshift 
         mus          = [] # Expectation model at each redshift 
         Finvs        = [] # Fisher parameter covariances at each redshift
+        bulk_Finvs   = [] # Fisher parameter covariances at each redshift
         F            = jnp.zeros(()) # Add independent information from data at each redshift 
+        F_bulk       = jnp.zeros(())
 
         with trange(len(config.redshifts), desc="Multi-z", colour="magenta") as bar:
             for _, (z, redshift) in zip(bar, enumerate(config.redshifts)):
@@ -329,6 +373,7 @@ if __name__ == "__main__":
                     datavector, 
                     prior, # Same prior for each z
                     alpha, # Datavectors generated at these parameters for each redshift
+                    bulk_Finv_z,
                     Finv_z, 
                     C, 
                     mu, 
@@ -344,11 +389,13 @@ if __name__ == "__main__":
                     redshift=redshift, 
                     n_datavectors=args.n_datavectors,
                     pre_train=args.pre_train,
+                    bulk_or_tails=args.bulk_or_tails,
                     verbose=args.verbose
                 ) 
 
                 # Add Fisher information from redshift (independent; Limber)
                 F += jnp.linalg.inv(Finv_z)
+                F_bulk += jnp.linalg.inv(bulk_Finv_z)
 
                 derivatives_.append(derivatives)
                 mus.append(mu)
@@ -356,6 +403,7 @@ if __name__ == "__main__":
                 x_s.append(x_z)
                 datavectors.append(datavector)
                 Finvs.append(Finv_z)
+                bulk_Finvs.append(bulk_Finv_z)
                 ensembles.append(ensemble)      
                 
                 bar.set_postfix_str("z={}".format(redshift))
@@ -366,6 +414,7 @@ if __name__ == "__main__":
         ) 
 
         Finv_all_z = jnp.linalg.inv(F) # Combined Fisher information over all redshifts
+        bulk_Finv_all_z = jnp.linalg.inv(F_bulk) # Combined Fisher information over all redshifts
 
         if args.verbose:
             # Plot Fisher forecast
@@ -381,6 +430,18 @@ if __name__ == "__main__":
                         shade_alpha=0.
                     )
                 )
+            for z, bulk_Finv_z in zip(config.redshifts, bulk_Finvs):
+                c.add_chain(
+                    Chain.from_covariance(
+                        alpha,
+                        bulk_Finv_z,
+                        columns=parameter_strings,
+                        name=r"$F_{\Sigma^{-1}}$ z=" + str(z) + " [bulk]",
+                        linestyle=":",
+                        color="g",
+                        shade_alpha=0.
+                    )
+                )
             c.add_chain(
                 Chain.from_covariance(
                     alpha,
@@ -388,6 +449,16 @@ if __name__ == "__main__":
                     columns=parameter_strings,
                     name=r"$F_{\Sigma^{-1}}$ (all z)",
                     color="k",
+                    shade_alpha=0.
+                )
+            )
+            c.add_chain(
+                Chain.from_covariance(
+                    alpha,
+                    bulk_Finv_all_z,
+                    columns=parameter_strings,
+                    name=r"$F_{\Sigma^{-1}}$ (all z) [bulk]",
+                    color="g",
                     shade_alpha=0.
                 )
             )
@@ -469,9 +540,7 @@ if __name__ == "__main__":
         # assert jnp.all(jnp.isfinite(samples))
 
         # Save posterior, Fisher and summary
-        posterior_save_dir = get_multi_z_posterior_dir(
-            config, default(args.sbi_type, "nle")
-        )
+        posterior_save_dir = get_multi_z_posterior_dir(config, args)
         if not os.path.exists(posterior_save_dir):
             os.makedirs(posterior_save_dir, exist_ok=True)
 
@@ -501,6 +570,16 @@ if __name__ == "__main__":
                 name=r"$F_{\Sigma^{-1}}$",
                 color="k",
                 linestyle=":",
+                shade_alpha=0.
+            )
+        )
+        c.add_chain(
+            Chain.from_covariance(
+                alpha,
+                bulk_Finv_all_z,
+                columns=parameter_strings,
+                name=r"$F_{\Sigma^{-1}}$ (all z) [bulk]",
+                color="g",
                 shade_alpha=0.
             )
         )
@@ -564,6 +643,16 @@ if __name__ == "__main__":
                 name=r"$F_{\Sigma^{-1}}$",
                 color="k",
                 linestyle=":",
+                shade_alpha=0.
+            )
+        )
+        c.add_chain(
+            Chain.from_covariance(
+                alpha[ix],
+                bulk_Finv_all_z[ix, :][:, ix],
+                columns=parameter_names_,
+                name=r"$F_{\Sigma^{-1}}$ (all z) [bulk]",
+                color="g",
                 shade_alpha=0.
             )
         )

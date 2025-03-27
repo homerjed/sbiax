@@ -49,9 +49,7 @@ z_idx               = [redshifts.index(z) for z in redshifts] # Chosen scales/re
     Get fiducials
 """
 
-ALL_FIDUCIAL_CUMULANTS = np.zeros(
-    (n_redshifts, n_fiducials, n_scales, n_moments_calculate)
-)
+ALL_FIDUCIAL_CUMULANTS = np.zeros((n_redshifts, n_fiducials, n_scales, n_moments_calculate))
 
 t0 = time.time()
 # Loop through integer -> string realisation folders to avoid other realisation types
@@ -97,9 +95,7 @@ print("\nDONE.")
     Get latins
 """
 
-ALL_LATIN_CUMULANTS = np.zeros(
-    (n_redshifts, n_latins, n_scales, n_moments_calculate)
-)
+ALL_LATIN_CUMULANTS = np.zeros((n_redshifts, n_latins, n_scales, n_moments_calculate))
 
 t0 = time.time()
 # Loop through integer -> string realisation folders to avoid other realisation types
@@ -121,6 +117,8 @@ for n in trange(n_latins, desc="Latins"):
             print("bad", n)
             pass
 
+        assert cumulants_n.shape == (7, 5)
+
         ALL_LATIN_CUMULANTS[n_z, n, :, :] = cumulants_n[:, n_moments_start:]
 
 np.save(
@@ -134,9 +132,7 @@ print("\nDONE.")
 """
 
 # Derivatives at each R, for all parameters, at redshift z
-derivatives = np.zeros(
-    (n_derivatives, n_params, n_redshifts, n_scales, 2, n_moments_calculate)
-)
+derivatives = np.zeros((n_derivatives, n_redshifts, n_params, n_scales, 2, n_moments_calculate))
 bad_idx = []
 
 # Each realisation's derivative
@@ -163,8 +159,10 @@ for n_d in trange(n_derivatives, desc="Derivatives"):
                             unpack=True
                         ).T
 
+                        assert d_cumulant_dparam.shape == (7, 5)
+
                         # n-th derivative of parameter p, pdf at scale R, +/- derivative
-                        derivatives[n_d, p, n_z, :, pm, :] = d_cumulant_dparam[:, n_moments_start:] # Assuming ordered by moment n
+                        derivatives[n_d, n_z, p, :, pm, :] = d_cumulant_dparam[:, n_moments_start:] # Assuming ordered by moment n
 
                     except ValueError:
                         bad_idx.append(n_d)

@@ -38,11 +38,6 @@ def get_parameter_strings() -> list[str]:
     return parameter_strings
 
 
-# def remove_nuisances(dataset: Dataset) -> Dataset:
-#     # Remove 'nuisance' parameters not constrained by the moments/cumulants
-#     return dataset
-
-
 """
     Data
 """
@@ -79,7 +74,7 @@ def get_raw_data(
     Float[np.ndarray, "z 15000 R d"],
     Float[np.ndarray, "z 2000 R d"],
     Float[np.ndarray, "2000 p"],
-    Float[np.ndarray, "500 p z R 2 d"]
+    Float[np.ndarray, "500 z p R 2 d"]
 ]:
     """
         Load fiducial and latin PDFs
@@ -96,7 +91,7 @@ def get_raw_data(
         os.path.join(data_dir, "latin_hypercube_params.txt") # (n, p)
     )
     derivatives = np.load(
-        os.path.join(data_dir, "cumulants_derivatives_plus_minus.npy") # (n, p, z, R, pm, d)
+        os.path.join(data_dir, "cumulants_derivatives_plus_minus.npy") # (n, z, p, R, pm, d)
     )
 
     if verbose:
@@ -111,7 +106,7 @@ def get_R_and_z_moments(
     R_idx: list[int], 
     fiducial_pdfs: Float[np.ndarray, "z 15000 R d"], 
     latin_pdfs: Float[np.ndarray, "z 2000 R d"], 
-    derivatives: Float[np.ndarray, "500 5 z R d"],
+    derivatives: Float[np.ndarray, "500 z 5 R d"], # Check redshift / parameter axes...
     *, 
     order_idx: Optional[list[int]] = None,
     reduced_cumulants: bool = False,
@@ -126,139 +121,231 @@ def get_R_and_z_moments(
         - select for moment order (e.g. var, skewness, kurtosis ... before final reshape)
     """
 
-    def get_R_z(
-        simulations: Float[Array, "z n R d"] | Float[Array, "n 5 z R d"], 
-        z_idx: int, 
-        R_idx: list[int], 
-        order_idx: list[int],
-        *,
-        n_scales: int,
-        reduced_cumulants: bool = False,
-        are_derivatives: bool = False
-    ) -> Array:
-        # Obtain fiducial/latin/derivative cumulants at chosen redshift and scales
-        # > `simulations` is either simulations or derivatives
+    """
+        def get_R_z(
+            simulations: Float[Array, "z n R d"] | Float[Array, "n 5 z R d"], 
+            z_idx: int, 
+            R_idx: list[int], 
+            order_idx: list[int],
+            *,
+            n_scales: int,
+            reduced_cumulants: bool = False,
+            are_derivatives: bool = False
+        ) -> Array:
+            # Obtain fiducial/latin/derivative cumulants at chosen redshift and scales
+            # > `simulations` is either simulations or derivatives
 
+            n_cumulants = len(order_idx)
+
+            if verbose:
+                print("Are derivatives?", are_derivatives)
+
+            @typecheck
+            def _maybe_reduce(
+                cumulants: Float[np.ndarray, "c"] | Float[np.ndarray, "c 5"], 
+                reduce: bool = False
+            ) -> Float[np.ndarray, "c"] | Float[np.ndarray, "c 5"]:
+
+                # Order of input cumulants (e.g. variance, skewness, kurtosis)
+                cumulant_orders = [2, 3, 4] 
+
+                var = cumulants[0] # Broadcast? e.g. [..., :1]
+
+                # Derivatives or sims => choose last axis, last axis is `order_idx` length
+                # Only reduce cumulants of higher order than variance
+                if reduce:
+                    for cumulant_index, _ in zip(range(cumulants.shape[0]), order_idx): 
+                        if (cumulant_index > 0):
+                            # E.g. for skewness (n=3); skewness_reduced = skewness / (var ** 2)
+                            order = cumulant_orders[cumulant_index]
+
+                            # S_n = k_n / (k_2 ** (n - 1)) 
+                            cumulants[cumulant_index] = cumulants[cumulant_index] / (var ** (order - 1))
+
+                # cumulants = cumulants / 100. 
+
+                return cumulants 
+
+            # n_s is number of derivatives or number of simulations (latin / fiducial)
+            if are_derivatives:
+                n_s, *_ = simulations.shape
+
+                R_z_simulations = np.zeros((n_s, 5, n_scales * n_redshifts * n_cumulants))
+            else:
+                _, n_s, *_ = simulations.shape
+
+                R_z_simulations = np.zeros((n_s, n_scales * n_redshifts * n_cumulants))
+
+            if verbose:
+                bar = trange(
+                    n_s, desc="reduced_cumulants" if reduced_cumulants else "cumulants"
+                ) 
+            else: 
+                bar = range(n_s)
+
+            for n in bar:
+                for z, z_i in enumerate(z_idx):
+                    for r, r_i in enumerate(R_idx):
+
+                        _slice = z * n_scales + r # NOTE: These must be positions in new array
+
+                        if are_derivatives:
+                            # Shape (5, 3)
+                            simulation = _maybe_reduce(
+                                # Float[np.ndarray, "n z 5 R d"]
+                                simulations[n, z_i, :, r_i, order_idx], # Redshift axis is 3rd, parameter axis is 2nd
+                                reduce=reduced_cumulants
+                            )
+                            simulation = np.transpose(simulation)
+
+                            R_z_simulations[n, :, _slice * n_cumulants : (_slice + 1) * n_cumulants] = simulation
+                        else:
+                            # Shape (3,)
+                            simulation = _maybe_reduce(
+                                # Float[np.ndarray, "z n R d"]
+                                simulations[z_i, n, r_i, order_idx], 
+                                reduce=reduced_cumulants
+                            )
+
+                            R_z_simulations[n, _slice * n_cumulants : (_slice + 1) * n_cumulants] = simulation
+
+            return R_z_simulations
+
+        if isinstance(z_idx, int):
+            z_idx = [z_idx]
+
+        n_scales = len(R_idx)
+        n_redshifts = len(z_idx)
         n_cumulants = len(order_idx)
 
         if verbose:
-            print("Are derivatives?", are_derivatives)
+            print("z_idx:", z_idx)
+            print("R_idx:", R_idx)
 
-        @typecheck
-        def _maybe_reduce(
-            cumulants: Float[np.ndarray, "c"] | Float[np.ndarray, "c 5"], 
-            reduce: bool = False
-        ) -> Float[np.ndarray, "c"] | Float[np.ndarray, "c 5"]:
-            """ 
-                Derivatives; linear operation on two +/- parameter nudged sims => still just divide? 
-            """
+        # fiducial_pdfs_z_R = get_R_z(
+        #     fiducial_pdfs, 
+        #     z_idx=z_idx, 
+        #     R_idx=R_idx, 
+        #     order_idx=order_idx,
+        #     n_scales=n_scales,
+        #     reduced_cumulants=reduced_cumulants
+        # )
+        # latin_pdfs_z_R = get_R_z(
+        #     latin_pdfs, 
+        #     z_idx=z_idx, 
+        #     R_idx=R_idx, 
+        #     order_idx=order_idx,
+        #     n_scales=n_scales,
+        #     reduced_cumulants=reduced_cumulants
+        # )
+        # derivatives_z_R = get_R_z(
+        #     derivatives, 
+        #     z_idx=z_idx, 
+        #     R_idx=R_idx, 
+        #     order_idx=order_idx,
+        #     n_scales=n_scales,
+        #     reduced_cumulants=reduced_cumulants, 
+        #     are_derivatives=True
+        # )
+    """
 
-            # Order of input cumulants (e.g. variance, skewness, kurtosis)
-            cumulant_orders = [2, 3, 4] 
-
-            var = cumulants[0] # Broadcast? e.g. [..., :1]
-
-            # Derivatives or sims => choose last axis, last axis is `order_idx` length
-            # for cumulant_index in range(cumulants.shape[-1]): 
-            for cumulant_index, _ in zip(range(cumulants.shape[0]), order_idx): 
-
-                # Only reduce cumulants of higher order than variance
-                if reduce and (cumulant_index > 0):
-
-                    # E.g. for skewness (n=3); skewness_reduced = skewness / (var ** 2)
-                    order = cumulant_orders[cumulant_index]
-
-                    # S_n = k_n / (k_2 ** (n - 1)) 
-                    cumulants[cumulant_index] = cumulants[cumulant_index] / (var ** (order - 1))
-
-            return cumulants 
-
-        # n_s is number of derivatives or number of simulations (latin / fiducial)
-        if are_derivatives:
-            n_s, *_ = simulations.shape
-
-            R_z_simulations = np.zeros((n_s, 5, n_scales * n_redshifts * n_cumulants))
-        else:
-            _, n_s, *_ = simulations.shape
-
-            R_z_simulations = np.zeros((n_s, n_scales * n_redshifts * n_cumulants))
-
-        if verbose:
-            bar = trange(
-                n_s, desc="reduced_cumulants" if reduced_cumulants else "cumulants"
-            ) 
-        else: 
-            bar = range(n_s)
-
-        for n in bar:
-            for z, z_i in enumerate(z_idx):
-                for r, r_i in enumerate(R_idx):
-
-                    _slice = z * n_scales + r # NOTE: These must be positions in new array
-
-                    if are_derivatives:
-                        # Shape (5, 3)
-                        simulation = _maybe_reduce(
-                            # Float[np.ndarray, "n 5 z R d"]
-                            simulations[n, :, z_i, r_i, order_idx], # Redshift axis is 3rd, parameter axis is 2nd
-                            reduce=reduced_cumulants
-                        )
-                        simulation = np.transpose(simulation)
-
-                        R_z_simulations[n, :, _slice * n_cumulants : (_slice + 1) * n_cumulants] = simulation
-                    else:
-                        # Shape (3,)
-                        simulation = _maybe_reduce(
-                            # Float[np.ndarray, "z n R d"]
-                            simulations[z_i, n, r_i, order_idx], 
-                            reduce=reduced_cumulants
-                        )
-
-                        R_z_simulations[n, _slice * n_cumulants : (_slice + 1) * n_cumulants] = simulation
-
-        return R_z_simulations
+    # Do it the same as in bulk PDFS....
 
     if isinstance(z_idx, int):
         z_idx = [z_idx]
 
     n_scales = len(R_idx)
     n_redshifts = len(z_idx)
+    n_cumulants = len(order_idx)
 
     if verbose:
         print("z_idx:", z_idx)
         print("R_idx:", R_idx)
+        print("order_idx", order_idx)
 
-    n_cumulants = len(order_idx)
+    @typecheck
+    def _maybe_reduce(
+        cumulants: Float[np.ndarray, "c"], 
+        order_idx: list[int],
+        reduce: bool = False
+    ) -> Float[np.ndarray, "c"]:
+        # Calculate reduced cumulants from cumulants if required
+        if reduce:
+            # Order of input cumulants (e.g. variance, skewness, kurtosis)
+            cumulant_orders = [2, 3, 4] 
+            # Only reduce cumulants of higher order than variance
+            var = cumulants[0] 
+            for cumulant_index, _ in zip(range(cumulants.shape[0]), order_idx): 
+                if (cumulant_index > 0):
+                    # E.g. for skewness (n=3); skewness_reduced = skewness / (var ** 2)
+                    order = cumulant_orders[cumulant_index]
+                    # S_n = k_n / (k_2 ** (n - 1)) 
+                    cumulants[cumulant_index] = cumulants[cumulant_index] / (var ** (order - 1))
+        return cumulants 
 
-    fiducial_pdfs_z_R = get_R_z(
-        fiducial_pdfs, 
-        z_idx=z_idx, 
-        R_idx=R_idx, 
-        order_idx=order_idx,
-        n_scales=n_scales,
-        reduced_cumulants=reduced_cumulants
-    )
-    latin_pdfs_z_R = get_R_z(
-        latin_pdfs, 
-        z_idx=z_idx, 
-        R_idx=R_idx, 
-        order_idx=order_idx,
-        n_scales=n_scales,
-        reduced_cumulants=reduced_cumulants
-    )
-    derivatives_z_R = get_R_z(
-        derivatives, 
-        z_idx=z_idx, 
-        R_idx=R_idx, 
-        order_idx=order_idx,
-        n_scales=n_scales,
-        reduced_cumulants=reduced_cumulants, 
-        are_derivatives=True
-    )
+    def _get_bar(n_s):
+        if verbose:
+            bar = trange(
+                n_s, desc="reduced_cumulants" if reduced_cumulants else "cumulants"
+            ) 
+        else: 
+            bar = range(n_s)
+        return bar
+
+    fiducial_pdfs_z_R = np.zeros((fiducial_pdfs.shape[1], n_scales * n_redshifts * n_cumulants))
+    for n in _get_bar(fiducial_pdfs.shape[1]):
+        for z, z_i in enumerate(z_idx):
+            for r, r_i in enumerate(R_idx):
+
+                _slice = z * n_scales + r # NOTE: These must be positions in new array
+
+                # Shape (3,)
+                simulation = _maybe_reduce(
+                    # Float[np.ndarray, "z n R d"]
+                    fiducial_pdfs[z_i, n, r_i, order_idx], 
+                    order_idx=order_idx,
+                    reduce=reduced_cumulants
+                )
+
+                fiducial_pdfs_z_R[n, _slice * n_cumulants : (_slice + 1) * n_cumulants] = simulation
+
+    latin_pdfs_z_R = np.zeros((latin_pdfs.shape[1], n_scales * n_redshifts * n_cumulants))
+    for n in _get_bar(latin_pdfs.shape[1]):
+        for z, z_i in enumerate(z_idx):
+            for r, r_i in enumerate(R_idx):
+
+                _slice = z * n_scales + r # NOTE: These must be positions in new array
+
+                # Shape (3,)
+                simulation = _maybe_reduce(
+                    # Float[np.ndarray, "z n R d"]
+                    latin_pdfs[z_i, n, r_i, order_idx], 
+                    order_idx=order_idx,
+                    reduce=reduced_cumulants
+                )
+
+                latin_pdfs_z_R[n, _slice * n_cumulants : (_slice + 1) * n_cumulants] = simulation
+
+    derivatives_z_R = np.zeros((derivatives.shape[0], 5, n_scales * n_redshifts * n_cumulants))
+    for n in _get_bar(derivatives.shape[0]):
+        for z, z_i in enumerate(z_idx):
+            for r, r_i in enumerate(R_idx):
+
+                _slice = z * n_scales + r # NOTE: These must be positions in new array
+
+                # Shape (5, 3)
+                for p in range(5):
+                    simulation = _maybe_reduce(
+                        # Float[np.ndarray, "n z 5 R d"]
+                        derivatives[n, z_i, p, r_i, order_idx], # Redshift axis is 3rd, parameter axis is 2nd
+                        order_idx=order_idx,
+                        reduce=reduced_cumulants
+                    )
+                    derivatives_z_R[n, p, _slice * n_cumulants : (_slice + 1) * n_cumulants] = simulation
 
     if verbose:
         print(
-            "Processed data shapes:", 
+            "Processed data shapes (fids., latins, derivs.):", 
             [_.shape for _ in [fiducial_pdfs_z_R, latin_pdfs_z_R, derivatives]]
         )
 
@@ -271,14 +358,14 @@ def get_cumulant_data(
 
     @typecheck
     def calculate_derivatives(
-        derivatives_pm: Float[np.ndarray, "500 5 z R 2 d"], 
+        derivatives_pm: Float[np.ndarray, "500 z p R 2 d"], 
         alpha: Float[np.ndarray, "p"], 
         dparams: Float[np.ndarray, "p"], 
         parameter_strings: list[str], 
         parameter_derivative_names: list[list[str]], 
         *, 
         verbose: bool = False
-    ) -> Float[np.ndarray, "500 5 z R d"]:
+    ) -> Float[np.ndarray, "500 z 5 R d"]:
 
         derivatives = derivatives_pm[..., 1, :] - derivatives_pm[..., 0, :] 
 
@@ -288,7 +375,7 @@ def get_cumulant_data(
                     "Parameter strings / dp / dp_name", 
                     parameter_strings[p], dparams[p], parameter_derivative_names[p]
                 )
-            derivatives[:, p, ...] = derivatives[:, p, ...] / dparams[p] # NOTE: OK before or after reducing cumulants
+            derivatives[:, :, p, ...] = derivatives[:, :, p, ...] / dparams[p] # NOTE: OK before or after reducing cumulants
 
         assert derivatives.ndim == 5, "{}".format(derivatives.shape)
 
@@ -314,10 +401,6 @@ def get_cumulant_data(
 
     R_idx = [all_R_values.index(R) for R in config.scales]
     z_idx = all_redshifts.index(config.redshift)
-
-    if verbose:
-        print("z_idx:", z_idx)
-        print("R_idx:", R_idx)
 
     # Raw moments
     (
@@ -357,19 +440,6 @@ def get_cumulant_data(
 
     # Calculate covariance for datavector of each fiducial pdfs for all chosen scales 
     C = np.cov(fiducial_moments_z_R, rowvar=False) # NOTE: correctly calculates covariance of reduced or not
-
-    # Condition number regularisation
-    if config.covariance_epsilon is not None:
-        if verbose:
-            print("Covariance conditioning...")
-
-        L = jnp.trace(C) / n_d * config.covariance_epsilon
-
-        # U, S, Vt = jnp.linalg.svd(C)
-        # L = 0.01 * S.min()
-        # L = S.max() / 1000
-
-        C = jnp.identity(n_d) * L + C
 
     assert np.all(np.isfinite(C)), "Bad covariance."
     assert derivatives.shape[:-1] == (500, 5), "Do derivatives have batch axis? Required."
@@ -763,6 +833,10 @@ def get_linear_compressor(
 
 
 def get_nn_compressor(key, dataset, data_preprocess_fn=None, *, results_dir):
+    """
+        Train neural network compression function
+        - Optionally use parameter covariance for chi2 loss
+    """
     net_key, train_key = jr.split(key)
 
     if data_preprocess_fn is None:
@@ -801,7 +875,10 @@ def get_nn_compressor(key, dataset, data_preprocess_fn=None, *, results_dir):
 
 
 def get_compression_fn(key, config, dataset, *, results_dir):
-    # Get linear or neural network compressor
+    """ 
+        Get linear or neural network compressor
+    """ 
+
     if config.compression == "nn":
 
         net, preprocess_fn = get_nn_compressor(
@@ -910,3 +987,16 @@ class CumulantsDataset:
     def get_preprocess_fn(self):
         # Get (X, P) preprocessor?
         ...
+
+    # # Condition number regularisation
+    # if config.covariance_epsilon is not None:
+    #     if verbose:
+    #         print("Covariance conditioning...")
+
+    #     L = jnp.trace(C) / n_d * config.covariance_epsilon
+
+    #     # U, S, Vt = jnp.linalg.svd(C)
+    #     # L = 0.01 * S.min()
+    #     # L = S.max() / 1000
+
+    #     C = jnp.identity(n_d) * L + C

@@ -11,9 +11,10 @@ POSTERIORS_DIR = os.path.join(ROOT_DIR, "results/posteriors/")
 FIGS_DIR = os.path.join(ROOT_DIR, "results/") 
 
 # Save and load directories for quijote data
-DATA_DIR = os.path.join(ROOT_DIR, "quijote_data/") # "/Users/Jed.Homer/phd/sbiaxpdf/sbiax/quijote_data/"
-OUT_DIR = DERIVATIVES_DIR = DATA_DIR
+DATA_DIR = os.path.join(ROOT_DIR, "quijote_data/") 
+OUT_DIR = DATA_DIR
 QUIJOTE_DIR = "/project/ls-gruen/users/jed.homer/quijote_pdfs/" # Cluster only!
+DERIVATIVES_DIR = os.path.join(QUIJOTE_DIR, "derivatives/")
 
 
 def get_raw_quijote_dir():
@@ -93,3 +94,7 @@ def get_quijote_parameters():
 
 def get_alpha_and_parameter_strings():
     return ALPHA, PARAMETER_STRINGS
+
+
+def get_delta_bin_widths():
+    return D_DELTAS

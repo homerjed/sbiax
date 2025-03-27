@@ -13,21 +13,22 @@ import matplotlib.pyplot as plt
 from chainconsumer import Chain, ChainConsumer, Truth
 from tensorflow_probability.substrates.jax.distributions import Distribution
 
+from sbiax.utils import make_df, marker
+from sbiax.ndes import Scaler, CNF, MAF 
+from sbiax.inference import nuts_sample
+
 from configs import (
-    cumulants_config, get_results_dir, get_posteriors_dir, 
+    cumulants_config, bulk_cumulants_config, 
+    get_results_dir, get_posteriors_dir, 
     get_cumulants_sbi_args, get_ndes_from_config
 )
 from cumulants import (
     CumulantsDataset, Dataset, get_data, get_prior, 
     get_compression_fn, get_datavector, get_linearised_data
 )
-
-from sbiax.utils import make_df, marker
-from sbiax.ndes import Scaler, CNF, MAF 
+from pdfs import BulkCumulantsDataset, get_bulk_dataset
 from cumulants_ensemble import Ensemble
 from sbiax.train import train_ensemble
-from sbiax.inference import nuts_sample
-
 from affine import affine_sample
 from utils import plot_moments, plot_latin_moments, plot_summaries, plot_fisher_summaries
 
@@ -60,6 +61,15 @@ def replace_scalers(ensemble, *, X, P):
     - covariance conditioning?
 """ 
 
+def get_dataset_and_config(bulk_or_tails):
+    if bulk_or_tails == "bulk":
+        dataset_constructor = BulkCumulantsDataset
+        config = bulk_cumulants_config 
+    if bulk_or_tails == "tails":
+        dataset_constructor = CumulantsDataset
+        config = cumulants_config 
+    return dataset_constructor, config
+
 t0 = time.time()
 
 args = get_cumulants_sbi_args()
@@ -73,7 +83,10 @@ print("LINEARISED:", args.linearised)
     Config
 """
 
-config = cumulants_config(
+# Bulk / tails constructors for dataset / config
+_dataset, _config = get_dataset_and_config(args.bulk_or_tails) 
+
+config = _config(
     seed=args.seed, 
     redshift=args.redshift, 
     reduced_cumulants=args.reduced_cumulants,
@@ -94,14 +107,17 @@ key = jr.key(config.seed)
 
 results_dir = get_results_dir(config, args)
 
-posteriors_dir = get_posteriors_dir(config)
+posteriors_dir = get_posteriors_dir(config, args)
 
 # Dataset of simulations, parameters, covariance, ...
-cumulants_dataset = CumulantsDataset(config, results_dir=results_dir)
+cumulants_dataset = _dataset(config, results_dir=results_dir)
 
 dataset: Dataset = cumulants_dataset.data
 
 parameter_prior: Distribution = cumulants_dataset.prior
+
+bulk_pdfs = True
+bulk_dataset: Dataset = get_bulk_dataset(args, pdfs=bulk_pdfs) # For Fisher forecast comparisons
 
 print("DATA:", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (dataset.fiducial_data, dataset.data)])
 print("DATA:", [_.shape for _ in (dataset.fiducial_data, dataset.data)])
@@ -144,18 +160,14 @@ print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None)
 
 ensemble = Ensemble(ndes, sbi_type=config.sbi_type)
 
-data_preprocess_fn = lambda x: x #jnp.log(jnp.clip(x, min=1e-10))
+data_preprocess_fn = lambda x: x #/ jnp.max(dataset.fiducial_data, axis=0) #jnp.log(jnp.clip(x, min=1e-10))
 
 """
     Pre-train NDEs on linearised data
 """
 
 # Only pre-train if required and not inferring from linear simulations
-if (
-    (not config.linearised) 
-    and config.pre_train 
-    and (config.n_linear_sims is not None)
-):
+if ((not config.linearised) and config.pre_train and (config.n_linear_sims is not None)):
     print("Linearised pre-training...")
 
     pre_train_key, summaries_key = jr.split(key)
@@ -241,6 +253,17 @@ if (
             shade_alpha=0.
         )
     )
+    c.add_chain(
+        Chain.from_covariance(
+            dataset.alpha,
+            bulk_dataset.Finv,
+            columns=dataset.parameter_strings,
+            name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]" if bulk_pdfs else "Cumulants[bulk]"),
+            color="g",
+            linestyle=":",
+            shade_alpha=0.
+        )
+    )
     c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
     c.add_marker(
         location=marker(x_, parameter_strings=dataset.parameter_strings),
@@ -263,6 +286,7 @@ if (
 
 opt = getattr(optax, config.train.opt)(config.train.lr)
 
+print("DATA:", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (dataset.fiducial_data, dataset.data)])
 print("Data / Parameters", [_.shape for _ in (X, dataset.parameters)])
 
 if config.use_scalers:
@@ -349,6 +373,17 @@ if 1:
                 shade_alpha=0.
             )
         )
+        c.add_chain(
+            Chain.from_covariance(
+                dataset.alpha,
+                bulk_dataset.Finv,
+                columns=dataset.parameter_strings,
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]" if bulk_pdfs else "Cumulants[bulk]"),
+                color="g",
+                linestyle=":",
+                shade_alpha=0.
+            )
+        )
         c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
         c.add_marker(
             location=marker(x_, parameter_strings=dataset.parameter_strings),
@@ -379,7 +414,7 @@ if 1:
         print("(!) Shit posterior")
         pass
 
-if 0:
+if 1:
     try:
         # BLACKJAX SAMPLE IS FUNNY WITH float64
         samples, samples_log_prob = nuts_sample(
@@ -415,6 +450,17 @@ if 0:
                 shade_alpha=0.
             )
         )
+        c.add_chain(
+            Chain.from_covariance(
+                dataset.alpha,
+                bulk_dataset.Finv,
+                columns=dataset.parameter_strings,
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]" if bulk_pdfs else "Cumulants[bulk]"),
+                color="g",
+                linestyle=":",
+                shade_alpha=0.
+            )
+        )
         c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
         c.add_marker(
             location=marker(x_, parameter_strings=dataset.parameter_strings),
@@ -437,7 +483,7 @@ if 0:
                 ),
             multialignment='center'
         )
-        plt.savefig(os.path.join(results_dir, "posterior.pdf"))
+        plt.savefig(os.path.join(results_dir, "posterior_blackjax.pdf"))
         plt.close()
     except Exception as e:
         print("(!) Shit posterior")

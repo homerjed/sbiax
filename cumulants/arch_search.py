@@ -1,6 +1,7 @@
 import warnings
 import os
 import time
+import yaml
 import pickle
 import gc
 from datetime import datetime
@@ -102,7 +103,7 @@ def objective(
     # Set config attributes based on these hyperparameters
     config = get_trial_hyperparameters(trial, config)
 
-    key = jr.key(config.seed)
+    key = jr.key(int(trial.number)) # config.seed
 
     ( 
         model_key, train_key, key_prior, 
@@ -121,7 +122,12 @@ def objective(
         if not os.path.exists(_dir):
             os.makedirs(_dir, exist_ok=True)
 
-    print("EGG", results_dir)
+    # Save command line arguments and config together
+    with open(os.path.join(results_dir, "config.yml"), "w") as f:
+        yaml.dump({"args": ""}, f, default_flow_style=False)
+        yaml.dump(vars(args), f, default_flow_style=False)
+        yaml.dump({"config": ""}, f, default_flow_style=False)
+        yaml.dump(config.to_dict(), f, default_flow_style=False)
 
     cumulants_dataset: CumulantsDataset = CumulantsDataset(config, results_dir=results_dir)
 
@@ -138,61 +144,63 @@ def objective(
     # Fiducial
     X0 = jax.vmap(compression_fn, in_axes=(0, None))(dataset.fiducial_data, dataset.alpha)
 
-    c = ChainConsumer()
-    c.add_chain(
-        Chain(
-            samples=make_df(X0, parameter_strings=dataset.parameter_strings), 
-            name="X (fiducial)", 
-            color="b", 
-            plot_contour=False, 
-            plot_cloud=True
+    if 1:
+        c = ChainConsumer()
+        c.add_chain(
+            Chain(
+                samples=make_df(X0, parameter_strings=dataset.parameter_strings), 
+                name="X (fiducial)", 
+                color="b", 
+                plot_contour=False, 
+                plot_cloud=True
+            )
         )
-    )
-    c.add_chain(
-        Chain.from_covariance(
-            dataset.alpha,
-            dataset.Finv,
-            columns=dataset.parameter_strings,
-            name=r"$F_{\Sigma^{-1}}$",
-            color="k",
-            linestyle=":",
-            shade_alpha=0.
+        c.add_chain(
+            Chain.from_covariance(
+                dataset.alpha,
+                dataset.Finv,
+                columns=dataset.parameter_strings,
+                name=r"$F_{\Sigma^{-1}}$",
+                color="k",
+                linestyle=":",
+                shade_alpha=0.
+            )
         )
-    )
-    # c.add_chain(
-    #     Chain(
-    #         samples=make_df(dataset.parameters, parameter_strings=dataset.parameter_strings), 
-    #         plot_contour=False, 
-    #         plot_cloud=True, 
-    #         name="P", 
-    #         color="r"
-    #     )
-    # )
-    c.add_marker(
-        location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
-        name=r"$\alpha$", 
-        color="#7600bc"
-    )
-    fig = c.plotter.plot()
-    fig.suptitle(
-        r"$k_n/k_2^{n-1}$ SBI & $F_{{\Sigma}}^{{-1}}$" + "\n" +
-        "z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
-                config.redshift, 
-                len(X), 
-                config.n_linear_sims if config.pre_train else None,
-                "[{}]".format(", ".join(map(str, config.scales))),
-                "[{}]".format(",".join(map(str, [["var.", "skew.", "kurt."][_] for _ in config.order_idx])))
-            ),
-        multialignment='center'
-    )
-    plt.show()
+        # c.add_chain(
+        #     Chain(
+        #         samples=make_df(dataset.parameters, parameter_strings=dataset.parameter_strings), 
+        #         plot_contour=False, 
+        #         plot_cloud=True, 
+        #         name="P", 
+        #         color="r"
+        #     )
+        # )
+        c.add_marker(
+            location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
+            name=r"$\alpha$", 
+            color="#7600bc"
+        )
+        fig = c.plotter.plot()
+        fig.suptitle(
+            r"$k_n/k_2^{n-1}$ SBI & $F_{{\Sigma}}^{{-1}}$" + "\n" +
+            "z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
+                    config.redshift, 
+                    len(X), 
+                    config.n_linear_sims if config.pre_train else None,
+                    "[{}]".format(", ".join(map(str, config.scales))),
+                    "[{}]".format(",".join(map(str, [["var.", "skew.", "kurt."][_] for _ in config.order_idx])))
+                ),
+            multialignment='center'
+        )
+        plt.savefig(os.path.join(results_dir, "X0.png"))
+        plt.close()
 
     # Plot summaries
-    # plot_summaries(X, dataset.parameters, dataset)
+    plot_summaries(X, dataset.parameters, dataset, results_dir=results_dir)
 
-    plot_moments(dataset.fiducial_data, config)
+    plot_moments(dataset.fiducial_data, config, results_dir=results_dir)
 
-    plot_latin_moments(dataset.data, config)
+    plot_latin_moments(dataset.data, config, results_dir=results_dir)
 
     def replace_scalers(ensemble, *, X, P):
         is_scaler = lambda x: isinstance(x, Scaler)
@@ -263,15 +271,12 @@ def objective(
             tqdm_description="Training (pre-train)",
             show_tqdm=args.use_tqdm,
             trial=trial,
-            # results_dir=results_dir
+            results_dir=results_dir
         )
 
         # Test pre-training on a linearised datavector...
-        datavector = jr.multivariate_normal(
-            key, 
-            jnp.mean(dataset.fiducial_data, axis=0), 
-            dataset.C
-        )
+        mu = jnp.mean(dataset.fiducial_data, axis=0)
+        datavector = jr.multivariate_normal(key, mu, dataset.C)
 
         x_ = compression_fn(datavector, dataset.alpha)
 
@@ -295,11 +300,6 @@ def objective(
         samples_log_prob = jax.vmap(log_prob_fn)(samples)
         alpha_log_prob = log_prob_fn(jnp.asarray(dataset.alpha))
 
-    if (
-        (not config.linearised) 
-        and config.pre_train 
-        and (config.n_linear_sims is not None)
-    ):
         posterior_df = make_df(
             samples, 
             samples_log_prob, 
@@ -341,7 +341,7 @@ def objective(
         fig = c.plotter.plot()
         plt.savefig(os.path.join(results_dir, "posterior_affine_pretrain.pdf"))
         plt.savefig(os.path.join(posteriors_dir, "posterior_affine_pretrain.pdf"))
-        plt.show()
+        plt.close()
 
         c = ChainConsumer()
         c.add_chain(
@@ -386,7 +386,8 @@ def objective(
             ax.set_ylim(dataset.lower[p], dataset.upper[p])
             ax.set_xlabel(dataset.parameter_strings[p])
             ax.set_ylabel(dataset.parameter_strings[p] + "'")
-        plt.show()
+        plt.savefig(os.path.join(results_dir, "Xl.png"))
+        plt.close()
 
     opt = getattr(optax, config.train.opt)(config.train.lr)
 
@@ -550,8 +551,8 @@ def objective(
         multialignment='center'
     )
     # plt.show()
-    plt.savefig(os.path.join(results_dir, "posterior_affine.pdf"))
-    plt.savefig(os.path.join(posteriors_dir, "posterior_affine.pdf"))
+    plt.savefig(os.path.join(results_dir, "posterior_affine_Oms8.pdf"))
+    plt.savefig(os.path.join(posteriors_dir, "posterior_affine_Oms8.pdf"))
     plt.close()
 
     # Free memory
@@ -566,6 +567,7 @@ def objective(
 def callback(
     study: optuna.Study, 
     trial: optuna.Trial, 
+    df_name: str,
     figs_dir: str, 
     arch_search_dir: str
 ) -> None:
@@ -601,7 +603,7 @@ def callback(
         fig.write_image(os.path.join(figs_dir, "timeline.pdf"))
 
         df = study.trials_dataframe()
-        df.to_pickle(os.path.join(arch_search_dir, "arch_search_df.pkl")) 
+        df.to_pickle(os.path.join(arch_search_dir, df_name)) 
     except ValueError:
         pass # Not enough trials to plot yet
 
