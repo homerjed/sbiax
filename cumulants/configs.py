@@ -145,7 +145,7 @@ def get_cumulants_sbi_args(using_notebook: bool = False):
         "-c",
         "--compression", 
         default="linear",
-        choices=["linear", "nn"],
+        choices=["linear", "nn", "nn-lbfgs"],
         type=str,
         help="Compression with neural network or MOPED."
     )
@@ -246,7 +246,7 @@ def get_cumulants_multi_z_args(using_notebook: bool = False):
         "-c",
         "--compression", 
         default="linear",
-        choices=["linear", "nn"],
+        choices=["linear", "nn", "nn-lbfgs"],
         type=str,
         help="Compression with neural network or MOPED."
     )
@@ -381,7 +381,7 @@ def cumulants_config(
     reduced_cumulants: bool = False,
     sbi_type: Literal["nle", "npe"] = "nle", 
     linearised: bool = True, 
-    compression: Literal["linear", "nn"] = "linear",
+    compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
     order_idx: list[int] = [0, 1, 2],
     # nonlinearised: bool = True, 
     n_linear_sims: Optional[int] = None,
@@ -512,7 +512,7 @@ def bulk_cumulants_config(
     reduced_cumulants: bool = False,
     sbi_type: Literal["nle", "npe"] = "nle", 
     linearised: bool = True, 
-    compression: Literal["linear", "nn"] = "linear",
+    compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
     order_idx: list[int] = [0, 1, 2],
     # nonlinearised: bool = True, 
     n_linear_sims: Optional[int] = None,
@@ -649,7 +649,7 @@ def ensembles_cumulants_config(
     sbi_type: str = "nle", 
     linearised: bool = True, 
     n_linear_sims: int = 10_000,
-    compression: Literal["linear", "nn"] = "linear",
+    compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
     reduced_cumulants: bool = True,
     redshifts: list[float] = [0.0, 0.5, 1.0],
     order_idx: list[int] = [0, 1, 2],
@@ -692,7 +692,7 @@ def ensembles_bulk_cumulants_config(
     sbi_type: str = "nle", 
     linearised: bool = True, 
     n_linear_sims: int = 10_000,
-    compression: Literal["linear", "nn"] = "linear",
+    compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
     reduced_cumulants: bool = True,
     redshifts: list[float] = [0.0, 0.5, 1.0],
     order_idx: list[int] = [0, 1, 2],
@@ -740,7 +740,7 @@ def arch_search_config(
     sbi_type: str = "nle", 
     linearised: bool = True, 
     n_linear_sims: int = 10_000,
-    compression: Literal["linear", "nn"] = "linear",
+    compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
     reduced_cumulants: bool = True,
     redshifts: list[float] = [0.0, 0.5, 1.0],
     order_idx: list[int] = [0, 1, 2],
@@ -804,7 +804,7 @@ def get_arch_search_args(using_notebook: bool = False):
     #     "-c",
     #     "--compression", 
     #     default="linear",
-    #     choices=["linear", "nn"],
+    #     choices=["linear", "nn", "nn-lbfgs"],
     #     type=str,
     #     help="Compression with neural network or MOPED."
     # )

@@ -25,9 +25,9 @@ cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 
 # Be sure to re-init the exp name, job halts otherwise (--multiprocess --n_processes 10 --n_parallel 1 # 2 CPUs per trial being run)
 echo ">>Running arch search on id: " "${id}"
-echo ">>order_idx 0 1 2"
-python arch_search.py --seed 0 --redshift 0.0 --order_idx 0 1 2 --no-linearised --no-reduced_cumulants
-# echo ">>order_idx 0 1"
-# python arch_search.py --seed 0 --redshift 0.0 --order_idx 0 --no-linearised  
+# echo ">>order_idx 0 1 2"
+# python arch_search.py --seed 0 --redshift 0.0 --order_idx 0 1 2 --no-linearised --no-reduced_cumulants
+# echo ">>order_idx 0"
+python arch_search.py --seed 0 --redshift 0.0 --order_idx 0 --no-linearised  
 # echo ">>order_idx 0 1"
 # python arch_search.py --seed 0 --redshift 0.0 --order_idx 0 1 --no-linearised  

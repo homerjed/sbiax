@@ -677,7 +677,7 @@ def get_bulk_dataset(args, pdfs=False):
     else:
         print("Using cumulants dataset for bulk dataset.")
 
-    dataset = BulkCumulantsDataset(config, pdfs=pdfs, verbose=True)
+    dataset = BulkCumulantsDataset(config, pdfs=pdfs, verbose=False)
 
     return dataset.data
 

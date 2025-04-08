@@ -42,9 +42,9 @@ for i in {0..2}; do
         echo ">>Running linear scripts... Complete."
 
         # Linear model, NN compression
-        # echo ">>Running linear (nn) scripts..."
-        # python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "nn" --linearised --order_idx $order_idx_args --redshift $z --no-use-tqdm
-        # echo ">>Running linear (nn) scripts... Complete."
+        echo ">>Running linear (nn) scripts..."
+        python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "nn" --linearised --order_idx $order_idx_args --redshift $z --no-use-tqdm
+        echo ">>Running linear (nn) scripts... Complete."
 
         # Non-linear model, linear compression
         # echo ">>Running non-linear scripts..."
@@ -62,9 +62,9 @@ for i in {0..2}; do
         echo ">>Running pre-train non-linear scripts... Completed."
 
         # Non-linear model, NN compression (pre-train)
-        # echo ">>Running pre-train non-linear scripts..."
-        # python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "nn" --no-linearised --pre-train --order_idx $order_idx_args --redshift $z --no-use-tqdm
-        # echo ">>Running pre-train non-linear scripts... Completed."
+        echo ">>Running pre-train non-linear scripts..."
+        python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "nn" --no-linearised --pre-train --order_idx $order_idx_args --redshift $z --no-use-tqdm
+        echo ">>Running pre-train non-linear scripts... Completed."
 
         current_time=$(date +"%H:%M:%S")
         echo "The current time is: $current_time"

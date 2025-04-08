@@ -22,7 +22,7 @@ import tensorflow_probability.substrates.jax.distributions as tfd
 from tqdm.auto import trange
 
 from constants import get_quijote_parameters, get_save_and_load_dirs
-from nn import fit_nn
+from nn import fit_nn, fit_nn_lbfgs
 from pca import PCA
 from sbiax.utils import marker
 
@@ -832,7 +832,7 @@ def get_linear_compressor(
     return partial(compressor, mu=mu, dmu=dmu)
 
 
-def get_nn_compressor(key, dataset, data_preprocess_fn=None, *, results_dir):
+def get_nn_compressor(key, dataset, data_preprocess_fn=None, *, lbfgs=False, results_dir):
     """
         Train neural network compression function
         - Optionally use parameter covariance for chi2 loss
@@ -846,7 +846,7 @@ def get_nn_compressor(key, dataset, data_preprocess_fn=None, *, results_dir):
         dataset.data.shape[-1], 
         dataset.parameters.shape[-1], 
         width_size=32, 
-        depth=1, 
+        depth=3, 
         activation=jax.nn.tanh,
         key=net_key
     )
@@ -855,16 +855,24 @@ def get_nn_compressor(key, dataset, data_preprocess_fn=None, *, results_dir):
         # Preprocess with covariance?
         return (jnp.asarray(x) - jnp.mean(dataset.data, axis=0)) / jnp.std(dataset.data, axis=0)
 
-    net, losses = fit_nn(
-        train_key, 
-        net, 
-        (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
-        opt=optax.adam(1e-3), 
-        precision=jnp.linalg.inv(dataset.Finv), # In reality this varies with parameters
-        n_batch=500, 
-        patience=1000,
-        n_steps=50_000
-    )
+    if lbfgs:
+        net, losses = fit_nn_lbfgs(
+            train_key, 
+            net, 
+            (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
+            # precision=jnp.linalg.inv(dataset.Finv) # In reality this varies with parameters
+        )
+    else:
+        net, losses = fit_nn(
+            train_key, 
+            net, 
+            (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
+            opt=optax.adam(1e-3), 
+            precision=jnp.linalg.inv(dataset.Finv), # In reality this varies with parameters
+            n_batch=500, 
+            patience=1000,
+            n_steps=50_000
+        )
 
     plt.figure()
     plt.loglog(losses)
@@ -879,10 +887,10 @@ def get_compression_fn(key, config, dataset, *, results_dir):
         Get linear or neural network compressor
     """ 
 
-    if config.compression == "nn":
+    if config.compression == "nn" or config.compression == "nn-lbfgs":
 
         net, preprocess_fn = get_nn_compressor(
-            key, dataset, results_dir=results_dir
+            key, dataset, lbfgs=config.compression == "nn-lbfgs", results_dir=results_dir
         )
 
         compressor = lambda d, p: net(preprocess_fn(d)) # Ignore parameter kwarg!

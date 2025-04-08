@@ -116,7 +116,7 @@ dataset: Dataset = cumulants_dataset.data
 
 parameter_prior: Distribution = cumulants_dataset.prior
 
-bulk_pdfs = True
+bulk_pdfs = True # Use PDFs for Finv not cumulants
 bulk_dataset: Dataset = get_bulk_dataset(args, pdfs=bulk_pdfs) # For Fisher forecast comparisons
 
 print("DATA:", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (dataset.fiducial_data, dataset.data)])
@@ -315,8 +315,6 @@ print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None)
     Sample and plot posterior for NDE with noisy datavectors
 """
 
-ensemble = eqx.nn.inference_mode(ensemble)
-
 # Generates linearised (or not) datavector at fiducial parameters
 datavector = cumulants_dataset.get_datavector(key_datavector)
 
@@ -393,7 +391,7 @@ if 1:
         c.add_marker(
             location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
             name=r"$\alpha$", 
-            color="#7600bc"
+            color="k"
         )
         fig = c.plotter.plot()
         fig.suptitle(
@@ -414,7 +412,7 @@ if 1:
         print("(!) Shit posterior")
         pass
 
-if 1:
+if 0:
     try:
         # BLACKJAX SAMPLE IS FUNNY WITH float64
         samples, samples_log_prob = nuts_sample(
