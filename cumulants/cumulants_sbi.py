@@ -105,19 +105,16 @@ posteriors_dir = get_posteriors_dir(config, args)
 
 # Dataset of simulations, parameters, covariance, ...
 if args.bulk_or_tails == "tails":
-    cumulants_dataset = _dataset(
-        config, results_dir=results_dir
-    )
+    cumulants_dataset = _dataset(config, results_dir=results_dir)
 if args.bulk_or_tails in ["bulk", "bulk_pdf"]:
-    cumulants_dataset = _dataset(
-        config, pdfs=("pdf" in args.bulk_or_tails), results_dir=results_dir
-    )
+    use_pdfs_or_cumulants = ("pdf" in args.bulk_or_tails)
+    cumulants_dataset = _dataset(config, pdfs=use_pdfs_or_cumulants, results_dir=results_dir)
 
 dataset: Dataset = cumulants_dataset.data
 
 parameter_prior: Distribution = cumulants_dataset.prior
 
-bulk_pdfs = True # Use PDFs for Finv_bulk not cumulants
+bulk_pdfs = False # Use PDFs for Finv_bulk or cumulants of bulk of PDF
 bulk_dataset: Dataset = get_bulk_dataset(args, pdfs=bulk_pdfs) # For Fisher forecast comparisons
 
 print("DATA:", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (dataset.fiducial_data, dataset.data)])

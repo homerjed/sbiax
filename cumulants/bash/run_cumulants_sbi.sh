@@ -14,143 +14,165 @@
 current_time=$(date +"%H:%M:%S")
 echo "The current time is: $current_time"
 
-# Each process takes its ID to use for the seeds
 id=$SLURM_ARRAY_TASK_ID
 
 start=`date +%s`
 
-echo "Currently running array index: " "${id}"
+echo "Currently running array index: " "$id"
 
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 
-# Activate env
 source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
 
-# Iterate over variance, skewness & kurtosis args
 for i in {0..2}; do
-    # Iterate over redshift
     for z in 0.0 0.5 1.0; do
-        order_idx_args=$(seq -s " " 0 $i)  # Generate "0", "0 1", "0 1 2" 
+        order_idx_args=$(seq -s " " 0 $i)
 
         echo ">>Running seed=$id, redshift $z, cumulants=$order_idx_args..."
 
-        # @@@@ Per-redshift posterior fitting @@@@
+        echo ">>Running bulk linearised scripts..."
+        python cumulants_sbi.py \
+            --seed "$id" \
+            --sbi_type "nle" \
+            --compression "linear" \
+            --linearised \
+            --n_linear_sims 10000 \
+            --order_idx "$order_idx_args" \
+            --redshift "$z" \
+            --no-use-tqdm \
+            --bulk_or_tails "bulk" \
+            --no-freeze-parameters
+        echo ">>Running bulk linearised scripts... Complete."
 
+        echo ">>Running tails linearised scripts..."
+        python cumulants_sbi.py \
+            --seed "$id" \
+            --sbi_type "nle" \
+            --compression "linear" \
+            --linearised \
+            --n_linear_sims 10000 \
+            --order_idx "$order_idx_args" \
+            --redshift "$z" \
+            --no-use-tqdm \
+            --bulk_or_tails "tails" \
+            --no-freeze-parameters
+        echo ">>Running tails linearised scripts... Complete."
 
+        # echo ">>Running linearised (nn) scripts..."
+        # python cumulants_sbi.py \
+        #     --seed "$id" \
+        #     --sbi_type "nle" \
+        #     --compression "nn" \
+        #     --linearised \
+        #     --order_idx "$order_idx_args" \
+        #     --redshift "$z" \
+        #     --no-use-tqdm
+        # echo ">>Running linearised (nn) scripts... Complete."
 
-        # BULK PDFS / CUMULANTS (--bulk_or_tails "bulk_pdf" or --bulk_or_tails "bulk")
+        # echo ">>Running non-linearised scripts..."
+        # python cumulants_sbi.py \
+        #     --seed "$id" \
+        #     --sbi_type "nle" \
+        #     --compression "linear" \
+        #     --no-linearised \
+        #     --order_idx "$order_idx_args" \
+        #     --redshift "$z" \
+        #     --no-use-tqdm
+        # echo ">>Running non-linearised scripts... Complete."
 
-        # Linear model
-        echo ">>Running linear scripts..."
-        python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "linear" --linearised --n_linear_sims 10000 --order_idx $order_idx_args --redshift $z --no-use-tqdm --bulk_or_tails "bulk_pdf" --no-freeze-parameters
-        echo ">>Running linear scripts... Complete."
+        # echo ">>Running non-linearised (nn) scripts..."
+        # python cumulants_sbi.py \
+        #     --seed "$id" \
+        #     --sbi_type "nle" \
+        #     --compression "nn" \
+        #     --no-linearised \
+        #     --order_idx "$order_idx_args" \
+        #     --redshift "$z" \
+        #     --no-use-tqdm
+        # echo ">>Running non-linearised (nn) scripts... Complete."
 
-        # Linear model, NN compression
-        # echo ">>Running linear (nn) scripts..."
-        # python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "nn" --linearised --order_idx $order_idx_args --redshift $z --no-use-tqdm
-        # echo ">>Running linear (nn) scripts... Complete."
+        echo ">>Running bulk pre-train non-linearised scripts..."
+        python cumulants_sbi.py \
+            --seed "$id" \
+            --sbi_type "nle" \
+            --compression "linear" \
+            --no-linearised \
+            --pre-train \
+            --n_linear_sims 10000 \
+            --order_idx "$order_idx_args" \
+            --redshift "$z" \
+            --no-use-tqdm \
+            --bulk_or_tails "bulk" \
+            --no-freeze-parameters
+        echo ">>Running bulk pre-train non-linearised scripts... Completed."
 
-        # Non-linear model, linear compression
-        # echo ">>Running non-linear scripts..."
-        # python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "linear" --no-linearised --order_idx $order_idx_args --redshift $z --no-use-tqdm
-        # echo ">>Running non-linear scripts... Complete."
-
-        # Non-linear model, NN compression
-        # echo ">>Running non-linear (nn) scripts..."
-        # python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "nn" --no-linearised --order_idx $order_idx_args --redshift $z --no-use-tqdm
-        # echo ">>Running non-linear (nn) scripts... Complete."
-
-        # Non-linear model (pre-train)
-        echo ">>Running pre-train non-linear scripts..."
-        python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "linear" --no-linearised --pre-train --n_linear_sims 10000 --order_idx $order_idx_args --redshift $z --no-use-tqdm --bulk_or_tails "bulk_pdf" --no-freeze-parameters
-        echo ">>Running pre-train non-linear scripts... Completed."
-
-        # Non-linear model, NN compression (pre-train)
-        # echo ">>Running pre-train non-linear scripts..."
-        # python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "nn" --no-linearised --pre-train --order_idx $order_idx_args --redshift $z --no-use-tqdm --bulk_or_tails "bulk_pdf"
-        # echo ">>Running pre-train non-linear scripts... Completed."
-
-
-
-        # TAILS CUMULANTS
-
-        # Linear model
-        echo ">>Running linear scripts..."
-        python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "linear" --linearised --n_linear_sims 10000 --order_idx $order_idx_args --redshift $z --no-use-tqdm --no-freeze-parameters
-        echo ">>Running linear scripts... Complete."
-
-        # Linear model, NN compression
-        # echo ">>Running linear (nn) scripts..."
-        # python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "nn" --linearised --order_idx $order_idx_args --redshift $z --no-use-tqdm
-        # echo ">>Running linear (nn) scripts... Complete."
-
-        # Non-linear model, linear compression
-        # echo ">>Running non-linear scripts..."
-        # python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "linear" --no-linearised --order_idx $order_idx_args --redshift $z --no-use-tqdm
-        # echo ">>Running non-linear scripts... Complete."
-
-        # Non-linear model, NN compression
-        # echo ">>Running non-linear (nn) scripts..."
-        # python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "nn" --no-linearised --order_idx $order_idx_args --redshift $z --no-use-tqdm
-        # echo ">>Running non-linear (nn) scripts... Complete."
-
-        # Non-linear model (pre-train)
-        echo ">>Running pre-train non-linear scripts..."
-        python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "linear" --no-linearised --pre-train --n_linear_sims 10000 --order_idx $order_idx_args --redshift $z --no-use-tqdm --no-freeze-parameters
-        echo ">>Running pre-train non-linear scripts... Completed."
-
-        # Non-linear model, NN compression (pre-train)
-        # echo ">>Running pre-train non-linear scripts..."
-        # python cumulants_sbi.py --seed $id --sbi_type "nle" --compression "nn" --no-linearised --pre-train --order_idx $order_idx_args --redshift $z --no-use-tqdm
-        # echo ">>Running pre-train non-linear scripts... Completed."
-
-
+        echo ">>Running tails pre-train non-linearised scripts..."
+        python cumulants_sbi.py \
+            --seed "$id" \
+            --sbi_type "nle" \
+            --compression "linear" \
+            --no-linearised \
+            --pre-train \
+            --n_linear_sims 10000 \
+            --order_idx "$order_idx_args" \
+            --redshift "$z" \
+            --no-use-tqdm \
+            --bulk_or_tails "tails" \
+            --no-freeze-parameters
+        echo ">>Running tails pre-train non-linearised scripts... Completed."
 
         current_time=$(date +"%H:%M:%S")
         echo "The current time is: $current_time"
     done
 
-    # @@@@ Multi-redshift posterior sampling @@@@
-    # > Done after all redshifts are executed for this order_idx cumulants combination
+    echo ">>Sampling multi-z with linearised datavectors..."
+    python cumulants_multi_z.py \
+        --seed "$id" \
+        --sbi_type "nle" \
+        --linearised \
+        --order_idx "$order_idx_args" \
+        --compression "linear" \
+        --bulk_or_tails "bulk" \
+        --no-freeze-parameters
+    echo ">>Sampling multi-z with linearised datavectors... Completed."
 
+    echo ">>Sampling multi-z with non-linearised datavectors..."
+    python cumulants_multi_z.py \
+        --seed "$id" \
+        --sbi_type "nle" \
+        --compression "linear" \
+        --no-linearised \
+        --pre-train \
+        --n_linear_sims 10000 \
+        --order_idx "$order_idx_args" \
+        --bulk_or_tails "bulk" \
+        --no-freeze-parameters
+    echo ">>Sampling multi-z with non-linearised datavectors... Completed."
 
+    echo ">>Sampling multi-z with linearised datavectors..."
+    python cumulants_multi_z.py \
+        --seed "$id" \
+        --sbi_type "nle" \
+        --linearised \
+        --order_idx "$order_idx_args" \
+        --compression "linear" \
+        --bulk_or_tails "tails" \
+    echo ">>Sampling multi-z with linearised datavectors... Completed."
 
-    # Sample multi-z posteriors with linear datavectors
-    echo ">>Sampling multi-z with linear datavectors..."
-    python cumulants_multi_z.py --seed $id --sbi_type "nle" --linearised --order_idx $order_idx_args --compression "linear" --bulk_or_tails "bulk_pdf" --no-freeze-parameters
-    echo ">>Sampling multi-z with linear datavectors... Completed."
-
-    # Sample multi-z posteriors with non-linear datavectors
-    # echo "Sampling multi-z with non-linear datavectors..."
-    # python cumulants_multi_z.py --seed $id --sbi_type "nle" --no-linearised  --order_idx $order_idx_args --compression "linear"
-    # echo "Sampling multi-z with non-linear datavectors... Completed."
-
-    # Sample multi-z posteriors with non-linear datavectors (pre-train)
-    echo ">>Sampling multi-z with non-linear datavectors..."
-    python cumulants_multi_z.py --seed $id --sbi_type "nle" --compression "linear" --no-linearised --pre-train --n_linear_sims 10000 --order_idx $order_idx_args --bulk_or_tails "bulk_pdf" --no-freeze-parameters
-    echo ">>Sampling multi-z with non-linear datavectors... Completed."
-
-
-
-    # Sample multi-z posteriors with linear datavectors
-    echo ">>Sampling multi-z with linear datavectors..."
-    python cumulants_multi_z.py --seed $id --sbi_type "nle" --linearised --order_idx $order_idx_args --compression "linear" --bulk_or_tails "bulk_pdf"
-    echo ">>Sampling multi-z with linear datavectors... Completed."
-
-    # Sample multi-z posteriors with non-linear datavectors
-    # echo "Sampling multi-z with non-linear datavectors..."
-    # python cumulants_multi_z.py --seed $id --sbi_type "nle" --no-linearised  --order_idx $order_idx_args --compression "linear"
-    # echo "Sampling multi-z with non-linear datavectors... Completed."
-
-    # Sample multi-z posteriors with non-linear datavectors (pre-train)
-    echo ">>Sampling multi-z with non-linear datavectors..."
-    python cumulants_multi_z.py --seed $id --sbi_type "nle" --compression "linear" --no-linearised --pre-train --n_linear_sims 10000 --order_idx $order_idx_args --bulk_or_tails "bulk_pdf"
-    echo ">>Sampling multi-z with non-linear datavectors... Completed."
+    echo ">>Sampling multi-z with non-linearised datavectors..."
+    python cumulants_multi_z.py \
+        --seed "$id" \
+        --sbi_type "nle" \
+        --compression "linear" \
+        --no-linearised \
+        --pre-train \
+        --n_linear_sims 10000 \
+        --order_idx "$order_idx_args" \
+        --bulk_or_tails "tails" \
+    echo ">>Sampling multi-z with non-linearised datavectors... Completed."
 
 done
 
 end=`date +%s`
-
 runtime=$((end-start))
-
-echo "Time for index:" "${id}" "was" "${runtime}" "seconds"
+echo "Time for index:" "$id" "was" "$runtime" "seconds"

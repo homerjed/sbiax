@@ -158,7 +158,7 @@ def get_cumulants_multi_z_args(using_notebook: bool = False):
         default="tails",
         choices=["bulk", "tails", "bulk_pdf"], # Choose bulk cumulants/tails or bulk pdf
         type=str,
-        help="Use cumulants from bulk or tails of PDF"
+        help="Use cumulants from bulk or tails of PDF, or bulk of the PDF."
     )
     parser.add_argument(
         "-n",

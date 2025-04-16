@@ -278,8 +278,7 @@ def get_bulk_cumulants_data(
                 print("\r n={:05d}/{}".format(n, n_fiducial_pdfs), end="")
 
     if use_mean and stack_mean:
-        fiducial_moments_z_R = intersperse_means(fiducial_moments_z_R_means, fiducial_moments_z_R) #jnp.concatenate([fiducial_moments_z_R_means, fiducial_moments_z_R], axis=1)
-        print("FIDUCIAL MOMENTS Z R", fiducial_moments_z_R.shape)
+        fiducial_moments_z_R = intersperse_means(fiducial_moments_z_R_means, fiducial_moments_z_R) 
 
     latin_pdfs_z_R_cut = np.zeros((n_latin_pdfs, cut_dim))
     latin_moments_z_R = np.zeros((n_latin_pdfs, n_scales * n_cumulants))
@@ -324,7 +323,6 @@ def get_bulk_cumulants_data(
                 print("\r n={:05d}/{}".format(n, n_latin_pdfs), end="")
 
     if use_mean and stack_mean:
-        # latin_moments_z_R = jnp.concatenate([latin_moments_z_R_means, latin_moments_z_R], axis=1)
         latin_moments_z_R = intersperse_means(latin_moments_z_R_means, latin_moments_z_R)
 
     # Including pm axes
@@ -389,7 +387,6 @@ def get_bulk_cumulants_data(
                 print("\r n={:05d}/{}".format(n, n_derivatives), end="")
 
     if use_mean and stack_mean:
-        # derivative_moments_z_R = jnp.concatenate([derivative_moments_z_R_means, derivative_moments_z_R], axis=2)
         derivative_moments_z_R = intersperse_means(derivative_moments_z_R_means, derivative_moments_z_R, are_derivatives=True)
 
     # Euler derivative from plus minus statistics

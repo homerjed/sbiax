@@ -193,7 +193,7 @@ def cumulants_config(
 
     # Miscallaneous
     config.use_scalers        = USE_SCALERS # Input scalers for (xi, pi) in NDEs (NOTE: checked that scalings aren't optimised!)
-    config.use_pca            = False# Need to add this into other scripts...
+    config.use_pca            = False # Need to add this into other scripts...
     config.ema_rate           = 0.995
     config.use_ema            = False # Use it and sample with it
 
@@ -436,7 +436,7 @@ def ensembles_cumulants_config(
     linearised: bool = True, 
     n_linear_sims: int = 10_000,
     compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
-    reduced_cumulants: bool = True,
+    reduced_cumulants: bool = False,
     redshifts: list[float] = [0.0, 0.5, 1.0],
     order_idx: list[int] = [0, 1, 2],
     freeze_parameters: bool = False,
@@ -481,7 +481,7 @@ def ensembles_bulk_cumulants_config(
     linearised: bool = True, 
     n_linear_sims: int = 10_000,
     compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
-    reduced_cumulants: bool = True,
+    reduced_cumulants: bool = False,
     redshifts: list[float] = [0.0, 0.5, 1.0],
     order_idx: list[int] = [0, 1, 2],
     freeze_parameters: bool = False,
@@ -531,7 +531,7 @@ def arch_search_config(
     linearised: bool = True, 
     n_linear_sims: int = 10_000,
     compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
-    reduced_cumulants: bool = True,
+    reduced_cumulants: bool = False,
     redshifts: list[float] = [0.0, 0.5, 1.0],
     order_idx: list[int] = [0, 1, 2],
     pre_train: bool = False
