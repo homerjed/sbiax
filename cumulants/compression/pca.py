@@ -29,7 +29,7 @@ class PCA:
         X_centred = X - self.mean
         S, self.principal_components = svd(X_centred, full_matrices=True)[1:]
 
-        self.explained_variance = S**2 / jnp.sum(S**2)
+        self.explained_variance = jnp.square(S) / jnp.sum(jnp.square(S))
 
     def transform(self, X: jax.Array):
         if self.principal_components is None:

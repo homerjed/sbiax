@@ -12,7 +12,7 @@ import optax
 import numpy as np 
 from tqdm.auto import trange
 
-from pca import PCA
+from .pca import PCA
 
 """
     Tools for compression with neural networks.
@@ -29,7 +29,7 @@ def loss(
     y: Float[Array, "b y"], 
     *,
     precision: Optional[Float[Array, "y y"]] = None
-) -> Float[Array, ""]:
+) -> Scalar:
     def fn(x, y):
         y_ = model(x)
         dy = jnp.subtract(y_, y)
@@ -49,7 +49,7 @@ def evaluate(
     *, 
     precision: Optional[Float[Array, "y y"]] = None,
     replicated_sharding: Optional[PositionalSharding] = None
-) -> Float[Array, ""]:
+) -> Scalar:
     if replicated_sharding is not None:
         model = eqx.filter_shard(model, replicated_sharding)
     return loss(model, x, y, precision=precision)
@@ -66,7 +66,7 @@ def make_step(
     *, 
     precision: Optional[Float[Array, "y y"]] = None,
     replicated_sharding: Optional[PositionalSharding]
-) -> Tuple[eqx.Module, optax.OptState, Float[Array, ""]]:
+) -> Tuple[eqx.Module, optax.OptState, Scalar]:
 
     if replicated_sharding is not None:
         model, opt_state = eqx.filter_shard(
@@ -110,6 +110,7 @@ def fit_nn(
     valid_fraction: int = 0.9, 
     valid_data: Sequence[Array] = None,
     batch_dataset: bool = True,
+    use_tqdm: bool = False,
     *,
     precision: Optional[Float[Array, "y y"]] = None,
     sharding: Optional[NamedSharding] = None,
@@ -157,50 +158,54 @@ def fit_nn(
         Xt, Xv = jnp.split(D, [int(valid_fraction * n_s)]) 
         Yt, Yv = jnp.split(Y, [int(valid_fraction * n_s)])
 
+    if use_tqdm: 
+        steps = trange(n_steps, desc="Training NN", colour="blue")
+    else: 
+        steps = trange(n_steps)
+
     L = np.zeros((n_steps, 2))
-    with trange(n_steps, desc="Training NN", colour="blue") as steps:
-        for step in steps:
-            key_t, key_v = jr.split(jr.fold_in(key, step))
+    for step in steps:
+        key_t, key_v = jr.split(jr.fold_in(key, step))
 
-            if batch_dataset:
-                x, y = get_batch(Xt, Yt, n=n_batch, key=key_t) # Xt, Yt
-            else:
-                x, y = Xt, Yt
-            
-            if sharding is not None:
-                x, y = eqx.filter_shard((x, y), sharding)
+        if batch_dataset:
+            x, y = get_batch(Xt, Yt, n=n_batch, key=key_t) # Xt, Yt
+        else:
+            x, y = Xt, Yt
+        
+        if sharding is not None:
+            x, y = eqx.filter_shard((x, y), sharding)
 
-            model, opt_state, train_loss = make_step(
-                model, 
-                opt_state, 
-                x, 
-                y, 
-                opt=opt, 
-                precision=precision, 
-                replicated_sharding=replicated_sharding
-            )
+        model, opt_state, train_loss = make_step(
+            model, 
+            opt_state, 
+            x, 
+            y, 
+            opt=opt, 
+            precision=precision, 
+            replicated_sharding=replicated_sharding
+        )
 
-            if batch_dataset:
-                x, y = get_batch(Xv, Yv, n=n_batch, key=key_v)
-            else:
-                x, y = Xv, Yv
+        if batch_dataset:
+            x, y = get_batch(Xv, Yv, n=n_batch, key=key_v)
+        else:
+            x, y = Xv, Yv
 
-            if sharding is not None:
-                x, y = eqx.filter_shard((x, y), sharding)
+        if sharding is not None:
+            x, y = eqx.filter_shard((x, y), sharding)
 
-            valid_loss = evaluate(
-                model, x, y, precision=precision, replicated_sharding=replicated_sharding
-            )
+        valid_loss = evaluate(
+            model, x, y, precision=precision, replicated_sharding=replicated_sharding
+        )
 
-            L[step] = train_loss, valid_loss
-            steps.set_postfix_str(
-                "train={:.3E}, valid={:.3E}".format(train_loss.item(), valid_loss.item())
-            )
+        L[step] = train_loss, valid_loss
+        steps.set_postfix_str(
+            "train={:.3E}, valid={:.3E}".format(train_loss.item(), valid_loss.item())
+        )
 
-            if patience is not None:
-                if (step > 0) and (step - np.argmin(L[:step, 1]) > patience):
-                    steps.set_description_str("Stopped at {}".format(step))
-                    break
+        if patience is not None:
+            if (step > 0) and (step - np.argmin(L[:step, 1]) > patience):
+                steps.set_description_str("Stopped at {}".format(step))
+                break
 
     return model, L[:step]
 

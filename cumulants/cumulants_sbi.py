@@ -16,35 +16,37 @@ from tensorflow_probability.substrates.jax.distributions import Distribution
 from sbiax.utils import make_df, marker
 from sbiax.ndes import Scaler, CNF, MAF 
 from sbiax.inference import nuts_sample
-
-from configs import (
-    cumulants_config, bulk_cumulants_config, 
-    get_results_dir, get_posteriors_dir, 
-    get_cumulants_sbi_args, get_ndes_from_config
-)
-from cumulants import (
-    CumulantsDataset, Dataset, get_data, get_prior, 
-    get_compression_fn, get_datavector, get_linearised_data
-)
-from pdfs import BulkCumulantsDataset, get_bulk_dataset
-from cumulants_ensemble import Ensemble
 from sbiax.train import train_ensemble
-from affine import affine_sample
-from utils import plot_moments, plot_latin_moments, plot_summaries, plot_fisher_summaries
 
-def replace_scalers(ensemble, *, X, P):
-    is_scaler = lambda x: isinstance(x, Scaler)
-    get_scalers = lambda m: [
-        x
-        for x in jax.tree.leaves(m, is_leaf=is_scaler)
-        if is_scaler(x)
-    ]
-    ensemble = eqx.tree_at(
-        get_scalers, 
-        ensemble, 
-        [Scaler(X, P)] * sum(int(nde.use_scaling) for nde in config.ndes) 
-    )
-    return ensemble
+from configs.configs import (
+    cumulants_config, 
+    bulk_cumulants_config, 
+    get_results_dir, 
+    get_posteriors_dir, 
+    get_ndes_from_config
+)
+from configs.args import get_cumulants_sbi_args
+from data.cumulants import (
+    CumulantsDataset, 
+    Dataset, 
+    get_data, 
+    get_prior, 
+    get_compression_fn, 
+    get_datavector, 
+    get_linearised_data
+)
+from data.pdfs import BulkCumulantsDataset, get_bulk_dataset
+from cumulants_ensemble import Ensemble
+from affine import affine_sample
+from utils.utils import (
+    plot_moments, 
+    plot_latin_moments, 
+    plot_summaries, 
+    plot_fisher_summaries, 
+    replace_scalers,
+    get_dataset_and_config
+)
+
 
 """ 
     Run NLE or NPE SBI with the moments of the 1pt matter PDF.
@@ -60,15 +62,6 @@ def replace_scalers(ensemble, *, X, P):
     - scaling of inputs? summaries seem to be high magnitude ... PCA whitening?
     - covariance conditioning?
 """ 
-
-def get_dataset_and_config(bulk_or_tails):
-    if bulk_or_tails == "bulk":
-        dataset_constructor = BulkCumulantsDataset
-        config = bulk_cumulants_config 
-    if bulk_or_tails == "tails":
-        dataset_constructor = CumulantsDataset
-        config = cumulants_config 
-    return dataset_constructor, config
 
 t0 = time.time()
 
@@ -95,6 +88,7 @@ config = _config(
     compression=args.compression,
     order_idx=args.order_idx,
     n_linear_sims=args.n_linear_sims,
+    freeze_parameters=args.freeze_parameters,
     pre_train=args.pre_train
 )
 
@@ -110,13 +104,20 @@ results_dir = get_results_dir(config, args)
 posteriors_dir = get_posteriors_dir(config, args)
 
 # Dataset of simulations, parameters, covariance, ...
-cumulants_dataset = _dataset(config, results_dir=results_dir)
+if args.bulk_or_tails == "tails":
+    cumulants_dataset = _dataset(
+        config, results_dir=results_dir
+    )
+if args.bulk_or_tails in ["bulk", "bulk_pdf"]:
+    cumulants_dataset = _dataset(
+        config, pdfs=("pdf" in args.bulk_or_tails), results_dir=results_dir
+    )
 
 dataset: Dataset = cumulants_dataset.data
 
 parameter_prior: Distribution = cumulants_dataset.prior
 
-bulk_pdfs = True # Use PDFs for Finv not cumulants
+bulk_pdfs = True # Use PDFs for Finv_bulk not cumulants
 bulk_dataset: Dataset = get_bulk_dataset(args, pdfs=bulk_pdfs) # For Fisher forecast comparisons
 
 print("DATA:", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (dataset.fiducial_data, dataset.data)])
@@ -156,11 +157,11 @@ ndes = get_ndes_from_config(
     key=model_key
 )
 
-print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None)
+print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None) # Check scaler mu, std are not changed by gradient
 
 ensemble = Ensemble(ndes, sbi_type=config.sbi_type)
 
-data_preprocess_fn = lambda x: x #/ jnp.max(dataset.fiducial_data, axis=0) #jnp.log(jnp.clip(x, min=1e-10))
+data_preprocess_fn = lambda x: x #2.0 * (x - X.min()) / (X.max() - X.min()) - 1.0 #/ jnp.max(dataset.fiducial_data, axis=0) #jnp.log(jnp.clip(x, min=1e-10))
 
 """
     Pre-train NDEs on linearised data
@@ -174,6 +175,7 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
 
     # Pre-train data = linearised simulations
     D_l, Y_l = cumulants_dataset.get_linearised_data()
+
     X_l = jax.vmap(compression_fn)(D_l, Y_l)
 
     print("Pre-training with", D_l.shape, X_l.shape, Y_l.shape)
@@ -181,7 +183,10 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
     plot_fisher_summaries(X_l, Y_l, dataset, results_dir)
 
     if config.use_scalers:
-        ensemble = replace_scalers(ensemble, X=X_l, P=dataset.parameters)
+        # ensemble = replace_scalers(ensemble, X=X_l, P=dataset.parameters)
+        ensemble = replace_scalers(
+            ensemble, config=config, X=data_preprocess_fn(X_l), P=Y_l
+        )
 
     opt = getattr(optax, config.pretrain.opt)(config.pretrain.lr)
 
@@ -286,11 +291,10 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
 
 opt = getattr(optax, config.train.opt)(config.train.lr)
 
-print("DATA:", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (dataset.fiducial_data, dataset.data)])
-print("Data / Parameters", [_.shape for _ in (X, dataset.parameters)])
-
 if config.use_scalers:
-    ensemble = replace_scalers(ensemble, X=X, P=dataset.parameters)
+    ensemble = replace_scalers(
+        ensemble, config=config, X=data_preprocess_fn(X), P=dataset.parameters
+    )
 
 ensemble, stats = train_ensemble(
     train_key, 
@@ -341,7 +345,7 @@ if 1:
     )
 
     samples_log_prob = jax.vmap(log_prob_fn)(samples)
-    alpha_log_prob = log_prob_fn(jnp.asarray(dataset.alpha))
+    alpha_log_prob = log_prob_fn(dataset.alpha)
 
     posterior_df = make_df(
         samples, 
@@ -365,7 +369,7 @@ if 1:
                 dataset.alpha,
                 dataset.Finv,
                 columns=dataset.parameter_strings,
-                name=r"$F_{\Sigma^{-1}}$",
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format("$S_n$[tails]" if config.reduced_cumulants else "$k_n$[tails]"),
                 color="k",
                 linestyle=":",
                 shade_alpha=0.
@@ -395,15 +399,17 @@ if 1:
         )
         fig = c.plotter.plot()
         fig.suptitle(
-            r"$k_n/k_2^{n-1}$ SBI & $F_{{\Sigma}}^{{-1}}$" + "\n" +
-            r"z={},\n $n_s$={},\n R={} Mpc,\n $k_n$={}".format(
-                config.redshift, 
-                config.n_linear_sims, 
-                "[{}]".format(", ".join(map(str, config.scales))),
-                "[{}]".format(",".join(map(str, [["var.", "skew.", "kurt."][_] for _ in config.order_idx])))
-                ),
+            (
+                r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
+                + " z={}".format(config.redshift) + "\n"
+                + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
+                + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
+                + r"$k_n$ = [{}]".format(
+                    ", ".join([["var.", "skew.", "kurt."][_] for _ in config.order_idx])
+                )
+            ),
             multialignment='center'
-        )
+    )
         plt.savefig(os.path.join(results_dir, "posterior_affine.pdf"))
         plt.savefig(os.path.join(posteriors_dir, "posterior_affine.pdf"))
         plt.close()
@@ -414,7 +420,6 @@ if 1:
 
 if 0:
     try:
-        # BLACKJAX SAMPLE IS FUNNY WITH float64
         samples, samples_log_prob = nuts_sample(
             key_sample, log_prob_fn, prior=parameter_prior
         )
@@ -442,7 +447,7 @@ if 0:
                 dataset.alpha,
                 dataset.Finv,
                 columns=dataset.parameter_strings,
-                name=r"$F_{\Sigma^{-1}}$",
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format("$S_n$[tails]" if config.reduced_cumulants else "$k_n$[tails]"),
                 color="k",
                 linestyle=":",
                 shade_alpha=0.

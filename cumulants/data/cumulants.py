@@ -1,12 +1,12 @@
 import os
 from dataclasses import dataclass, replace
 from functools import partial
-from typing import Tuple, Callable, Optional
+from typing import Callable, Optional
 
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-from jaxtyping import PRNGKeyArray, Array, Float, jaxtyped
+from jaxtyping import PRNGKeyArray, Array, Float, Int, jaxtyped
 
 import equinox as eqx
 import optax
@@ -21,9 +21,9 @@ from chainconsumer import Chain, ChainConsumer, Truth
 import tensorflow_probability.substrates.jax.distributions as tfd
 from tqdm.auto import trange
 
-from constants import get_quijote_parameters, get_save_and_load_dirs
-from nn import fit_nn, fit_nn_lbfgs
-from pca import PCA
+from data.constants import get_quijote_parameters, get_save_and_load_dirs, get_target_idx
+from compression.nn import fit_nn, fit_nn_lbfgs
+from compression.pca import PCA
 from sbiax.utils import marker
 
 typecheck = jaxtyped(typechecker=typechecker)
@@ -46,7 +46,7 @@ def get_parameter_strings() -> list[str]:
 @typecheck
 @dataclass
 class Dataset:
-    alpha: Float[Array, "p"]
+    alpha: Float[Array, "p"] 
     lower: Float[Array, "p"]
     upper: Float[Array, "p"]
     parameter_strings: list[str]
@@ -70,7 +70,7 @@ def convert_dataset_to_jax(dataset: Dataset) -> Dataset:
 @typecheck
 def get_raw_data(
     data_dir: str, verbose: bool = False
-) -> Tuple[
+) -> tuple[
     Float[np.ndarray, "z 15000 R d"],
     Float[np.ndarray, "z 2000 R d"],
     Float[np.ndarray, "2000 p"],
@@ -367,6 +367,7 @@ def get_cumulant_data(
         verbose: bool = False
     ) -> Float[np.ndarray, "500 z 5 R d"]:
 
+        # (n, z, p, R, 2, d) -> (n, z, p, R, d)
         derivatives = derivatives_pm[..., 1, :] - derivatives_pm[..., 0, :] 
 
         for p in range(alpha.size):
@@ -467,6 +468,13 @@ def get_cumulant_data(
         derivatives=jnp.asarray(derivatives)  
     )
 
+    if config.freeze_parameters:
+        print("Freezing all but Om, s8")
+        dataset = freeze_out_parameters_dataset(dataset)
+
+    if config.use_pca:
+        dataset = pca_dataset(dataset)
+
     if verbose:
         corr_matrix = np.corrcoef(fiducial_moments_z_R, rowvar=False) + 1e-6 # Log colouring
 
@@ -526,6 +534,123 @@ def get_cumulant_data(
         plt.close()
 
     return dataset
+
+
+def pca_dataset(dataset: Dataset) -> Dataset:
+
+    # Compress simulations as usual 
+    # X = jax.vmap(compressor)(dataset.data, dataset.parameters) # Fit PCA to latins
+    # X = jax.vmap(compressor, in_axes=(0, None))(dataset.fiducial_data, dataset.alpha) # Fit PCA to fiducials
+
+    # Standardise before PCA (don't get tricked by high variance due to units)
+    X = dataset.fiducial_data
+    mu_X = jnp.mean(X, axis=0)
+    std_X = jnp.std(X, axis=0)
+
+    def _preprocess_fn(X):
+        return X #(X - mu_X) / std_X
+
+    # Fit whitening-PCA to compressed simulations
+    pca = PCA(num_components=dataset.fiducial_data.shape[-1]) 
+    pca.fit(_preprocess_fn(X)) # Fit on fiducial data?
+    
+    # Reparameterize compression with both transforms
+    pca_fn = lambda d: pca.transform(_preprocess_fn(d))
+
+    derivatives = jnp.zeros_like(dataset.derivatives)
+    for p in range(dataset.alpha.size):
+        derivatives = derivatives.at[:, p, :].set(
+            jax.vmap(pca_fn)(dataset.derivatives[:, p, :])
+        )
+
+    fiducial_data = jax.vmap(pca_fn)(dataset.fiducial_data)
+
+    C = jnp.cov(fiducial_data, rowvar=False)
+    Cinv = jnp.linalg.inv(C)
+    _derivatives = jnp.mean(derivatives, axis=0)
+    Finv = jnp.linalg.multi_dot([_derivatives, Cinv, _derivatives.T])
+
+    frozen_dataset = Dataset(
+        alpha=dataset.alpha,
+        lower=dataset.lower,
+        upper=dataset.upper,
+        parameter_strings=dataset.parameter_strings,
+        Finv=Finv,
+        Cinv=Cinv,
+        C=C,
+        fiducial_data=fiducial_data,
+        data=jax.vmap(pca_fn)(dataset.data),
+        parameters=dataset.parameters,
+        derivatives=derivatives
+    )
+
+    return frozen_dataset 
+
+
+def freeze_out_parameters_dataset(dataset: Dataset) -> Dataset:
+
+    @typecheck
+    def _process_latins(
+        latins: Float[Array, "n d"], 
+        parameters: Float[Array, "n 5"], 
+        alpha: Float[Array, "5"], 
+        mu: Float[Array, "d"], 
+        dmu: Float[Array, "5 d"],
+        p_idx: Int[Array, "_"]
+    ) -> Float[Array, "n d"]:
+        # Freeze out latins
+
+        @typecheck
+        def _freeze_parameters(pdf: Float[Array, "d"], p: Float[Array, "p"]) -> Float[Array, "d"]:
+            # Freeze the nuisance parameters of the latin hypercube realisations
+
+            # Om, s8 and nuisances at fiducial values
+            p0 = jnp.array(
+                [_p if (i_p in p_idx) else alpha[i_p] for i_p, _p in enumerate(p)]
+            ) 
+
+            mu_p_nu = linearised_model(alpha, alpha_=p, mu=mu, dmu=dmu)
+            mu_p_nu_0 = linearised_model(alpha, alpha_=p0, mu=mu, dmu=dmu)
+
+            return pdf - mu_p_nu + mu_p_nu_0
+
+        return jax.vmap(_freeze_parameters)(latins, parameters)
+
+    p_idx = get_target_idx()
+
+    # Recalculate Fisher information (not marginalising out nuisances, they are known)
+    derivatives = dataset.derivatives[:, p_idx, :]  
+    _derivatives = jnp.mean(derivatives, axis=0)
+    F = jnp.linalg.multi_dot([_derivatives, dataset.Cinv, _derivatives.T])
+    Finv = jnp.linalg.inv(F)
+
+    # Remove influence of nuisances from latins by linearisation
+    latins_data = _process_latins(
+        dataset.data, 
+        dataset.parameters, 
+        alpha=dataset.alpha, 
+        mu=jnp.mean(dataset.fiducial_data, axis=0), 
+        dmu=jnp.mean(dataset.derivatives, axis=0), # Must be derivatives for all parameters!
+        p_idx=p_idx
+    )
+
+    frozen_dataset = Dataset(
+        alpha=dataset.alpha[p_idx],
+        lower=dataset.lower[p_idx],
+        upper=dataset.upper[p_idx],
+        parameter_strings=[
+            dataset.parameter_strings[p] for p in p_idx
+        ],
+        Finv=Finv,
+        Cinv=dataset.Cinv,
+        C=dataset.C,
+        fiducial_data=dataset.fiducial_data,
+        data=latins_data,
+        parameters=dataset.parameters[:, p_idx],
+        derivatives=derivatives # Target-indexed derivatives
+    )
+
+    return frozen_dataset 
 
 
 @typecheck
@@ -599,7 +724,10 @@ def sample_prior(
 
 
 @typecheck
-def get_linearised_data(config: ConfigDict, dataset: Dataset) -> Tuple[Float[Array, "n d"], Float[Array, "n p"]]:
+def get_linearised_data(
+    config: ConfigDict, 
+    dataset: Dataset
+) -> tuple[Float[Array, "n d"], Float[Array, "n p"]]:
     """
         Get linearised PDFs and get their MLEs 
 
@@ -648,7 +776,7 @@ def get_linearised_data(config: ConfigDict, dataset: Dataset) -> Tuple[Float[Arr
 
 
 @typecheck
-def get_nonlinearised_data(config: ConfigDict) -> Tuple[Float[Array, "n d"], Float[Array, "n p"]]:
+def get_nonlinearised_data(config: ConfigDict) -> tuple[Float[Array, "n d"], Float[Array, "n p"]]:
     """
         Get non-linearised PDFs. 
         - use linearised model at a random fiducial pdf noise realisation
@@ -719,6 +847,8 @@ def get_data(config: ConfigDict, *, verbose: bool = False, results_dir: Optional
             D, Y = get_linearised_data(config, dataset) 
 
             dataset = replace(dataset, data=D, parameters=Y)
+        else:
+            print("Using non-linearised model, non-Gaussian noise.")
 
     # E.g. using non-linear model and Gaussian noise or what?
     if hasattr(config, "nonlinearised"):
@@ -899,22 +1029,29 @@ def get_compression_fn(key, config, dataset, *, results_dir):
         compressor = get_linear_compressor(config, dataset)
 
     # Fit PCA transform to simulated data and apply after compressing
-    if config.use_pca:
+    # if config.use_pca:
 
-        # Compress simulations as usual 
-        X = jax.vmap(compressor)(dataset.data, dataset.parameters)
+    #     # Compress simulations as usual 
+    #     # X = jax.vmap(compressor)(dataset.data, dataset.parameters) # Fit PCA to latins
+    #     X = jax.vmap(compressor, in_axes=(0, None))(dataset.fiducial_data, dataset.alpha) # Fit PCA to fiducials
 
-        # Standardise before PCA (don't get tricked by high variance due to units)
-        X = (X - jnp.mean(X, axis=0)) / jnp.std(X, axis=0)
+    #     # Standardise before PCA (don't get tricked by high variance due to units)
+    #     mu_X = jnp.mean(X, axis=0)
+    #     std_X = jnp.std(X, axis=0)
 
-        # Fit whitening-PCA to compressed simulations
-        pca = PCA(num_components=dataset.alpha.size) 
-        pca.fit(X) # Fit on fiducial data?
+    #     def _preprocess_fn(X):
+    #         return (X - mu_X) / std_X
+
+    #     # Fit whitening-PCA to compressed simulations
+    #     pca = PCA(num_components=dataset.alpha.size) 
+    #     pca.fit(_preprocess_fn(X)) # Fit on fiducial data?
         
-        # Reparameterize compression with both transforms
-        compression_fn = lambda d, p: pca.transform(compressor(d, p))
-    else:
-        compression_fn = lambda d, p: compressor(d, p)
+    #     # Reparameterize compression with both transforms
+    #     compression_fn = lambda d, p: pca.transform(_preprocess_fn(compressor(d, p)))
+    # else:
+    #     compression_fn = lambda d, p: compressor(d, p)
+
+    compression_fn = lambda d, p: compressor(d, p)
 
     return compression_fn 
 
@@ -958,7 +1095,10 @@ class CumulantsDataset:
 
         self.results_dir = results_dir
 
-    def get_parameter_strings(self):
+        print("DATA:\n\t", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (self.data.fiducial_data, self.data.data)])
+        print("DATA / PARAMETERS:\n\t", [_.shape for _ in (self.data.data, self.data.parameters)])
+
+    def get_parameter_strings(self) -> list[str]:
         return get_parameter_strings()
 
     def sample_prior(self, key: PRNGKeyArray, n: int, *, hypercube: bool = True) -> Float[Array, "n p"]:
@@ -973,7 +1113,7 @@ class CumulantsDataset:
         )
         return P
 
-    def get_compression_fn(self):
+    def get_compression_fn(self) -> Callable[[Float[Array, "d"], Float[Array, "p"]], Float[Array, "p"]]:
         return self.compression_fn
 
     def get_datavector(self, key: PRNGKeyArray, n: int = 1) -> Float[Array, "... d"]:
@@ -988,7 +1128,7 @@ class CumulantsDataset:
             d = jnp.squeeze(d, axis=0) 
         return d
 
-    def get_linearised_data(self):
+    def get_linearised_data(self) -> tuple[Float[Array, "n d"], Float[Array, "n p"]]:
         # Get linearised data (e.g. pre-training), where config only sets how many simulations
         return get_linearised_data(self.config, self.data)
 

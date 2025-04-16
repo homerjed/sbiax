@@ -1,9 +1,10 @@
 import os
 from pathlib import Path
+import jax.numpy as jnp
 import numpy as np
 
 # This file is in repo/subfolder/ w.r.t. .git root
-ROOT_DIR = str(Path(__file__).resolve().parent.parent) 
+ROOT_DIR = str(Path(__file__).resolve().parent.parent.parent) 
 
 # Results and plots directories
 RESULTS_DIR = os.path.join(ROOT_DIR, "results/") 
@@ -72,6 +73,10 @@ DPARAMS = np.array(
 
 DELTA_BIN_EDGES = np.geomspace(1e-2, 1e2, num=100) 
 D_DELTAS = DELTA_BIN_EDGES[1:] - DELTA_BIN_EDGES[:-1]
+
+
+def get_target_idx():
+    return jnp.array([0, 4]) # Om, s8; ignoring h, n_s, Ob
 
 
 def get_quijote_parameters():

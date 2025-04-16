@@ -22,11 +22,13 @@ from chainconsumer import Chain, ChainConsumer, Truth
 from tensorflow_probability.substrates.jax.distributions import Distribution
 import optuna
 
-from configs import (
-    arch_search_config, get_arch_search_args, cumulants_config, get_results_dir, get_posteriors_dir, 
-    get_cumulants_sbi_args, get_ndes_from_config, get_base_results_dir
+from configs.configs import (
+    arch_search_config, cumulants_config, 
+    get_results_dir, get_posteriors_dir, 
+    get_ndes_from_config, get_base_results_dir
 )
-from cumulants import (
+from configs.args import get_arch_search_args, get_cumulants_sbi_args
+from data.cumulants import (
     CumulantsDataset, Dataset, get_data, get_prior, 
     get_compression_fn, get_datavector, get_linearised_data
 )
@@ -38,7 +40,7 @@ from sbiax.train import train_ensemble
 from sbiax.inference import nuts_sample
 
 from affine import affine_sample
-from utils import plot_moments, plot_latin_moments, plot_summaries, plot_fisher_summaries
+from utils.utils import plot_moments, plot_latin_moments, plot_summaries, plot_fisher_summaries, replace_scalers
 
 """
     - Integrate optuna into training function       x
@@ -72,7 +74,6 @@ def assign_trial_parameters_to_config(
     return config
 
 
-
 def objective(
     trial: optuna.trial.Trial, 
     arch_search_dir: str, 
@@ -88,6 +89,10 @@ def objective(
     print("LINEARISED:", args.linearised)
     print("TRIAL NUMBER", trial.number)
 
+    """
+        Config
+    """
+
     config = cumulants_config(
         seed=args.seed, 
         redshift=args.redshift, 
@@ -97,6 +102,7 @@ def objective(
         compression=args.compression,
         order_idx=args.order_idx,
         n_linear_sims=args.n_linear_sims,
+        freeze_parameters=args.freeze_parameters,
         pre_train=args.pre_train
     )
 
@@ -115,7 +121,7 @@ def objective(
     )
 
     posteriors_dir = os.path.join(
-        get_posteriors_dir(config, arch_search=True), "{}/".format(trial.number)
+        get_posteriors_dir(config, args, arch_search=True), "{}/".format(trial.number)
     )
 
     for _dir in [posteriors_dir, results_dir]:
@@ -136,6 +142,10 @@ def objective(
 
     print("DATA:", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (dataset.fiducial_data, dataset.data)])
     print("DATA:", [_.shape for _ in (dataset.fiducial_data, dataset.data)])
+
+    """
+        Compression
+    """
 
     compression_fn = cumulants_dataset.compression_fn
 
@@ -202,19 +212,9 @@ def objective(
 
     plot_latin_moments(dataset.data, config, results_dir=results_dir)
 
-    def replace_scalers(ensemble, *, X, P):
-        is_scaler = lambda x: isinstance(x, Scaler)
-        get_scalers = lambda m: [
-            x
-            for x in jax.tree.leaves(m, is_leaf=is_scaler)
-            if is_scaler(x)
-        ]
-        ensemble = eqx.tree_at(
-            get_scalers, 
-            ensemble, 
-            [Scaler(X, P)] * sum(int(nde.use_scaling) for nde in config.ndes) 
-        )
-        return ensemble
+    """
+        Build NDEs
+    """
 
     scaler = Scaler(X, dataset.parameters, use_scaling=config.use_scalers)
 
@@ -228,14 +228,14 @@ def objective(
 
     ensemble = Ensemble(ndes, sbi_type=config.sbi_type)
 
-    data_preprocess_fn = lambda x: 2.0 * (x - X.min()) / (X.max() - X.min()) - 1.0 # jnp.log(jnp.clip(x, min=1e-10)) 
+    data_preprocess_fn = lambda x: x # 2.0 * (x - X.min()) / (X.max() - X.min()) - 1.0 # jnp.log(jnp.clip(x, min=1e-10)) 
+
+    """
+        Pre-train NDEs on linearised data
+    """
 
     # Only pre-train if required and not inferring from linear simulations
-    if (
-        (not config.linearised) 
-        and config.pre_train 
-        and (config.n_linear_sims is not None)
-    ):
+    if ((not config.linearised) and config.pre_train and (config.n_linear_sims is not None)):
         print("Linearised pre-training...")
 
         pre_train_key, summaries_key = jr.split(key)
@@ -253,7 +253,7 @@ def objective(
 
         if config.use_scalers:
             ensemble = replace_scalers(
-                ensemble, X=data_preprocess_fn(X_l), P=dataset.parameters
+                ensemble, X=data_preprocess_fn(X_l), P=dataset.parameters, config=config
             )
 
         ensemble, stats = train_ensemble(
@@ -297,7 +297,7 @@ def objective(
             show_tqdm=args.use_tqdm
         )
 
-        samples_log_prob = jax.vmap(log_prob_fn)(samples)
+        samples_log_prob = jax.vmap(log_prob_fn)(samples) # No pre-processing on parameters
         alpha_log_prob = log_prob_fn(jnp.asarray(dataset.alpha))
 
         posterior_df = make_df(
@@ -375,7 +375,7 @@ def objective(
             Truth(location=dict(zip(dataset.parameter_strings, dataset.alpha)), name=r"$\pi^0$")
         )
         fig = c.plotter.plot()
-        plt.show()
+        plt.close()
 
         fig, axs = plt.subplots(1, dataset.alpha.size, figsize=(2. + 2. * dataset.alpha.size, 2.5))
         for p, ax in enumerate(axs):
@@ -389,6 +389,10 @@ def objective(
         plt.savefig(os.path.join(results_dir, "Xl.png"))
         plt.close()
 
+    """
+        Train NDE on data
+    """
+
     opt = getattr(optax, config.train.opt)(config.train.lr)
 
     print("Data / Parameters", [_.shape for _ in (X, dataset.parameters)])
@@ -396,7 +400,7 @@ def objective(
 
     if config.use_scalers:
         ensemble = replace_scalers(
-            ensemble, X=data_preprocess_fn(X), P=dataset.parameters
+            ensemble, X=data_preprocess_fn(X), P=dataset.parameters, config=config
         )
 
     ensemble, stats = train_ensemble(
@@ -417,7 +421,9 @@ def objective(
         # results_dir=results_dir
     )
 
-    ensemble = eqx.nn.inference_mode(ensemble)
+    """ 
+        Sample and plot posterior for NDE with noisy datavectors
+    """
 
     # Generates linearised (or not) datavector at fiducial parameters
     datavector = cumulants_dataset.get_datavector(key_datavector)
@@ -574,32 +580,33 @@ def callback(
     try:
         print("@" * 80 + datetime.today().strftime('%Y-%m-%d %H:%M:%S'))
         print("Best values so far:\n\t{}\n\t{}".format(study.best_trial, study.best_trial.params))
+        print("Optuna figures saved at:\n\t{}".format(figs_dir))
         print("@" * 80 + "n_trials=" + str(len(study.trials)))
 
         layout_kwargs = dict(template="simple_white", title=dict(text=None))
         fig = optuna.visualization.plot_param_importances(study)
         fig.update_layout(**layout_kwargs)
-        fig.show()
+        # fig.show()
         fig.write_image(os.path.join(figs_dir, "importances.pdf"))
 
         fig = optuna.visualization.plot_optimization_history(study)
         fig.update_layout(**layout_kwargs)
-        fig.show()
+        # fig.show()
         fig.write_image(os.path.join(figs_dir, "history.pdf"))
 
         fig = optuna.visualization.plot_contour(study)
         fig.update_layout(**layout_kwargs)
-        fig.show()
+        # fig.show()
         fig.write_image(os.path.join(figs_dir, "contour.pdf"))
 
         fig = optuna.visualization.plot_intermediate_values(study)
         fig.update_layout(**layout_kwargs)
-        fig.show()
+        # fig.show()
         fig.write_image(os.path.join(figs_dir, "intermediates.pdf"))
 
         fig = optuna.visualization.plot_timeline(study)
         fig.update_layout(**layout_kwargs)
-        fig.show()
+        # fig.show()
         fig.write_image(os.path.join(figs_dir, "timeline.pdf"))
 
         df = study.trials_dataframe()
@@ -619,6 +626,7 @@ def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> Config
             "depth" : trial.suggest_int(name="depth", low=0, high=4, step=1), # NN depth
             "dt" : trial.suggest_float(name="dt", low=0.01, high=0.15, step=0.01), # ODE solver timestep
             "solver" : trial.suggest_categorical(name="solver", choices=["Euler", "Heun", "Tsit5"]), # ODE solver
+            "activation" : trial.suggest_categorical(name="activation", choices=["tanh", "gelu", "leaky_relu", "swish"])
         }
         config.ndes[0].width_size = 2 ** model_hyperparameters["width"]
         config.ndes[0].depth = model_hyperparameters["depth"]
@@ -627,11 +635,12 @@ def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> Config
 
     if model_type == "maf":
         model_hyperparameters = {
-            "width" : trial.suggest_int(name="width", low=3, high=7, step=1), # Hidden units in NNs
-            "depth" : trial.suggest_int(name="depth", low=1, high=5, step=1), # Flow depth
+            "width" : trial.suggest_int(name="width", low=3, high=8, step=1), # Hidden units in NNs
+            "depth" : trial.suggest_int(name="depth", low=1, high=10, step=1), # Flow depth
             "layers" : trial.suggest_int(name="layers", low=1, high=3, step=1), # NN layers
+            "activation" : trial.suggest_categorical(name="activation", choices=["tanh", "gelu", "leaky_relu", "swish"])
         }
-        config.ndes[0].width = 2 ** model_hyperparameters["width"]
+        config.ndes[0].width_size = 2 ** model_hyperparameters["width"]
         config.ndes[0].n_layers = model_hyperparameters["depth"]
         config.ndes[0].nn_depth = model_hyperparameters["layers"]
 
@@ -639,7 +648,7 @@ def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> Config
         # Training
         "n_batch" : trial.suggest_int(name="n_batch", low=40, high=100, step=10), 
         "lr" : trial.suggest_float(name="lr", low=1e-5, high=1e-3, log=True), 
-        "patience" : trial.suggest_int(name="p", low=10, high=100, step=10),
+        "patience" : trial.suggest_int(name="p", low=10, high=500, step=10),
     }
 
     config.train.n_batch = training_hyperparameters["n_batch"]
@@ -654,7 +663,6 @@ def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> Config
 
 if __name__ == "__main__":
 
-    # args = arch_search_config()
     args = get_arch_search_args()
 
     show_results_dataframe = False # Simply show best trial from existing dataframe

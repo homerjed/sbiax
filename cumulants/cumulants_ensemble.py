@@ -27,6 +27,10 @@ def default_weights(weights: Float[Array, "n"], ndes: list[eqx.Module]) -> Float
 
 
 class Ensemble(eqx.Module):
+    """
+        Ensemble of NDEs to be fit to simulations at a fixed redshift
+    """
+
     sbi_type: str
     ndes: Tuple[eqx.Module]
     n_ndes: int
@@ -169,6 +173,11 @@ class Ensemble(eqx.Module):
 
 
 class MultiEnsemble(eqx.Module):
+    """
+        Ensemble for bringing together ensembles of NDEs fit at
+        individual redshifts
+    """
+
     ensembles: list[Ensemble]
     prior: Optional[Distribution]
     sbi_type: Literal["nle", "npe"] 

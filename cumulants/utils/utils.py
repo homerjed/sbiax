@@ -1,10 +1,30 @@
 import os 
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import jax
+import equinox as eqx
 import numpy as np
-from chainconsumer import Chain, ChainConsumer, Truth
+from chainconsumer import Chain, ChainConsumer, Truth, PlotConfig
 
 from sbiax.utils import make_df, marker
+from sbiax.ndes import Scaler
+
+from data.pdfs import BulkCumulantsDataset
+from data.cumulants import CumulantsDataset
+from configs.configs import cumulants_config, bulk_cumulants_config
+
+
+def get_dataset_and_config(bulk_or_tails):
+    assert bulk_or_tails in ["bulk", "bulk_pdf", "tails"], (
+        "bulk_or_tails == {}".format(bulk_or_tails)
+    )
+    if (bulk_or_tails == "bulk") or (bulk_or_tails == "bulk_pdf"):
+        dataset_constructor = BulkCumulantsDataset
+        config = bulk_cumulants_config 
+    if bulk_or_tails == "tails":
+        dataset_constructor = CumulantsDataset
+        config = cumulants_config 
+    return dataset_constructor, config
 
 
 def plot_moments(fiducial_moments_z_R, config, results_dir=None):
@@ -104,6 +124,15 @@ def plot_summaries(X, P, dataset, results_dir=None):
     c.add_truth(
         Truth(location=dict(zip(dataset.parameter_strings, dataset.alpha)), name=r"$\pi^0$")
     )
+    plot_config = PlotConfig(
+        extents=dict(
+            zip(
+                dataset.parameter_strings, 
+                np.stack([dataset.lower, dataset.upper], axis=1)
+            )
+        )
+    )
+    c.set_plot_config(plot_config)
     fig = c.plotter.plot()
     if results_dir is not None:
         plt.savefig(os.path.join(results_dir, "params.pdf")) 
@@ -186,3 +215,19 @@ def plot_fisher_summaries(X, P, dataset, results_dir=None):
         plt.close()
     else:
         plt.show()
+
+
+def replace_scalers(ensemble, *, config, X, P):
+    if config.use_scalers:
+        is_scaler = lambda x: isinstance(x, Scaler)
+        get_scalers = lambda m: [
+            x
+            for x in jax.tree.leaves(m, is_leaf=is_scaler)
+            if is_scaler(x)
+        ]
+        ensemble = eqx.tree_at(
+            get_scalers, 
+            ensemble, 
+            [Scaler(X, P)] * sum(int(nde.use_scaling) for nde in config.ndes) 
+        )
+    return ensemble

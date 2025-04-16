@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=arch
-#SBATCH --output=/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/%A/arch_search_%A_%a.out
-#SBATCH --error=/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/%A/nle_arch_search_%A_%a.err
+#SBATCH --output=/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/arch_search/%A/arch_search_%A_%a.out
+#SBATCH --error=/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/arch_search/%A/nle_arch_search_%A_%a.err
 #SBATCH --array=0%1
 #SBATCH --time=48:00:00
 #SBATCH --partition=cluster
@@ -28,6 +28,6 @@ echo ">>Running arch search on id: " "${id}"
 # echo ">>order_idx 0 1 2"
 # python arch_search.py --seed 0 --redshift 0.0 --order_idx 0 1 2 --no-linearised --no-reduced_cumulants
 # echo ">>order_idx 0"
-python arch_search.py --seed 0 --redshift 0.0 --order_idx 0 --no-linearised  
+python arch_search.py --seed 0 --redshift 0.0 --order_idx 0 1 2 --no-linearised --no-freeze-parameters
 # echo ">>order_idx 0 1"
 # python arch_search.py --seed 0 --redshift 0.0 --order_idx 0 1 --no-linearised  

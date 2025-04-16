@@ -20,8 +20,10 @@ from sbiax.ndes import CNF, MAF, Scaler
 from sbiax.compression.linear import mle
 from sbiax.inference import nuts_sample
 from sbiax.utils import make_df, marker
-from configs import (
+
+from configs.configs import (
     cumulants_config, 
+    bulk_cumulants_config,
     ensembles_cumulants_config,
     ensembles_bulk_cumulants_config,
     get_base_results_dir, 
@@ -29,11 +31,13 @@ from configs import (
     get_results_dir, 
     get_multi_z_posterior_dir, 
     get_posteriors_dir, 
-    get_cumulants_sbi_args, 
-    get_cumulants_multi_z_args,
     get_ndes_from_config
 )
-from cumulants import (
+from configs.args import (
+    get_cumulants_sbi_args, 
+    get_cumulants_multi_z_args
+)
+from data.cumulants import (
     CumulantsDataset,
     Dataset, 
     get_data, 
@@ -43,10 +47,11 @@ from cumulants import (
     get_linearised_data,
     get_parameter_strings
 )
-from pdfs import BulkCumulantsDataset, get_bulk_dataset
+from data.pdfs import BulkCumulantsDataset, get_bulk_dataset
 from cumulants_ensemble import Ensemble, MultiEnsemble
-from pca import PCA
+from compression.pca import PCA
 from affine import affine_sample
+from utils.utils import get_dataset_and_config
 
 typecheck = jaxtyped(typechecker=typechecker)
 
@@ -88,6 +93,7 @@ def get_z_config_and_datavector(
     redshift: float, 
     linearised: bool = True, 
     order_idx: list[int] = [0, 1, 2],
+    freeze_parameters: bool = False,
     compression: Literal["linear", "nn"] = "linear",
     reduced_cumulants: bool = True,
     n_linear_sims: int = 10_000,
@@ -95,7 +101,7 @@ def get_z_config_and_datavector(
     sbi_type: str = "nle",
     exp_name_format: str = "z={}_m={}",
     n_datavectors: int = 1,
-    bulk_or_tails: Literal["tails", "bulk"] = "tails",
+    bulk_or_tails: Literal["tails", "bulk", "bulk_pdf"] = "tails",
     *,
     verbose: bool = False
 ) -> tuple[
@@ -105,6 +111,7 @@ def get_z_config_and_datavector(
     Distribution,
     Float[Array, "p"],
     Float[Array, "p p"],
+    Float[Array, "p p"],
     Float[Array, "d d"],
     Float[Array, "d"],
     Float[Array, "p d"]
@@ -113,15 +120,6 @@ def get_z_config_and_datavector(
         Get config and datavector associated with a redshift z to load the experiment 
         for use in an ensemble of SBI likelihoods at different redshifts
     """
-
-    def get_dataset_and_config(bulk_or_tails):
-        if bulk_or_tails == "bulk":
-            dataset_constructor = BulkCumulantsDataset
-            config = bulk_cumulants_config 
-        if bulk_or_tails == "tails":
-            dataset_constructor = CumulantsDataset
-            config = cumulants_config 
-        return dataset_constructor 
 
     key_datavector, key_model = jr.split(key)
 
@@ -136,6 +134,7 @@ def get_z_config_and_datavector(
         reduced_cumulants=reduced_cumulants,
         n_linear_sims=n_linear_sims,
         order_idx=order_idx,
+        freeze_parameters=freeze_parameters,
         pre_train=pre_train
     )
 
@@ -147,6 +146,7 @@ def get_z_config_and_datavector(
         reduced_cumulants=reduced_cumulants,
         n_linear_sims=n_linear_sims,
         order_idx=order_idx,
+        freeze_parameters=freeze_parameters,
         pre_train=pre_train
     )
 
@@ -157,16 +157,20 @@ def get_z_config_and_datavector(
     # Set to current redshift, ensure matching NLE or NPE and linearisation
     config_z.exp_name = exp_name_format.format(redshift, "".join(map(str, config.order_idx)))
 
-    cumulants_dataset = CumulantsDataset(config_z, results_dir=None, verbose=verbose)
+    cumulants_dataset = CumulantsDataset(
+        config_z, results_dir=None, verbose=verbose
+    )
 
-    bulk_cumulants_dataset = BulkCumulantsDataset(bulk_config_z, results_dir=None, verbose=verbose)
+    bulk_cumulants_dataset = BulkCumulantsDataset(
+        bulk_config_z, pdfs=("pdf" in bulk_or_tails), results_dir=None, verbose=verbose
+    )
 
     dataset: Dataset = cumulants_dataset.data
 
-    bulk_dataset: Dataset = bulk_cumulants_dataset.data
+    bulk_dataset: Dataset = bulk_cumulants_dataset.data # For Fisher forecast comparisons
 
     # bulk_pdfs = True
-    # bulk_dataset: Dataset = get_bulk_dataset(args, pdfs=bulk_pdfs) # For Fisher forecast comparisons
+    # bulk_dataset: Dataset = get_bulk_dataset(args, pdfs=bulk_pdfs) 
 
     parameter_prior: Distribution = cumulants_dataset.prior # Quijote prior (same for all z, only applied once with combined z-likelihoods)
 
@@ -184,6 +188,7 @@ def get_z_config_and_datavector(
     X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
 
     # Input scaler functions for individual NDEs (NOTE: scaling on X which may need to be linearised or not)
+    # NOTE: make sure this is consistent with training data-scaling
     scalers = [
         Scaler(X, dataset.parameters, use_scaling=config_z.use_scalers)
     ]
@@ -302,7 +307,7 @@ if __name__ == "__main__":
     # Multi-z inference concerning the bulk or bulk + tails
     if args.bulk_or_tails == "tails":
         ensembles_config = ensembles_cumulants_config
-    if args.bulk_or_tails == "bulk":
+    if args.bulk_or_tails == "bulk" or args.bulk_or_tails == "bulk_pdf":
         ensembles_config = ensembles_bulk_cumulants_config
 
     config = ensembles_config(
@@ -313,7 +318,8 @@ if __name__ == "__main__":
         order_idx=args.order_idx,
         redshifts=args.redshifts,
         compression=args.compression,
-        pre_train=args.pre_train
+        pre_train=args.pre_train,
+        freeze_parameters=args.freeze_parameters
     )
 
     parameter_strings = get_parameter_strings()
@@ -390,6 +396,7 @@ if __name__ == "__main__":
                     n_datavectors=args.n_datavectors,
                     pre_train=args.pre_train,
                     bulk_or_tails=args.bulk_or_tails,
+                    freeze_parameters=args.freeze_parameters,
                     verbose=args.verbose
                 ) 
 
@@ -552,79 +559,81 @@ if __name__ == "__main__":
             samples=samples, 
             samples_log_prob=samples_log_prob,
             Finv=Finv_all_z,
+            datavectors=datavectors,
             summary=x_ # Is this correct one to save?
         )
 
-        print("POSTERIOR FILENAME", posterior_filename)
+        print("POSTERIOR FILENAME:\n", posterior_filename)
 
         """
             Full posterior
         """
 
-        c = ChainConsumer() 
-        c.add_chain(
-            Chain.from_covariance(
-                alpha,
-                Finv_all_z, # NOTE: Get multi redshift Fisher matrix, use a multi-inference config
-                columns=parameter_strings,
-                name=r"$F_{\Sigma^{-1}}$",
-                color="k",
-                linestyle=":",
-                shade_alpha=0.
+        if not config.freeze_parameters:
+            c = ChainConsumer() 
+            c.add_chain(
+                Chain.from_covariance(
+                    alpha,
+                    Finv_all_z, # NOTE: Get multi redshift Fisher matrix, use a multi-inference config
+                    columns=parameter_strings,
+                    name=r"$F_{\Sigma^{-1}}$",
+                    color="k",
+                    linestyle=":",
+                    shade_alpha=0.
+                )
             )
-        )
-        c.add_chain(
-            Chain.from_covariance(
-                alpha,
-                bulk_Finv_all_z,
-                columns=parameter_strings,
-                name=r"$F_{\Sigma^{-1}}$ (all z) [bulk]",
-                color="g",
-                shade_alpha=0.
+            c.add_chain(
+                Chain.from_covariance(
+                    alpha,
+                    bulk_Finv_all_z,
+                    columns=parameter_strings,
+                    name=r"$F_{\Sigma^{-1}}$ (all z) [bulk]",
+                    color="g",
+                    shade_alpha=0.
+                )
             )
-        )
-        posterior_df = make_df(
-            samples, samples_log_prob, parameter_strings=parameter_strings
-        )
-        c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
-        # If using multiple datavectors, plot them individually
-        if x_.ndim > 1:
-            for i, _x_ in enumerate(x_):
+            posterior_df = make_df(
+                samples, samples_log_prob, parameter_strings=parameter_strings
+            )
+            c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
+            # If using multiple datavectors, plot them individually
+            if x_.ndim > 1:
+                for i, _x_ in enumerate(x_):
+                    c.add_marker(
+                        location=marker(_x_, parameter_strings), 
+                        name=r"$\hat{x}$ " + str(i), 
+                        color="b"
+                    )
+            else:
                 c.add_marker(
-                    location=marker(_x_, parameter_strings), 
-                    name=r"$\hat{x}$ " + str(i), 
+                    location=marker(x_, parameter_strings), 
+                    name=r"$\hat{x}$", 
                     color="b"
                 )
-        else:
             c.add_marker(
-                location=marker(x_, parameter_strings), 
-                name=r"$\hat{x}$", 
-                color="b"
+                location=marker(alpha, parameter_strings), 
+                name=r"$\alpha$", 
+                color="#7600bc"
             )
-        c.add_marker(
-            location=marker(alpha, parameter_strings), 
-            name=r"$\alpha$", 
-            color="#7600bc"
-        )
-        fig = c.plotter.plot()
-        fig.suptitle(
-            r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n/k_2^{n-1}$" if config.reduced_cumulants else "$k_n$") + "\n" +
-            "{} z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
-                    ("linearised" if config.linearised else "non-linear") + "\n",
-                    "[{}]".format(", ".join(map(str, config.redshifts))),
-                    config.n_linear_sims if config.linearised else 2000, 
-                    config.n_linear_sims if config.pre_train else None,
-                    "[{}]".format(", ".join(map(str, config.scales))),
-                    "[{}]".format(", ".join(map(str, [["var.", "skew.", "kurt."][_] for _ in config.order_idx])))
-                ),
-            multialignment='center'
-        )
-        plt.savefig(
-            os.path.join(
-                figs_dir, 
-                "multi_ensemble_posterior_cumulants_{}_{}.pdf".format(n_posterior, linear_str))
-        )
-        plt.close()
+            fig = c.plotter.plot()
+            fig.suptitle(
+                r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n/k_2^{n-1}$" if config.reduced_cumulants else "$k_n$") + "\n" +
+                "{} z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
+                        ("linearised" if config.linearised else "non-linear") + "\n",
+                        "[{}]".format(", ".join(map(str, config.redshifts))),
+                        config.n_linear_sims if config.linearised else 2000, 
+                        config.n_linear_sims if config.pre_train else None,
+                        "[{}]".format(", ".join(map(str, config.scales))),
+                        "[{}]".format(", ".join(map(str, [["var.", "skew.", "kurt."][_] for _ in config.order_idx])))
+                    ),
+                multialignment='center'
+            )
+            plt.savefig(
+                os.path.join(
+                    figs_dir, 
+                    "multi_ensemble_posterior_cumulants_{}_{}_{}.pdf".format(args.seed, linear_str, n_posterior))
+            )
+            plt.close()
 
         """
             Marginalised posterior
@@ -691,10 +700,11 @@ if __name__ == "__main__":
                 ),
             multialignment='center'
         )
-        plt.savefig(
-            os.path.join(
-                figs_dir, 
-                "multi_ensemble_posterior_marginalised_cumulants_{}_{}.pdf".format(n_posterior, linear_str)
-            )
+        posterior_plot_filename = os.path.join(
+            figs_dir, 
+            "multi_ensemble_posterior_marginalised_cumulants_{}_{}_{}.pdf".format(args.seed, linear_str, n_posterior)
         )
+        plt.savefig(posterior_plot_filename)
         plt.close()
+
+        print("POSTERIOR PLOT FILENAME:\n", posterior_plot_filename)
