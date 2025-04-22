@@ -21,22 +21,16 @@ from sbiax.compression.linear import mle
 from sbiax.inference import nuts_sample
 from sbiax.utils import make_df, marker
 
+from configs import cumulants_config, bulk_cumulants_config
+from configs.ensembles_configs import ensembles_cumulants_config, ensembles_bulk_cumulants_config
 from configs.configs import (
-    cumulants_config, 
-    bulk_cumulants_config,
-    ensembles_cumulants_config,
-    ensembles_bulk_cumulants_config,
-    get_base_results_dir, 
-    get_base_posteriors_dir,
     get_results_dir, 
     get_multi_z_posterior_dir, 
     get_posteriors_dir, 
     get_ndes_from_config
 )
-from configs.args import (
-    get_cumulants_sbi_args, 
-    get_cumulants_multi_z_args
-)
+from configs.args import get_cumulants_sbi_args, get_cumulants_multi_z_args
+from data.constants import get_base_posteriors_dir
 from data.cumulants import (
     CumulantsDataset,
     Dataset, 
@@ -334,9 +328,9 @@ if __name__ == "__main__":
         posteriors_dir, 
         "frozen/" if config.freeze_parameters else "nonfrozen/",
         "{}/".format(args.bulk_or_tails),
-        "reduced_cumulants" if config.reduced_cumulants else "cumulants",
-        (config.sbi_type + "/") if config.sbi_type else "" , 
-        (config.compression + "/") if config.compression else "",
+        "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
+        (config.sbi_type + "/"), 
+        (config.compression + "/"),
         "linearised/" if config.linearised else "nonlinearised/",
         "pretrain/" if config.pre_train else "nopretrain/",
         "z={}_m={}".format( 
