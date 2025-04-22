@@ -22,25 +22,38 @@ from chainconsumer import Chain, ChainConsumer, Truth
 from tensorflow_probability.substrates.jax.distributions import Distribution
 import optuna
 
-from configs.configs import (
-    arch_search_config, cumulants_config, 
-    get_results_dir, get_posteriors_dir, 
-    get_ndes_from_config, get_base_results_dir
-)
-from configs.args import get_arch_search_args, get_cumulants_sbi_args
-from data.cumulants import (
-    CumulantsDataset, Dataset, get_data, get_prior, 
-    get_compression_fn, get_datavector, get_linearised_data
-)
-
 from sbiax.utils import make_df, marker
 from sbiax.ndes import Scaler, CNF, MAF 
 from cumulants_ensemble import Ensemble
 from sbiax.train import train_ensemble
 from sbiax.inference import nuts_sample
 
+from configs import (
+    arch_search_config, 
+    cumulants_config, 
+    get_results_dir, 
+    get_posteriors_dir, 
+    get_ndes_from_config
+)
+from data.constants import get_base_results_dir
+from configs.args import get_arch_search_args, get_cumulants_sbi_args
+from data.cumulants import (
+    Dataset, 
+    CumulantsDataset, 
+    get_data, 
+    get_prior, 
+    get_compression_fn, 
+    get_datavector, 
+    get_linearised_data
+)
 from affine import affine_sample
-from utils.utils import plot_moments, plot_latin_moments, plot_summaries, plot_fisher_summaries, replace_scalers
+from utils.utils import (
+    plot_moments, 
+    plot_latin_moments, 
+    plot_summaries, 
+    plot_fisher_summaries, 
+    replace_scalers
+)
 
 """
     - Integrate optuna into training function       x
@@ -578,8 +591,12 @@ def callback(
     arch_search_dir: str
 ) -> None:
     try:
+        trial_dict = study.best_trial.__dict__
+        filtered = {k: v for k, v in trial_dict.items() if k != "intermediate_values"} # Remove long list of losses
+
         print("@" * 80 + datetime.today().strftime('%Y-%m-%d %H:%M:%S'))
-        print("Best values so far:\n\t{}\n\t{}".format(study.best_trial, study.best_trial.params))
+        print("Best values so far:\n\t{}\n\t{}".format(study.best_trial.params))
+        print("Best trial so far:\n\t{}\n\t{}".format(filtered))
         print("Optuna figures saved at:\n\t{}".format(figs_dir))
         print("@" * 80 + "n_trials=" + str(len(study.trials)))
 
@@ -611,11 +628,14 @@ def callback(
 
         df = study.trials_dataframe()
         df.to_pickle(os.path.join(arch_search_dir, df_name)) 
-    except ValueError:
-        pass # Not enough trials to plot yet
+    except Exception as e:
+        print("HYPERPARAMETER PLOT ISSUE:\n\t", e) # Not enough trials to plot yet
 
 
 def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> ConfigDict:
+    """
+        Trial hyperparameters for CNF/MAF and training
+    """
 
     model_type = config.ndes[0].model_type
 

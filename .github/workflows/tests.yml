@@ -2,9 +2,11 @@ name: Run tests
 
 on:
   push:
-      paths:
-        - sbiax/**
-        - pyproject.toml # Only if version changes!
+    branches:
+      - main
+    paths:
+      - sbiax/**
+      - pyproject.toml # Only if version changes!
 
 jobs:
   run-test:

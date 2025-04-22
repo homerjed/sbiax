@@ -80,8 +80,6 @@ def default(v, d):
 
     Meta all-redshift config `ensembles_bulk_pdfs_config` tells how to 
     sample the posterior made of the separate flows.
-
-    Save posteriors at each z, to see what adding them together does
 """
 
 
@@ -217,6 +215,8 @@ def get_z_config_and_datavector(
     )
     ensemble = eqx.tree_deserialise_leaves(ensemble_path, ensemble)
 
+    print("Loaded ensemble from:\n\t", ensemble_path)
+
     if verbose:
         print("Datavectors", datavectors.shape)
 
@@ -300,7 +300,7 @@ def maybe_vmap_multi_redshift_mle(
 
 if __name__ == "__main__":
 
-    key = jr.key(0)
+    key = jr.key(0) # Only for datavectors
 
     args = get_cumulants_multi_z_args()
 
@@ -329,15 +329,16 @@ if __name__ == "__main__":
     # Where SBI's are saved (add on suffix for experiment details)
     posteriors_dir = get_base_posteriors_dir()
 
-    if config.reduced_cumulants:
-        exps_dir = "{}reduced_cumulants_multi_z/".format(posteriors_dir) # Import this from a constants file
-    else:
-        exps_dir = "{}cumulants_multi_z/".format(posteriors_dir) # Import this from a constants file
-
     # Save location for posterior plots
     figs_dir = "{}figs/{}".format(
         posteriors_dir, 
+        "frozen/" if config.freeze_parameters else "nonfrozen/",
+        "{}/".format(args.bulk_or_tails),
+        "reduced_cumulants" if config.reduced_cumulants else "cumulants",
+        (config.sbi_type + "/") if config.sbi_type else "" , 
+        (config.compression + "/") if config.compression else "",
         "linearised/" if config.linearised else "nonlinearised/",
+        "pretrain/" if config.pre_train else "nopretrain/",
         "z={}_m={}".format( 
             "".join(map(str, config.redshifts)),
             "".join(map(str, config.order_idx))
@@ -536,8 +537,9 @@ if __name__ == "__main__":
             show_tqdm=True # args.use_tqdm
         )
 
-        samples_log_prob = jax.vmap(log_prob_fn)(samples)
         alpha_log_prob = log_prob_fn(jnp.asarray(alpha))
+        samples_log_prob = jax.vmap(log_prob_fn)(samples)
+        samples_log_prob = jnp.where(jnp.isneginf(samples_log_prob), -1e100, samples_log_prob)
         
         # Remove NaNs
         # ix = jnp.isfinite(samples_log_prob)
@@ -550,6 +552,8 @@ if __name__ == "__main__":
         posterior_save_dir = get_multi_z_posterior_dir(config, args)
         if not os.path.exists(posterior_save_dir):
             os.makedirs(posterior_save_dir, exist_ok=True)
+
+        print("Multi-z posterior save dir:\n\t", posterior_save_dir)
 
         posterior_filename = os.path.join(
             posterior_save_dir, "posterior_{}.npz".format(args.seed)

@@ -241,6 +241,7 @@
 if 1:
     import argparse
     from typing import Tuple
+    from collections import namedtuple
     import os
     import jax
     import jax.numpy as jnp
@@ -254,102 +255,244 @@ if 1:
     from chainconsumer import ChainConsumer, Chain, Truth
     from tensorflow_probability.substrates.jax.distributions import Distribution
 
-    from configs.configs import get_base_results_dir, get_results_dir, get_multi_z_posterior_dir
-    from configs.configs import ensembles_cumulants_config, ensembles_bulk_cumulants_config 
-    from data.moments import Dataset, get_data, get_linear_compressor, get_datavector, get_prior, get_parameter_strings
-    from sbiax.ndes import Ensemble, MultiEnsemble, get_ndes_from_config
     from sbiax.ndes import CNF, MAF, Scaler
-    from sbiax.compression.linear import _mle
     from sbiax.inference import nuts_sample
-    from sbiax.inference.nle import affine_sample
     from sbiax.utils import make_df, marker
 
-    from cumulants_multi_z import 
-    from configs.configs import (
+    from configs import (
         cumulants_config, 
-        ensembles_cumulants_config,
-        ensembles_bulk_cumulants_config,
-        get_multi_z_posterior_dir
+        bulk_cumulants_config, 
+        get_results_dir, 
+        get_posteriors_dir, 
+        get_ndes_from_config
     )
+    from configs.configs import (
+        get_base_results_dir, 
+        get_results_dir, 
+        get_multi_z_posterior_dir, 
+        get_ndes_from_config
+    )
+    from configs.ensembles_configs import (
+        ensembles_cumulants_config, ensembles_bulk_cumulants_config 
+    )
+    from cumulants_ensemble import Ensemble, MultiEnsemble
+    from data.constants import (
+        get_quijote_parameters, 
+        get_base_posteriors_dir,
+        get_save_and_load_dirs
+    )
+    from data.cumulants import (
+        Dataset, 
+        get_data, 
+        get_linear_compressor, 
+        get_datavector, 
+        get_prior, 
+        get_parameter_strings
+    )
+    from data.pdfs import get_multi_z_bulk_pdf_fisher_forecast
     from configs.args import (
         get_cumulants_sbi_args, 
         get_cumulants_multi_z_args
     )
+    from affine import affine_sample
 
     """
-        Loop through seeds, getting configs for ensembles for bulk or tails
+        Loop through seeds, getting configs for ensembles for bulk and bulk + tails
         over all redshifts, loading posteriors from them 
     """
-
-    def posterior_object(posterior_file):
+    
+    def get_posterior_object(posterior_file):
+        # Posterior object contains samples, log prob, Finv, summary, ...
         PosteriorTuple = namedtuple("PosteriorTuple", posterior_file.files)
+        print(posterior_file.files) 
         posterior_tuple = PosteriorTuple(
             *(posterior_file[key] for key in posterior_file.files)
         )
         return posterior_tuple
 
-    args = get_cumulants_multi_z_args()
+    parser = argparse.ArgumentParser(
+        help="Plotting script for SBI bulk and tails posteriors. These args are for figure one plotting."
+    )
+    parser.add_argument(
+        "-s", 
+        "--seed", 
+        type=int, 
+        help="Seed for random number generation.", 
+        default=0
+    )
+    parser.add_argument(
+        "-l",
+        "--linearised", 
+        default=True,
+        action=argparse.BooleanOptionalAction, 
+        help="Linearised model for datavector."
+    )
+    parser.add_argument(
+        "-c",
+        "--compression", 
+        default="linear",
+        choices=["linear", "nn", "nn-lbfgs"],
+        type=str,
+        help="Compression with neural network or MOPED."
+    )
+    parser.add_argument(
+        "-p",
+        "--pre-train", 
+        default=False,
+        action=argparse.BooleanOptionalAction, 
+        help="Pre-train (only) when using non-linearised model for datavector. Pre-train on linearised simulations."
+    )
+    parser.add_argument(
+        "-o", 
+        "--order_idx",
+        default=[0, 1, 2],
+        nargs="+", 
+        type=int,
+        help="Indices of variance, skewness and kurtosis sample cumulants."
+    )
+    parser.add_argument(
+        "-t",
+        "--sbi_type", 
+        default="nle",
+        choices=["nle", "npe"],
+        type=str,
+        help="Method of SBI: neural likelihood (NLE) or posterior (NPE)."
+    )
+    parser.add_argument(
+        "-f",
+        "--freeze-parameters", 
+        default=False,
+        action=argparse.BooleanOptionalAction, 
+        help="Freeze parameters not in [Om, s8] to their fixed values, in hypercube simulations."
+    )
+    ARGS = parser.parse_args()
 
+    # General constants
+    data_dir, _, _ = get_save_and_load_dirs()
+
+    (
+        _, _, _, alpha, lower, upper, parameter_strings, *_
+    ) = get_quijote_parameters()
+
+    figs_dir = os.path.join(get_base_results_dir(), "figure_one/")
+    if not os.path.exists(figs_dir):
+        os.makedirs(figs_dir, exist_ok=True)
+
+    args = get_cumulants_multi_z_args() # Blueprint args for analysis
+
+    # Plot
     c = ChainConsumer() 
 
+    # Plotting properties for bulk / tails
+    plotting_dict = dict(
+        bulk=dict(color="g", linestyle="-", shade_alpha=0.5),
+        tails=dict(color="r", linestyle="-", shade_alpha=0.5)
+    )
+
+    # Args that are shared between bulk and tails SBI analyses/posteriors
+    args.seed = ARGS.seed
+    args.linearised = ARGS.linearised 
+    args.pre_train = ARGS.pre_train
+    args.order_idx = ARGS.order_idx
+    args.freeze_parameters = ARGS.freeze_parameters
+
+    # Get the bulk Fisher forecast for all redshifts (same whether linearised or not)
+    try:
+        Finv_bulk_pdfs_all_z = np.load(os.path.join(data_dir, "Finv_bulk_pdfs_all_z.npy"))
+    except:
+        Finv_bulk_pdfs_all_z = get_multi_z_bulk_pdf_fisher_forecast(args)
+        np.save(os.path.join(data_dir, "Finv_bulk_pdfs_all_z.npy"), Finv_bulk_pdfs_all_z)
+
+    # Loop through bulk / tails (just grab PDF Fisher forecast, no posterior)
     for bulk_or_tails in ["bulk", "tails"]:
 
         # Multi-z inference concerning the bulk or bulk + tails
         if bulk_or_tails == "tails":
             ensembles_config = ensembles_cumulants_config
-        if bulk_or_tails == "bulk" or args.bulk_or_tails == "bulk_pdf":
+        if bulk_or_tails == "bulk" or bulk_or_tails == "bulk_pdf":
             ensembles_config = ensembles_bulk_cumulants_config
 
+        # Force args for posterior to be bulk or tails
+        args.bulk_or_tails = bulk_or_tails 
+
+        # /project/ls-gruen/users/jed.homer/sbiaxpdf/results/posteriors/nonfrozen/tails/cumulants/multi_z/nle/linearised/
+        # /project/ls-gruen/users/jed.homer/sbiaxpdf/results/posteriors/nonfrozen/bulk/cumulants/multi_z/nle/linearised/
+
         config = ensembles_config(
-            seed=args.seed, # Defaults if run without argparse args
+            seed=seed, # Defaults if run without argparse args
             sbi_type=args.sbi_type, 
             linearised=args.linearised,
             reduced_cumulants=args.reduced_cumulants,
             order_idx=args.order_idx,
             redshifts=args.redshifts,
             compression=args.compression,
+            n_linear_sims=args.n_linear_sims,
+            freeze_parameters=args.freeze_parameters,
             pre_train=args.pre_train
         )
 
-        # Save posterior, Fisher and summary
-        posterior_save_dir = get_multi_z_posterior_dir(config, args)
-        if not os.path.exists(posterior_save_dir):
-            os.makedirs(posterior_save_dir, exist_ok=True)
-
         # Posterior for bulk/tails for a given seed
+        posterior_save_dir = get_multi_z_posterior_dir(config, args)
         posterior_filename = os.path.join(
             posterior_save_dir, "posterior_{}.npz".format(args.seed)
         )
-        posterior_file = np.load(
-            posterior_filename,
-        )
-        posterior_file = posterior_object(posterior_file)
+        posterior_file = np.load(posterior_filename)
+        posterior_object = get_posterior_object(posterior_file)
 
+        print(jax.tree.map(lambda x: x.shape, posterior_object))
+
+        title = " " + bulk_or_tails
+
+        # Fisher forecast
         c.add_chain(
             Chain.from_covariance(
                 alpha,
                 posterior_object.Finv, # NOTE: Get multi redshift Fisher matrix, use a multi-inference config
                 columns=parameter_strings,
                 name=r"$F_{\Sigma^{-1}}$ " + title,
-                color="k",
+                color=plotting_dict[bulk_or_tails]["color"],
                 linestyle=":",
                 shade_alpha=0.
             )
         )
 
+        # Posterior from SBI
         posterior_df = make_df(
             posterior_object.samples, 
             posterior_object.samples_log_prob, 
-            parameter_strings
+            parameter_strings=parameter_strings
         )
-        c.add_chain(Chain(samples=posterior_df, name="SBI " + title, color="r"))
-
-        c.add_marker(
-            location=marker(posterior_object.summary, parameter_strings), 
-            name=r"$\hat{x}$ " + title, 
-            color="b"
+        c.add_chain(
+            Chain(
+                samples=posterior_df, name="SBI " + title, 
+                color=plotting_dict[bulk_or_tails]["color"],
+                linestyle=plotting_dict[bulk_or_tails]["linestyle"],
+                shade_alpha=plotting_dict[bulk_or_tails]["shade_alpha"],
+            )
         )
 
+        # Compressed datavectors (assuming more than one of them)
+        for n, _summary in enumerate(posterior_object.summary):
+            c.add_marker(
+                location=marker(_summary, parameter_strings), 
+                name=r"$\hat{\pi}[\hat{\xi}]$ " + str(n) + title, 
+                color=plotting_dict[bulk_or_tails]["color"],
+            )
+
+    # Fisher forecast for bulk of PDF over all redshifts
+    c.add_chain(
+        Chain.from_covariance(
+            alpha,
+            Finv_bulk_pdfs_all_z, 
+            columns=parameter_strings,
+            name=r"$F_{\Sigma^{-1}}$ " + "bulk pdf",
+            color="k",
+            linestyle=":",
+            shade_alpha=0.
+        )
+    )
+
+    # True parameters
     c.add_marker(
         location=marker(alpha, parameter_strings), 
         name=r"$\alpha$", 

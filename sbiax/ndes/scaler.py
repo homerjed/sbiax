@@ -31,6 +31,7 @@ class Scaler(eqx.Module):
     std_q: Array
     use_scaling: bool
 
+    @jaxtyped(typechecker=typechecker)
     def __init__(
         self, 
         X: Float[Array, "n x"] = None, 

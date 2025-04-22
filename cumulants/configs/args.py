@@ -1,17 +1,21 @@
 import argparse
 from collections import namedtuple
+from typing import NamedTuple, Type
+
+ArgsTuple: Type[tuple] = None
 
 """
     CLI args 
 """
 
-def args_to_namedtuple(args):
+
+def args_to_namedtuple(args: argparse.Namespace) -> tuple:
     ArgsTuple = namedtuple("ArgsTuple", vars(args).keys()) # Create namedtuple type
     args = ArgsTuple(**vars(args)) # Convert Namespace to namedtuple
     return args
 
 
-def get_cumulants_sbi_args(using_notebook: bool = False):
+def get_cumulants_sbi_args(using_notebook: bool = False) -> argparse.Namespace | ArgsTuple:
     parser = argparse.ArgumentParser(
         description="Run SBI experiment with cumulants of the matter PDF."
     )
@@ -119,7 +123,7 @@ def get_cumulants_sbi_args(using_notebook: bool = False):
     return args
 
 
-def get_cumulants_multi_z_args(using_notebook: bool = False):
+def get_cumulants_multi_z_args(using_notebook: bool = False) -> argparse.Namespace | ArgsTuple:
     parser = argparse.ArgumentParser(
         description="Run SBI experiment with moments of the matter PDF."
     )

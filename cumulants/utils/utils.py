@@ -9,9 +9,9 @@ from chainconsumer import Chain, ChainConsumer, Truth, PlotConfig
 from sbiax.utils import make_df, marker
 from sbiax.ndes import Scaler
 
+from configs import cumulants_config, bulk_cumulants_config
 from data.pdfs import BulkCumulantsDataset
 from data.cumulants import CumulantsDataset
-from configs.configs import cumulants_config, bulk_cumulants_config
 
 
 def get_dataset_and_config(bulk_or_tails):
@@ -53,7 +53,7 @@ def plot_moments(fiducial_moments_z_R, config, results_dir=None):
             )
         axs[i].set_title(moment_names[i])
         axs[i].legend(frameon=False)  
-        axs[i].set_xscale("log")
+        # axs[i].set_xscale("log")
         axs[i].set_yscale("log")
     plt.tight_layout()
 
@@ -78,6 +78,10 @@ def plot_latin_moments(latin_moments_z_R, config, results_dir=None):
     for i in config.order_idx:  
         for j in range(len(config.scales)):  
             ix = i + j * len(config.order_idx) #(j % len(config.scales))
+
+            if np.any(latin_moments_z_R[:, ix] < 0.):
+                print("Warning: some latin moments less than zero (scale {})".format(config.scales[j]))
+
             axs[i].hist(
                 latin_moments_z_R[:, ix], 
                 range=[np.min(latin_moments_z_R), np.max(latin_moments_z_R)], 
@@ -89,7 +93,7 @@ def plot_latin_moments(latin_moments_z_R, config, results_dir=None):
             )
         axs[i].set_title(moment_names[i])
         axs[i].legend(frameon=False)  
-        axs[i].set_xscale("log")
+        # axs[i].set_xscale("log")
         axs[i].set_yscale("log")
     plt.tight_layout()
 

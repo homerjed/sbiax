@@ -19,9 +19,22 @@ import tensorflow_probability.substrates.jax.distributions as tfd
 from tqdm.auto import trange
 
 from data.constants import get_quijote_parameters, get_save_and_load_dirs, get_target_idx
-from data.cumulants import get_prior, Dataset
+from data.common import (
+    Dataset,
+    get_prior,
+    sample_prior,
+    get_compression_fn,
+    get_nn_compressor,
+    get_linear_compressor,
+    linearised_model,
+    get_linearised_data,
+    get_datavector,
+    freeze_out_parameters_dataset, 
+    hartlap,
+    get_parameter_strings
+)
 from sbiax.utils import make_df, marker
-from configs.configs import bulk_cumulants_config
+from configs import bulk_cumulants_config
 from compression.nn import fit_nn, fit_nn_lbfgs
 
 typecheck = jaxtyped(typechecker=typechecker)
@@ -108,7 +121,7 @@ def get_bulk_cumulants_data(
     n_scales           = len(config.scales)
     n_redshifts        = 1
     n_bins_pdf         = 99
-    n_fiducial_pdfs    = 1000 # 15_000
+    n_fiducial_pdfs    = 15_000
     n_latin_pdfs       = 2000
     n_derivatives      = 500
     n_p                = alpha.size 
@@ -583,858 +596,6 @@ def get_bulk_cumulants_data(
     return return_dataset 
 
 
-
-def _get_bulk_cumulants_data(
-    config: ConfigDict, 
-    *, 
-    pdfs: bool = False, # Use PDFs or cumulants for the bulk
-    verbose: bool = False, 
-    use_mean: bool = False,
-    check_cumulants_against_quijote: bool = False,
-    results_dir: Optional[str] = None
-) -> Dataset:
-    """
-        Get dataset for SBI experiments with the cumulants.
-        - Cut the PDFs according to a p_min, p_max cut into the CDF which 
-          indexes the bins of the PDF.
-        - 
-    """
-
-    data_dir, *_ = get_save_and_load_dirs()
-
-    (
-        all_R_values,
-        all_redshifts,
-        resolution,
-        alpha,
-        lower,
-        upper,
-        parameter_strings,
-        redshift_strings,
-        parameter_derivative_names,
-        dparams,
-        deltas,
-        delta_bin_edges,
-        D_deltas 
-    ) = get_quijote_parameters()
-
-    p_value_min        = config.p_value_min # Independent of choosing rho/delta for random variable of PDF
-    p_value_max        = config.p_value_max 
-
-    use_mean           = use_mean # Concatenate mean of bulk to datavector
-    cumulants          = True # Use cumulants over moments (NOTE: check not calculating reduced-cumulants, Quijote uses cumulants)
-    stack_mean         = True # For full shape <delta> is very close to zero
-
-    n_scales           = len(config.scales)
-    n_redshifts        = 1
-    n_bins_pdf         = 99
-    n_fiducial_pdfs    = 1000 # 15_000
-    n_latin_pdfs       = 2000
-    n_derivatives      = 500
-    n_p                = alpha.size 
-    R_idx              = [all_R_values.index(R) for R in config.scales]
-    z_idx              = all_redshifts.index(config.redshift)
-    n_cumulants        = 3 # [var, skew, kurt]
-
-    (
-        fiducials, 
-        latins, 
-        latin_parameters, 
-        derivatives, 
-        deltas, 
-        D_deltas
-    ) = get_raw_data(data_dir, verbose=verbose)
-
-    # Euler derivative from plus minus statistics
-    derivatives = derivatives[..., 1, :] - derivatives[..., 0, :]
-    for p in range(n_p):
-        derivatives[:, :, p, ...] = derivatives[:, :, p, ...] / dparams[p] # NOTE: parameter / redshifts axis!!!!!
-
-    """
-        Calculate CDF and cut PDFs
-    """
-
-    # Calculate mean of fiducial PDFS across scales R for cutting with CDF
-    fiducial_pdfs_stacked_mean = np.zeros((n_bins_pdf * n_scales,))
-    for R in R_idx:
-        mean_z_R = jnp.mean(fiducials[z_idx, :, R, :], axis=0)
-
-        fiducial_pdfs_stacked_mean[R * n_bins_pdf : (R + 1) * n_bins_pdf] = mean_z_R
-
-    # Assuming same shape mean PDF as Cora
-    cdf = np.zeros((n_scales * n_bins_pdf,))
-    for i in range(1, n_bins_pdf):
-        for R, _ in enumerate(config.scales):
-            # Fiducial pdfs must be normalised here
-            cdf[R * n_bins_pdf + i] = cdf[R * n_bins_pdf + i - 1] \
-                                    + fiducial_pdfs_stacked_mean[R * n_bins_pdf + i - 1] * D_deltas[i - 1] # PDFs normalised by default
-    if verbose:
-        print(f"...CDF min/max {cdf.min():.1f} {cdf.max():.1f}.")
-
-    # Check CDF bounds
-    assert np.isclose(cdf.min(), 0.) and np.isclose(cdf.max(), 1.), "{} {}".format(cdf.min(), cdf.max())
-
-    # Cut indices for each value of R
-    if check_cumulants_against_quijote:
-        cuts = [np.arange(n_bins_pdf) for R, _ in enumerate(config.scales)] # Use all bins
-    else:
-        cuts = [
-            np.where(
-                (cdf[R * n_bins_pdf : (R + 1) * n_bins_pdf] > p_value_min) & \
-                (cdf[R * n_bins_pdf : (R + 1) * n_bins_pdf] < p_value_max)
-            )[0] 
-            for R, _ in enumerate(config.scales)
-        ]
-    if verbose:
-        print("CUTS (idx):\n", [(min(cut), max(cut)) for cut in cuts])
-        print("CUTS (deltas) min/max={:.1f}/{:.1f}:\n".format(deltas.min(), deltas.max()), ["{:.1f} {:.1f}".format(min(deltas[cut]), max(deltas[cut])) for cut in cuts])
-        print("Cut total dim:", sum([_.size for _ in cuts]))
-
-    # Get cut dimensions
-    z_cut_dim_totals = 0
-    for R, cut_z in zip(config.scales, cuts):
-        if verbose:
-            print(f" R={R} cut: {cut_z.shape}")
-        z_cut_dim_totals += cut_z.shape[0]
-
-    if verbose:
-        print("All cuts added:", z_cut_dim_totals)
-        print(f"\n>CDF shape: {cdf.shape}") 
-        print(f"Total bins kept in CDF cut: {z_cut_dim_totals}/{1 * n_scales * n_bins_pdf}")
-
-    """
-        Cut PDFs to bulk density cut and calculate moments/cumulants
-    """
-
-    def normalise_cut_pdf(pdf, D_deltas_cut):
-        # Renormalise PDF in bulk region (pdf) which is already normalised
-        # pdf = (pdf * D_deltas_cut) / jnp.sum(pdf * D_deltas_cut) # Denominator is PDF integral
-
-        if verbose:
-            print("PDF (before)", jnp.sum(pdf), jnp.sum(pdf * D_deltas_cut))
-
-        pdf = pdf / jnp.sum(pdf * D_deltas_cut) # Denominator is PDF integral
-
-        if verbose:
-            print("PDF", jnp.sum(pdf), jnp.sum(pdf * D_deltas_cut))
-
-        return pdf 
-
-    def moment_n_R(pdf, n, D_deltas_cut, deltas_cut):
-        pdf = normalise_cut_pdf(pdf, D_deltas_cut)
-
-        # This is rho not delta; => <rho> = 1, must subtract it 
-        mu_delta = jnp.sum(deltas_cut * pdf * D_deltas_cut)
-
-        # Calculate moment n (NOTE: don't centre it around bulk mean of deltas)
-        moment_n = jnp.sum(pdf * D_deltas_cut * ((deltas_cut - mu_delta) ** n)) # = p(x)dx * (x ** n)
-
-        return moment_n
-
-    def moments_to_cumulants(moments, _delta_):
-        # Bernardeau 2002 Eq. 130
-
-        cumulant_2 = moments[0] - (_delta_) ** 2.
-        cumulant_3 = moments[1] - 3. * cumulant_2 * _delta_ - _delta_ ** 3. 
-        cumulant_4 = moments[2] - 4. * cumulant_3 * _delta_ - 3. * (cumulant_2 ** 2.) - 6. * cumulant_2 * (_delta_ ** 2.) - (_delta_ ** 4.)
-
-        cumulants = jnp.asarray([cumulant_2, cumulant_3, cumulant_4]) 
-
-        return cumulants
-
-    def intersperse_means(means, moments, are_derivatives=False):
-        assert len(means) == len(moments)
-        # Put means first in moments vectors for all scales
-        means_and_moments = np.zeros(moments.shape[:-1] + (n_scales * (1 + n_cumulants),)) # Mean + cumulants for all scales, additional shape info for derivatives or not
-        for r in range(n_scales):
-            means_and_moments[..., r * 4 : (r + 1) * 4] = np.concatenate(
-                [means[..., [r]], moments[..., r * n_cumulants : (r + 1) * n_cumulants]], axis=1
-            )
-        return means_and_moments
-
-    orders = [2, 3, 4] # Variance, skewness and kurtosis
-    cut_dim = sum([cut.size for cut in cuts])
-
-    assert np.all([cut.ndim == 1 for cut in cuts])
-
-    fiducial_pdfs_z_R_cut = np.zeros((n_fiducial_pdfs, cut_dim))
-    fiducial_moments_z_R = np.zeros((n_fiducial_pdfs, n_scales * n_cumulants))
-    fiducial_moments_z_R_means = np.zeros((n_fiducial_pdfs, n_scales))
-    for n in range(n_fiducial_pdfs):
-        
-        for R, cut in enumerate(cuts):
-
-            _cut_dim = sum([cut.size for cut in cuts[:R]]) # Cut dimension up to R-th scale
-
-            pdf = fiducials[z_idx, n, R, cut] # Cut PDF p(d_i)
-
-            fiducial_pdfs_z_R_cut[n, _cut_dim : _cut_dim + cuts[R].size] = pdf
-
-            for i in range(len(orders)):
-                order = orders[i]
-
-                moment = moment_n_R(
-                    pdf, n=order, D_deltas_cut=D_deltas[cut], deltas_cut=deltas[cut]
-                )
-
-                fiducial_moments_z_R[n, i + R * n_cumulants : (i + 1) + R * n_cumulants] = moment
-
-            # Mean for calculating cumulants from moments
-            if use_mean:
-                _delta_ = jnp.sum(pdf * D_deltas[cut] * deltas[cut]) # delta_R
-            else:
-                _delta_ = 0.
-
-            fiducial_moments_z_R_means[n, R] = _delta_
-
-            # Convert to cumulants (process all orders simultaneously)
-            if cumulants:
-                cumulant = moments_to_cumulants(
-                    fiducial_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants], 
-                    _delta_=_delta_
-                )
-
-                fiducial_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants] = cumulant               
-
-                if verbose: 
-                    print("CUMULANT", cumulant)
-
-            if verbose:
-                print("\r n={:05d}/{}".format(n, n_fiducial_pdfs), end="")
-
-    if use_mean and stack_mean:
-        fiducial_moments_z_R = intersperse_means(fiducial_moments_z_R_means, fiducial_moments_z_R) #jnp.concatenate([fiducial_moments_z_R_means, fiducial_moments_z_R], axis=1)
-        print("FIDUCIAL MOMENTS Z R", fiducial_moments_z_R.shape)
-
-    latin_pdfs_z_R_cut = np.zeros((n_latin_pdfs, cut_dim))
-    latin_moments_z_R = np.zeros((n_latin_pdfs, n_scales * n_cumulants))
-    latin_moments_z_R_means = np.zeros((n_latin_pdfs, n_scales))
-    for n in range(n_latin_pdfs):
-
-        for R, cut in enumerate(cuts):
-
-            _cut_dim = sum([cut.size for cut in cuts[:R]])
-
-            pdf = latins[z_idx, n, R, cut]
-
-            latin_pdfs_z_R_cut[n, _cut_dim : _cut_dim + cuts[R].size] = pdf
-
-            for i in range(len(orders)):
-                order = orders[i]
-
-                moment = moment_n_R(
-                    pdf, order, D_deltas_cut=D_deltas[cut], deltas_cut=deltas[cut]
-                )
-
-                latin_moments_z_R[n, i + R * n_cumulants : (i + 1) + R * n_cumulants] = moment
-
-            # Mean for calculating cumulants from moments
-            if use_mean:
-                _delta_ = jnp.sum(pdf * D_deltas[cut] * deltas[cut])
-            else:
-                _delta_ = 0.
-
-            latin_moments_z_R_means[n, R] = _delta_
-
-            # Convert to cumulants
-            if cumulants:
-                cumulant = moments_to_cumulants(
-                    latin_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants], 
-                    _delta_=_delta_
-                )
-
-                latin_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants] = cumulant
-
-            if verbose:
-                print("\r n={:05d}/{}".format(n, n_latin_pdfs), end="")
-
-    if use_mean and stack_mean:
-        # latin_moments_z_R = jnp.concatenate([latin_moments_z_R_means, latin_moments_z_R], axis=1)
-        latin_moments_z_R = intersperse_means(latin_moments_z_R_means, latin_moments_z_R)
-
-    derivative_pdfs_z_R_cut = np.zeros((n_derivatives, n_p, cut_dim))
-    derivative_moments_z_R = np.zeros((n_derivatives, n_p, n_scales * n_cumulants)) 
-    derivative_moments_z_R_means = np.zeros((n_derivatives, n_p, n_scales)) 
-    for n in range(n_derivatives):
-
-        for R, cut in enumerate(cuts):
-
-            _cut_dim = sum([cut.shape[0] for cut in cuts[:R]])
-            
-            pdf = derivatives[n, z_idx, :, R, cut].T # Shape (p, cut_dim), raw shape (n_derivatives, n_redshifts, n_params, n_scales, 2, n_bins_pdf)
-
-            derivative_pdfs_z_R_cut[n, :, _cut_dim : _cut_dim + cuts[R].size] = pdf # NOTE: choose the right axis; params or redshift
-
-            for i in range(len(orders)):
-                order = orders[i]
-
-                for p in range(n_p): # p_idx
-                    moment_p = moment_n_R(
-                        pdf[p], n=order, D_deltas_cut=D_deltas[cut], deltas_cut=deltas[cut]
-                    )
-
-                    derivative_moments_z_R[n, p, i + R * n_cumulants : (i + 1) + R * n_cumulants] = moment_p
-
-                    # Mean for calculating cumulants from moments
-                    if use_mean:
-                        _delta_ = jnp.sum(pdf[p] * D_deltas[cut] * deltas[cut])
-                    else:
-                        _delta_ = 0. 
-
-                    derivative_moments_z_R_means[n, p, R] = _delta_ # PDF at each dp has its own mean
-
-            # Convert to cumulants
-            if cumulants:
-                for p in range(n_p):
-
-                    if use_mean:
-                        _delta_ = jnp.sum(pdf[p] * D_deltas[cut] * deltas[cut])
-                    else:
-                        _delta_ = 0. 
-
-                    cumulant = moments_to_cumulants(
-                        derivative_moments_z_R[n, p, R * n_cumulants : (R + 1) * n_cumulants], 
-                        _delta_=_delta_
-                    )
-
-                    derivative_moments_z_R[n, p, R * n_cumulants : (R + 1) * n_cumulants] = cumulant
-
-            if verbose:
-                print("\r n={:05d}/{}".format(n, n_derivatives), end="")
-
-    if use_mean and stack_mean:
-        # derivative_moments_z_R = jnp.concatenate([derivative_moments_z_R_means, derivative_moments_z_R], axis=2)
-        derivative_moments_z_R = intersperse_means(derivative_moments_z_R_means, derivative_moments_z_R, are_derivatives=True)
-
-    print(
-        "Fiducials, latins (one redshift):\n", 
-        fiducial_pdfs_z_R_cut.shape, 
-        latin_pdfs_z_R_cut.shape, 
-        derivative_pdfs_z_R_cut.shape
-    )
-
-    """
-        Datasets
-    """
-
-    n_fiducial_moments, data_dim_moments = fiducial_moments_z_R.shape
-    C_moments = jnp.cov(fiducial_moments_z_R, rowvar=False)
-    H = (n_fiducial_moments - data_dim_moments - 2.) / (n_fiducial_moments - 1.)
-    Cinv_moments = H * jnp.linalg.inv(C_moments)
-    dmu_moments = jnp.mean(derivative_moments_z_R, axis=0)
-    F_moments = jnp.linalg.multi_dot([dmu_moments, Cinv_moments, dmu_moments.T])
-    Finv_moments = jnp.linalg.inv(F_moments)
-
-    if verbose:
-        assert jnp.all(jnp.isfinite(Cinv_moments))
-        assert jnp.all(jnp.isfinite(dmu_moments))
-        assert jnp.all(jnp.isfinite(Finv_moments))
-
-    # Cumulants[bulk]
-    dataset = Dataset(
-        alpha=jnp.asarray(alpha),
-        lower=jnp.asarray(lower),
-        upper=jnp.asarray(upper),
-        parameter_strings=parameter_strings,
-        Finv=jnp.asarray(Finv_moments),
-        Cinv=jnp.asarray(Cinv_moments),
-        C=jnp.asarray(C_moments),
-        fiducial_data=jnp.asarray(fiducial_moments_z_R),
-        data=jnp.asarray(latin_moments_z_R),
-        parameters=jnp.asarray(latin_parameters),
-        derivatives=jnp.asarray(derivative_moments_z_R)  
-    )
-
-    if config.freeze_parameters:
-        dataset = freeze_out_parameters_dataset(dataset)
-
-    def mle_moments(d, p):
-        mu = jnp.mean(fiducial_moments_z_R, axis=0)
-        dmu = jnp.mean(derivative_moments_z_R, axis=0)
-        mu_p = mu + jnp.dot(p - alpha, dmu)
-        return p + jnp.linalg.multi_dot([Finv_moments, dmu, Cinv_moments, d - mu_p])
-
-    X_moments = jax.vmap(mle_moments)(latin_moments_z_R, latin_parameters)
-
-    return_dataset = dataset
-
-    if not check_cumulants_against_quijote:
-        n_fiducial_pdfs, data_dim_pdfs = fiducial_pdfs_z_R_cut.shape 
-        C_pdf = np.cov(fiducial_pdfs_z_R_cut, rowvar=False) 
-        H = (n_fiducial_pdfs - data_dim_pdfs - 2.) / (n_fiducial_pdfs - 1.)
-        Cinv_pdf = H * np.linalg.inv(C_pdf)
-        dmu_pdfs = np.mean(derivative_pdfs_z_R_cut, axis=0)
-        F_pdf = jnp.linalg.multi_dot([dmu_pdfs, Cinv_pdf, dmu_pdfs.T])
-        Finv_pdf = np.linalg.inv(F_pdf)
-
-        # PDF[bulk]
-        pdf_dataset = Dataset(
-            alpha=jnp.asarray(alpha),
-            lower=jnp.asarray(lower),
-            upper=jnp.asarray(upper),
-            parameter_strings=parameter_strings,
-            Finv=jnp.asarray(Finv_pdf),
-            Cinv=jnp.asarray(Cinv_pdf),
-            C=jnp.asarray(C_pdf),
-            fiducial_data=jnp.asarray(fiducial_pdfs_z_R_cut),
-            data=jnp.asarray(latin_pdfs_z_R_cut),
-            parameters=jnp.asarray(latin_parameters),
-            derivatives=jnp.asarray(derivative_pdfs_z_R_cut)  
-        )
-
-        def mle_pdf(d, p):
-            mu = jnp.mean(fiducial_pdfs_z_R_cut, axis=0)
-            dmu = jnp.mean(derivative_pdfs_z_R_cut, axis=0)
-            mu_p = mu + jnp.dot(p - alpha, dmu)
-            return p + jnp.linalg.multi_dot([Finv_pdf, dmu, Cinv_pdf, d - mu_p])
-
-        X_pdfs = jax.vmap(mle_pdf)(latin_pdfs_z_R_cut, latin_parameters)
-
-        if config.freeze_parameters:
-            pdf_dataset = freeze_out_parameters_dataset(pdf_dataset)
-
-        return_dataset = pdf_dataset if pdfs else dataset
-
-    if verbose:
-
-        # fig, axs = plt.subplots(1, dataset.alpha.size, figsize=(2. + 2. * dataset.alpha.size, 2.5))
-        # for p, ax in enumerate(axs):
-        #     ax.scatter(latin_parameters[:, p], X_moments[:, p], s=0.1)
-        #     ax.scatter(latin_parameters[:, p], X_pdfs[:, p], s=0.1)
-        #     ax.axline((0, 0), slope=1., color="k", linestyle="--")
-        #     ax.set_xlim(dataset.lower[p], dataset.upper[p])
-        #     ax.set_ylim(dataset.lower[p], dataset.upper[p])
-        #     ax.set_xlabel(dataset.parameter_strings[p])
-        #     ax.set_ylabel(dataset.parameter_strings[p] + "'")
-        # plt.savefig("/project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/scratch/summaries_pdf_moments.png")
-        # plt.close()
-
-        if 0:
-            c = ChainConsumer()
-            c.add_chain(
-                Chain(
-                    samples=make_df(X_moments, parameter_strings=parameter_strings), 
-                    name="X[moments]", 
-                    color="b", 
-                    plot_contour=False, 
-                    plot_cloud=True
-                )
-            )
-            c.add_chain(
-                Chain(
-                    samples=make_df(X_pdfs, parameter_strings=parameter_strings), 
-                    name="X[pdfs]", 
-                    color="g", 
-                    plot_contour=False, 
-                    plot_cloud=True
-                )
-            )
-            c.add_chain(
-                Chain.from_covariance(
-                    alpha,
-                    Finv_pdf,
-                    columns=parameter_strings,
-                    name=r"$F_{\Sigma^{-1}}$ (PDFs)",
-                    color="k",
-                    linestyle=":",
-                    shade_alpha=0.
-                )
-            )
-            c.add_chain(
-                Chain.from_covariance(
-                    alpha,
-                    Finv_moments,
-                    columns=parameter_strings,
-                    name=r"$F_{\Sigma^{-1}}$ (moments)",
-                    color="r",
-                    linestyle=":",
-                    shade_alpha=0.
-                )
-            )
-            # c.add_chain(
-            #     Chain(
-            #         samples=make_df(dataset.parameters, parameter_strings=dataset.parameter_strings), 
-            #         plot_contour=False, 
-            #         plot_cloud=True, 
-            #         name="P", 
-            #         color="r"
-            #     )
-            # )
-            c.add_marker(
-                location=marker(alpha, parameter_strings=parameter_strings),
-                name=r"$\alpha$", 
-                color="#7600bc"
-            )
-            fig = c.plotter.plot()
-            # fig.suptitle(
-            #     r"$k_n/k_2^{n-1}$ SBI & $F_{{\Sigma}}^{{-1}}$" + "\n" +
-            #     "z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
-            #             0., 
-            #             len(X), 
-            #             "[{}]".format(", ".join(map(str, R_values)))
-            #         ),
-            #     multialignment='center'
-            # )
-            plt.savefig(
-                os.path.join(
-                    results_dir if results_dir is not None else "fisher_forecasts/", 
-                    "bulk_fisher_forecast_{}_z={}_R={}_m={}.png".format(
-                        config.linearised, 
-                        config.redshift, 
-                        "".join(map(str, config.order_idx)),
-                        "".join(map(str, config.scales))
-                    )
-                ), 
-            )
-            plt.close()
-
-    return return_dataset 
-
-
-def freeze_out_parameters_dataset(dataset: Dataset) -> Dataset:
-
-    @typecheck
-    def _process_latins(
-        latins: Float[Array, "n d"], 
-        parameters: Float[Array, "n 5"], 
-        alpha: Float[Array, "5"], 
-        mu: Float[Array, "d"], 
-        dmu: Float[Array, "5 d"],
-        p_idx: Int[Array, "_"]
-    ) -> Float[Array, "n d"]:
-        # Freeze out latins
-
-        @typecheck
-        def _freeze_parameters(pdf: Float[Array, "d"], p: Float[Array, "p"]) -> Float[Array, "d"]:
-            # Freeze the nuisance parameters of the latin hypercube realisations
-
-            # Om, s8 and nuisances at fiducial values
-            p0 = jnp.array(
-                [_p if (i_p in p_idx) else alpha[i_p] for i_p, _p in enumerate(p)]
-            ) 
-
-            mu_p_nu = linearised_model(alpha, alpha_=p, mu=mu, dmu=dmu)
-            mu_p_nu_0 = linearised_model(alpha, alpha_=p0, mu=mu, dmu=dmu)
-
-            return pdf - mu_p_nu + mu_p_nu_0
-
-        return jax.vmap(_freeze_parameters)(latins, parameters)
-
-    p_idx = get_target_idx()
-
-    # Recalculate Fisher information (not marginalising out nuisances, they are known)
-    derivatives = dataset.derivatives[:, p_idx, :]  
-    _derivatives = jnp.mean(derivatives, axis=0)
-    F = jnp.linalg.multi_dot([_derivatives, dataset.Cinv, _derivatives.T])
-    Finv = jnp.linalg.inv(F)
-
-    # Remove influence of nuisances from latins by linearisation
-    latins_data = _process_latins(
-        dataset.data, 
-        dataset.parameters, 
-        alpha=dataset.alpha, 
-        mu=jnp.mean(dataset.fiducial_data, axis=0), 
-        dmu=jnp.mean(dataset.derivatives, axis=0), # Must be derivatives for all parameters!
-        p_idx=p_idx
-    )
-
-    frozen_dataset = Dataset(
-        alpha=dataset.alpha[p_idx],
-        lower=dataset.lower[p_idx],
-        upper=dataset.upper[p_idx],
-        parameter_strings=[
-            dataset.parameter_strings[p] for p in p_idx
-        ],
-        Finv=Finv,
-        Cinv=dataset.Cinv,
-        C=dataset.C,
-        fiducial_data=dataset.fiducial_data,
-        data=latins_data,
-        parameters=dataset.parameters[:, p_idx],
-        derivatives=dataset.derivatives[:, p_idx, :]  
-    )
-
-    return frozen_dataset 
-
-
-"""
-    Compression
-"""
-
-
-@typecheck
-def linearised_model(
-    alpha: Float[Array, "p"], 
-    alpha_: Float[Array, "p"], 
-    mu: Float[Array, "d"], 
-    dmu: Float[Array, "p d"]
-) -> Float[Array, "d"]:
-    return mu + jnp.dot(alpha_ - alpha, dmu)
-
-
-@typecheck
-def get_linear_compressor(
-    config: ConfigDict, dataset: Dataset
-) -> Callable[[Float[Array, "d"], Float[Array, "p"]], Float[Array, "p"]]:
-    """ 
-        Get Chi^2 minimisation function; compressing datavector 
-        at estimated parameters to summary 
-    """
-
-    @typecheck
-    def mle(
-        d: Float[Array, "d"], 
-        pi: Float[Array, "p"], 
-        Finv: Float[Array, "p p"], 
-        mu: Float[Array, "d"], 
-        dmu: Float[Array, "p d"], 
-        precision: Float[Array, "d d"]
-    ) -> Float[Array, "p"]:
-        """
-            Calculates a maximum likelihood estimator (MLE) from a datavector by
-            assuming a linear model `mu` in parameters `pi` and using
-
-            Args:
-                d (`Array`): The datavector to compress.
-                p (`Array`): The estimated parameters of the datavector (e.g. a fiducial set).
-                Finv (`Array`): The Fisher matrix. Calculated with a precision matrix (e.g. `precision`) and 
-                    theory derivatives.
-                mu (`Array`): The model evaluated at the estimated set of parameters `pi`.
-                dmu (`Array`): The first-order theory derivatives (for the implicitly assumed linear model, 
-                    these are parameter independent!)
-                precision (`Array`): The precision matrix - defined as the inverse of the data covariance matrix.
-
-            Returns:
-                `Array`: the MLE.
-        """
-        return pi + jnp.linalg.multi_dot([Finv, dmu, precision, d - mu])
-
-    @typecheck
-    def compressor(
-        d: Float[Array, "d"], 
-        p: Float[Array, "p"],
-        mu: Float[Array, "d"], 
-        dmu: Float[Array, "p d"]
-    ) -> Float[Array, "p"]: 
-        mu_p = linearised_model(
-            alpha=dataset.alpha, alpha_=p, mu=mu, dmu=dmu
-        )
-        p_ = mle(
-            d,
-            pi=p,
-            Finv=dataset.Finv, 
-            mu=mu_p,            
-            dmu=dmu, 
-            precision=dataset.Cinv
-        )
-        return p_
-
-    mu = jnp.mean(dataset.fiducial_data, axis=0)
-    dmu = jnp.mean(dataset.derivatives, axis=0)
-
-    return partial(compressor, mu=mu, dmu=dmu)
-
-
-@typecheck
-def get_nn_compressor(
-    key: PRNGKeyArray, 
-    dataset: Dataset, 
-    data_preprocess_fn: Optional[Callable] = None, 
-    *, 
-    lbfgs: bool = False, 
-    results_dir: str
-) -> tuple[eqx.Module, Callable]:
-    """
-        Train neural network compression function
-        - Optionally use parameter covariance for chi2 loss
-    """
-    net_key, train_key = jr.split(key)
-
-    if data_preprocess_fn is None:
-        data_preprocess_fn = lambda x: x
-
-    net = eqx.nn.MLP(
-        dataset.data.shape[-1], 
-        dataset.parameters.shape[-1], 
-        width_size=32, 
-        depth=3, 
-        activation=jax.nn.tanh,
-        key=net_key
-    )
-
-    def preprocess_fn(x): 
-        # Preprocess with covariance?
-        return (jnp.asarray(x) - jnp.mean(dataset.data, axis=0)) / jnp.std(dataset.data, axis=0)
-
-    if lbfgs:
-        net, losses = fit_nn_lbfgs(
-            train_key, 
-            net, 
-            (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
-            # precision=jnp.linalg.inv(dataset.Finv) # In reality this varies with parameters
-        )
-    else:
-        net, losses = fit_nn(
-            train_key, 
-            net, 
-            (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
-            opt=optax.adam(1e-3), 
-            precision=jnp.linalg.inv(dataset.Finv), # In reality this varies with parameters
-            n_batch=500, 
-            patience=1000,
-            n_steps=50_000
-        )
-
-    plt.figure()
-    plt.loglog(losses)
-    plt.savefig(os.path.join(results_dir, "losses_nn.png"))
-    plt.close()
-
-    return net, preprocess_fn
-
-
-def get_compression_fn(key, config, dataset, *, results_dir):
-    # Get linear or neural network compressor
-    if config.compression == "nn":
-
-        net, preprocess_fn = get_nn_compressor(
-            key, dataset, results_dir=results_dir
-        )
-
-        compressor = lambda d, p: net(preprocess_fn(d)) # Ignore parameter kwarg!
-
-    if config.compression == "linear":
-        compressor = get_linear_compressor(config, dataset)
-
-    compression_fn = lambda d, p: compressor(d, p)
-
-    return compression_fn 
-
-
-@typecheck
-def get_datavector(
-    key: PRNGKeyArray, 
-    config: ConfigDict, 
-    dataset: Dataset, 
-    n: int = 1, 
-    *, 
-    use_expectation: bool = False
-) -> Float[Array, "... d"]:
-    """ Measurement: either Gaussian linear model or not """
-
-    # Choose a linearised model datavector or simply one of the Quijote realisations
-    # which corresponds to a non-linearised datavector with Gaussian noise
-    if (not config.use_expectation) or (not use_expectation):
-        if config.linearised:
-            mu = jnp.mean(dataset.fiducial_data, axis=0)
-
-            print("Using linearised datavector")
-            datavector = jr.multivariate_normal(key, mean=mu, cov=dataset.C, shape=(n,))
-        else:
-            print("Using non-linearised datavector")
-            datavector = jr.choice(key, dataset.fiducial_data, shape=(n,))
-    else:
-        print("Using expectation (noiseless datavector)")
-        datavector = jnp.mean(dataset.fiducial_data, axis=0, keepdims=True)
-
-    if not (n > 1):
-        datavector = jnp.squeeze(datavector, axis=0) 
-
-    return datavector # Remove batch axis by default
-
-
-@typecheck
-def sample_prior(
-    key: PRNGKeyArray, 
-    n_linear_sims: int, 
-    alpha: Float[Array, "p"], 
-    lower: Float[Array, "p"], 
-    upper: Float[Array, "p"],
-    *,
-    hypercube: bool = True
-) -> Float[Array, "n p"]:
-    # Forcing Quijote prior for simulating, this prior for inference
-
-    # Avoid tfp warning
-    lower = lower.astype(jnp.float32)
-    upper = upper.astype(jnp.float32)
-
-    assert jnp.all((upper - lower) > 0.)
-
-    keys_p = jr.split(key, alpha.size)
-
-    if hypercube:
-        print("Hypercube sampling...")
-        sampler = qmc.LatinHypercube(d=alpha.size)
-        samples = sampler.random(n=n_linear_sims)
-        Y = jnp.asarray(qmc.scale(samples, lower, upper))
-    else:
-        print("Uniform box sampling...")
-        Y = jnp.stack(
-            [
-                jr.uniform(
-                    key_p, 
-                    (n_linear_sims,), 
-                    minval=lower[p], 
-                    maxval=upper[p]
-                )
-                for p, key_p in enumerate(keys_p)
-            ], 
-            axis=1
-        )
-
-    return Y
-
-
-@typecheck
-def get_linearised_data(config: ConfigDict, dataset: Dataset) -> Tuple[Float[Array, "n d"], Float[Array, "n p"]]:
-    """
-        Get linearised PDFs and get their MLEs 
-
-        # Pre-train data = Fisher summaries
-        X_l, Y_l = get_fisher_summaries(
-            summaries_key, 
-            n=config.n_linear_sims, 
-            parameter_prior=parameter_prior, 
-            Finv=dataset.Finv
-        )
-    """
-
-    key = jr.key(config.seed)
-
-    key_parameters, key_simulations = jr.split(key)
-
-    if config.n_linear_sims is not None:
-        Y = sample_prior(
-            key_parameters, 
-            config.n_linear_sims, 
-            dataset.alpha, 
-            dataset.lower, 
-            dataset.upper
-        )
-    else:
-        Y = dataset.parameters
-
-    assert dataset.derivatives.ndim == 3, (
-        "Do derivatives [{}] have batch axis? Required.".format(dataset.derivatives.shape)
-    )
-
-    dmu = jnp.mean(dataset.derivatives, axis=0)
-    mu = jnp.mean(dataset.fiducial_data, axis=0)
-
-    def _simulator(key: PRNGKeyArray, pi: Float[Array, "p"]) -> Float[Array, "d"]:
-        # Data model with linearised expectation
-        _mu = linearised_model(alpha=dataset.alpha, alpha_=pi, mu=mu, dmu=dmu)
-        return jr.multivariate_normal(key, mean=_mu, cov=dataset.C)
-
-    keys = jr.split(key_simulations, len(Y))
-    D = jax.vmap(_simulator)(keys, Y) 
-
-    print("Get linearised data", D.shape, Y.shape)
-
-    return D, Y 
-
-
 """
     Dataset
 """
@@ -1481,6 +642,10 @@ class BulkCumulantsDataset:
         )
 
         self.results_dir = results_dir
+
+        print("PDFS DATASET")
+        print(">DATA:\n\t", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (self.data.fiducial_data, self.data.data)])
+        print(">DATA / PARAMETERS:\n\t", [_.shape for _ in (self.data.data, self.data.parameters)])
 
     def get_parameter_strings(self):
         return get_parameter_strings()
@@ -1533,7 +698,8 @@ def get_bulk_dataset(args, pdfs=False):
         compression=args.compression,
         order_idx=args.order_idx,
         n_linear_sims=args.n_linear_sims,
-        pre_train=args.pre_train
+        pre_train=args.pre_train,
+        freeze_parameters=args.freeze_parameters
     )
 
     if pdfs: 
@@ -1544,6 +710,37 @@ def get_bulk_dataset(args, pdfs=False):
     dataset = BulkCumulantsDataset(config, pdfs=pdfs, verbose=False)
 
     return dataset.data
+
+
+def get_multi_z_bulk_pdf_fisher_forecast(args):
+    # Get bulk dataset for multiple redshifts
+
+    F = np.zeros(())
+    for redshift in [0.0, 0.5, 1.0]:
+
+        config = bulk_cumulants_config(
+            seed=args.seed, 
+            redshift=redshift, # Force redshift!
+            reduced_cumulants=args.reduced_cumulants,
+            sbi_type=args.sbi_type,
+            linearised=args.linearised, 
+            compression=args.compression,
+            order_idx=args.order_idx,
+            n_linear_sims=args.n_linear_sims,
+            pre_train=args.pre_train,
+            freeze_parameters=args.freeze_parameters
+        )
+
+        print("Using PDF dataset for bulk dataset.")
+
+        dataset = BulkCumulantsDataset(config, pdfs=True, verbose=False)
+
+        F_z = np.linalg.inv(dataset.data.Finv)
+        F = F + F_z
+
+    Finv = np.linalg.inv(F)
+
+    return Finv
 
 
 if __name__ == "__main__":

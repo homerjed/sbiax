@@ -18,7 +18,7 @@ from sbiax.ndes import Scaler, CNF, MAF
 from sbiax.inference import nuts_sample
 from sbiax.train import train_ensemble
 
-from configs.configs import (
+from configs import (
     cumulants_config, 
     bulk_cumulants_config, 
     get_results_dir, 
@@ -26,12 +26,9 @@ from configs.configs import (
     get_ndes_from_config
 )
 from configs.args import get_cumulants_sbi_args
-from data.cumulants import (
-    CumulantsDataset, 
+from data.cumulants import CumulantsDataset
+from data.common import (
     Dataset, 
-    get_data, 
-    get_prior, 
-    get_compression_fn, 
     get_datavector, 
     get_linearised_data
 )
@@ -51,16 +48,11 @@ from utils.utils import (
 """ 
     Run NLE or NPE SBI with the moments of the 1pt matter PDF.
 
-    - Run with just variance of PDF (a test)? 
     - diagonal of covariance for compression?
-
     - freezing 'nuisance parameters'
-
-    - cumulants? What are Quijote conventions again? 
-        - Default quijote is cumulants (k-stats are sample cumulants, unbiased estimators)?
-
     - scaling of inputs? summaries seem to be high magnitude ... PCA whitening?
     - covariance conditioning?
+    - remove outliers in latins?
 """ 
 
 t0 = time.time()
@@ -116,9 +108,6 @@ parameter_prior: Distribution = cumulants_dataset.prior
 
 bulk_pdfs = False # Use PDFs for Finv_bulk or cumulants of bulk of PDF
 bulk_dataset: Dataset = get_bulk_dataset(args, pdfs=bulk_pdfs) # For Fisher forecast comparisons
-
-print("DATA:", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (dataset.fiducial_data, dataset.data)])
-print("DATA:", [_.shape for _ in (dataset.fiducial_data, dataset.data)])
 
 """
     Compression
@@ -225,8 +214,9 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
         show_tqdm=args.use_tqdm
     )
 
-    samples_log_prob = jax.vmap(log_prob_fn)(samples)
     alpha_log_prob = log_prob_fn(jnp.asarray(dataset.alpha))
+    samples_log_prob = jax.vmap(log_prob_fn)(samples)
+    samples_log_prob = jnp.where(jnp.isneginf(samples_log_prob), -1e100, samples_log_prob)
 
     posterior_df = make_df(
         samples, 
@@ -341,8 +331,12 @@ if 1:
         show_tqdm=args.use_tqdm
     )
 
-    samples_log_prob = jax.vmap(log_prob_fn)(samples)
     alpha_log_prob = log_prob_fn(dataset.alpha)
+    samples_log_prob = jax.vmap(log_prob_fn)(samples)
+    samples_log_prob = jnp.where(jnp.isneginf(samples_log_prob), -1e100, samples_log_prob)
+
+    print("samples:", samples.min(), samples.max())
+    print("probs:", samples_log_prob.min(), samples_log_prob.max())
 
     posterior_df = make_df(
         samples, 
@@ -359,61 +353,66 @@ if 1:
         summary=x_
     )
 
-    try:
-        c = ChainConsumer()
-        c.add_chain(
-            Chain.from_covariance(
-                dataset.alpha,
-                dataset.Finv,
-                columns=dataset.parameter_strings,
-                name=r"$F_{\Sigma^{-1}}$" + " {}".format("$S_n$[tails]" if config.reduced_cumulants else "$k_n$[tails]"),
-                color="k",
-                linestyle=":",
-                shade_alpha=0.
-            )
-        )
-        c.add_chain(
-            Chain.from_covariance(
-                dataset.alpha,
-                bulk_dataset.Finv,
-                columns=dataset.parameter_strings,
-                name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]" if bulk_pdfs else "Cumulants[bulk]"),
-                color="g",
-                linestyle=":",
-                shade_alpha=0.
-            )
-        )
-        c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
-        c.add_marker(
-            location=marker(x_, parameter_strings=dataset.parameter_strings),
-            name=r"$\hat{x}$", 
-            color="b"
-        )
-        c.add_marker(
-            location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
-            name=r"$\alpha$", 
-            color="k"
-        )
-        fig = c.plotter.plot()
-        fig.suptitle(
-            (
-                r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
-                + " z={}".format(config.redshift) + "\n"
-                + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
-                + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
-                + r"$k_n$ = [{}]".format(
-                    ", ".join([["var.", "skew.", "kurt."][_] for _ in config.order_idx])
-                )
+    # try:
+    c = ChainConsumer()
+    c.add_chain(
+        Chain.from_covariance(
+            dataset.alpha,
+            dataset.Finv,
+            columns=dataset.parameter_strings,
+            name=r"$F_{\Sigma^{-1}}$" + " {}".format(
+                "$S_n$[tails]" if config.reduced_cumulants else "$k_n$[tails]"
             ),
-            multialignment='center'
+            color="k",
+            linestyle=":",
+            shade_alpha=0.
+        )
     )
-        plt.savefig(os.path.join(results_dir, "posterior_affine.pdf"))
-        plt.savefig(os.path.join(posteriors_dir, "posterior_affine.pdf"))
-        plt.close()
-    except Exception as e:
-        print(e)
-        print("(!) Shit posterior")
-        pass
+    c.add_chain(
+        Chain.from_covariance(
+            dataset.alpha,
+            bulk_dataset.Finv,
+            columns=dataset.parameter_strings,
+            name=r"$F_{\Sigma^{-1}}$" + " {}".format(
+                "PDF[bulk]" if bulk_pdfs else "Cumulants[bulk]"
+            ),
+            color="g",
+            linestyle=":",
+            shade_alpha=0.
+        )
+    )
+    c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
+    c.add_marker(
+        location=marker(x_, parameter_strings=dataset.parameter_strings),
+        name=r"$\hat{x}$", 
+        color="b"
+    )
+    c.add_marker(
+        location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
+        name=r"$\alpha$", 
+        color="k"
+    )
+    fig = c.plotter.plot()
+    fig.suptitle(
+        (
+            r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
+            + " z={}".format(config.redshift) + "\n"
+            + (" linearised" if config.linearised else " Quijote") + "\n"
+            + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
+            + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
+            + r"$k_n$ = [{}]".format(
+                ", ".join([["var.", "skew.", "kurt."][_] for _ in config.order_idx])
+            )
+        ),
+        multialignment='center'
+    )
+    plt.savefig(os.path.join(results_dir, "posterior_affine.pdf"))
+    plt.savefig(os.path.join(posteriors_dir, "posterior_affine.pdf"))
+    plt.close()
+    # except Exception as e:
+    #     print(e)
+    #     print("(!) Shit posterior")
+    #     pass
 
 if 0:
     try:
@@ -422,6 +421,9 @@ if 0:
         )
         samples = samples.squeeze()
         samples_log_prob = samples_log_prob.squeeze()
+
+        samples_log_prob = jnp.where(jnp.isneginf(log_probs), -1e100, log_probs)
+
 
         posterior_df = make_df(
             samples, 
@@ -444,7 +446,9 @@ if 0:
                 dataset.alpha,
                 dataset.Finv,
                 columns=dataset.parameter_strings,
-                name=r"$F_{\Sigma^{-1}}$" + " {}".format("$S_n$[tails]" if config.reduced_cumulants else "$k_n$[tails]"),
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format(
+                    "$S_n$[tails]" if config.reduced_cumulants else "$k_n$[tails]"
+                ),
                 color="k",
                 linestyle=":",
                 shade_alpha=0.
@@ -455,7 +459,9 @@ if 0:
                 dataset.alpha,
                 bulk_dataset.Finv,
                 columns=dataset.parameter_strings,
-                name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]" if bulk_pdfs else "Cumulants[bulk]"),
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format(
+                    "PDF[bulk]" if bulk_pdfs else "Cumulants[bulk]"
+                ),
                 color="g",
                 linestyle=":",
                 shade_alpha=0.
