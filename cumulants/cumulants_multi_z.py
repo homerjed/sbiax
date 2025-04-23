@@ -540,7 +540,11 @@ if __name__ == "__main__":
 
         alpha_log_prob = log_prob_fn(jnp.asarray(alpha))
         samples_log_prob = jax.vmap(log_prob_fn)(samples)
-        samples_log_prob = jnp.where(jnp.isneginf(samples_log_prob), -1e100, samples_log_prob) # Remove NaNs?
+        samples_log_prob = jnp.where(
+            jnp.logical_or(jnp.isnan(samples_log_prob), jnp.isneginf(samples_log_prob)),
+            -1e32,
+            samples_log_prob
+        )
 
         # Save posterior, Fisher and summary
         posterior_save_dir = get_multi_z_posterior_dir(config, args)

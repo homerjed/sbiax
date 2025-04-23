@@ -217,7 +217,11 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
 
     alpha_log_prob = log_prob_fn(jnp.asarray(dataset.alpha))
     samples_log_prob = jax.vmap(log_prob_fn)(samples)
-    samples_log_prob = jnp.where(jnp.isneginf(samples_log_prob), -1e100, samples_log_prob)
+    samples_log_prob = jnp.where(
+        jnp.logical_or(jnp.isnan(samples_log_prob), jnp.isneginf(samples_log_prob)),
+        -1e32,
+        samples_log_prob
+    )
 
     posterior_df = make_df(
         samples, 
@@ -346,7 +350,11 @@ if 1:
 
     alpha_log_prob = log_prob_fn(dataset.alpha)
     samples_log_prob = jax.vmap(log_prob_fn)(samples)
-    samples_log_prob = jnp.where(jnp.isneginf(samples_log_prob), -1e100, samples_log_prob)
+    samples_log_prob = jnp.where(
+        jnp.logical_or(jnp.isnan(samples_log_prob), jnp.isneginf(samples_log_prob)),
+        -1e32,
+        samples_log_prob
+    ) # samples_log_prob = jnp.where(jnp.isneginf(samples_log_prob), -1e100, samples_log_prob)
 
     print("samples:", samples.min(), samples.max())
     print("probs:", samples_log_prob.min(), samples_log_prob.max())
@@ -435,7 +443,11 @@ if 0:
         samples = samples.squeeze()
         samples_log_prob = samples_log_prob.squeeze()
 
-        samples_log_prob = jnp.where(jnp.isneginf(log_probs), -1e100, log_probs)
+        samples_log_prob = jnp.where(
+            jnp.logical_or(jnp.isnan(samples_log_prob), jnp.isneginf(samples_log_prob)),
+            -1e32,
+            samples_log_prob
+        )
 
 
         posterior_df = make_df(
