@@ -220,7 +220,7 @@ def get_cumulants_multi_z_args(using_notebook: bool = False) -> argparse.Namespa
         "-n_p",
         "--n_posteriors_sample", 
         type=int,
-        default=2,
+        default=1,
         help="Number of posteriors to sample (using different measurements for each)." 
     )
     parser.add_argument(

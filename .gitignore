@@ -4,6 +4,7 @@
 *.npz
 *.eqx
 *.log
+*.out
 !paper/sbi_example.png
 !paper/paper.pdf
 !assets/cover.png

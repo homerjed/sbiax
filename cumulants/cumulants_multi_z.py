@@ -421,7 +421,7 @@ if __name__ == "__main__":
                 bulk_Finvs.append(bulk_Finv_z)
                 ensembles.append(ensemble)      
                 
-                bar.set_postfix_str("z={}".format(redshift))
+                bar.set_postfix_str("z={}, n_posterior={}".format(redshift, n_posterior))
 
         # Multi-redshift ensemble of individual ensembles at each redshift
         multi_ensemble = MultiEnsemble(

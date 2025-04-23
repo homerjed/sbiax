@@ -279,7 +279,8 @@ if 1:
     from data.constants import (
         get_quijote_parameters, 
         get_base_posteriors_dir,
-        get_save_and_load_dirs
+        get_save_and_load_dirs,
+        get_target_idx
     )
     from data.cumulants import (
         Dataset, 
@@ -385,7 +386,7 @@ if 1:
 
     # Plotting properties for bulk / tails
     plotting_dict = dict(
-        bulk=dict(color="g", linestyle="-", shade_alpha=0.5),
+        bulk=dict(color="b", linestyle="-", shade_alpha=0.5),
         tails=dict(color="r", linestyle="-", shade_alpha=0.5)
     )
 
@@ -403,6 +404,10 @@ if 1:
         Finv_bulk_pdfs_all_z = get_multi_z_bulk_pdf_fisher_forecast(args)
         np.save(os.path.join(data_dir, "Finv_bulk_pdfs_all_z.npy"), Finv_bulk_pdfs_all_z)
 
+    if args.freeze_parameters:
+        target_idx = get_target_idx()
+        Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z[:target_idx, :][:, :target_idx]
+
     # Loop through bulk / tails (just grab PDF Fisher forecast, no posterior)
     for bulk_or_tails in ["bulk", "tails"]:
 
@@ -414,9 +419,6 @@ if 1:
 
         # Force args for posterior to be bulk or tails
         args.bulk_or_tails = bulk_or_tails 
-
-        # /project/ls-gruen/users/jed.homer/sbiaxpdf/results/posteriors/nonfrozen/tails/cumulants/multi_z/nle/linearised/
-        # /project/ls-gruen/users/jed.homer/sbiaxpdf/results/posteriors/nonfrozen/bulk/cumulants/multi_z/nle/linearised/
 
         config = ensembles_config(
             seed=args.seed, # Defaults if run without argparse args
@@ -434,7 +436,6 @@ if 1:
         # Posterior for bulk/tails for a given seed
         posterior_save_dir = get_multi_z_posterior_dir(config, args)
         print(posterior_save_dir)
-        breakpoint()
         posterior_filename = os.path.join(
             posterior_save_dir, "posterior_{}.npz".format(args.seed)
         )
@@ -481,6 +482,8 @@ if 1:
                 color=plotting_dict[bulk_or_tails]["color"],
             )
 
+    print(alpha.shape, Finv_bulk_pdfs_all_z.shape) 
+
     # Fisher forecast for bulk of PDF over all redshifts
     c.add_chain(
         Chain.from_covariance(
@@ -488,7 +491,7 @@ if 1:
             Finv_bulk_pdfs_all_z, 
             columns=parameter_strings,
             name=r"$F_{\Sigma^{-1}}$ " + "bulk pdf",
-            color="k",
+            color="g",
             linestyle=":",
             shade_alpha=0.
         )

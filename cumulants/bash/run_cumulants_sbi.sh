@@ -2,7 +2,7 @@
 #SBATCH --job-name=cumulants_exps
 #SBATCH --output=/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/cumulants_sbi/%A/cumulants_exps_%a.out
 #SBATCH --error=/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/cumulants_sbi/%A/cumulants_exps_%a.err
-#SBATCH --array=0-4%5
+#SBATCH --array=0-2%3
 #SBATCH --time=48:00:00
 #SBATCH --partition=cluster
 #SBATCH --ntasks=1
