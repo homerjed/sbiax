@@ -12,6 +12,27 @@ typecheck = jaxtyped(typechecker=typechecker)
 
 USE_SCALERS = True
 
+DEFAULT_MAF_ARCH = dict(
+    width_size       = 32,
+    n_layers         = 2,
+    nn_depth         = 2,
+    activation       = "tanh",
+    use_scaling      = True
+)
+
+DEFAULT_CNF_ARCH = dict(
+    model_type       = "cnf",
+    width_size       = 8, # 32
+    depth            = 0, # 2
+    activation       = "tanh",
+    dropout_rate     = 0.,
+    dt               = 0.1,
+    t1               = 1.,
+    solver           = "Euler", # Heun
+    exact_log_prob   = True,
+    use_scaling      = True # Defaults  
+)
+
 
 @typecheck
 def cumulants_config(
@@ -67,23 +88,23 @@ def cumulants_config(
         # NDEs
         config.cnf = cnf = ConfigDict()
         cnf.model_type       = "cnf"
-        cnf.width_size       = 8
-        cnf.depth            = 0
-        cnf.activation       = "tanh"
-        cnf.dropout_rate     = 0.
-        cnf.dt               = 0.1
-        cnf.t1               = 1.
-        cnf.solver           = "Euler" 
-        cnf.exact_log_prob   = True
-        cnf.use_scaling      = True # Defaults to (mu, std) of (x, y)
+        cnf.width_size       = DEFAULT_CNF_ARCH["width_size"]
+        cnf.depth            = DEFAULT_CNF_ARCH["depth"]
+        cnf.activation       = DEFAULT_CNF_ARCH["activation"]
+        cnf.dropout_rate     = DEFAULT_CNF_ARCH["dropout_rate"]
+        cnf.dt               = DEFAULT_CNF_ARCH["dt"]
+        cnf.t1               = DEFAULT_CNF_ARCH["t1"]
+        cnf.solver           = DEFAULT_CNF_ARCH["solver"]
+        cnf.exact_log_prob   = DEFAULT_CNF_ARCH["exact_log_prob"]
+        cnf.use_scaling      = DEFAULT_CNF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
         config.maf = maf = ConfigDict()
         maf.model_type       = "maf" # = model.__class__.__name__
-        maf.width_size       = 32
-        maf.n_layers         = 2
-        maf.nn_depth         = 2
-        maf.activation       = "tanh"
-        maf.use_scaling      = True # Defaults to (mu, std) of (x, y)
+        maf.width_size       = DEFAULT_MAF_ARCH["width_size"]
+        maf.n_layers         = DEFAULT_MAF_ARCH["n_layers"]
+        maf.nn_depth         = DEFAULT_MAF_ARCH["nn_depth"]
+        maf.activation       = DEFAULT_MAF_ARCH["activation"]
+        maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
         config.ndes          = [maf]#, cnf, cnf]  
         config.n_ndes        = len(config.ndes)
@@ -101,23 +122,23 @@ def cumulants_config(
         # NDEs
         config.cnf = cnf = ConfigDict()
         cnf.model_type       = "cnf"
-        cnf.width_size       = 32 # 32
-        cnf.depth            = 2 # 2
-        cnf.activation       = "tanh"
-        cnf.dropout_rate     = 0.
-        cnf.dt               = 0.05
-        cnf.t1               = 1.
-        cnf.solver           = "Heun"
-        cnf.exact_log_prob   = True
-        cnf.use_scaling      = True # Defaults to (mu, std) of (x, y)
+        cnf.width_size       = DEFAULT_CNF_ARCH["width_size"]
+        cnf.depth            = DEFAULT_CNF_ARCH["depth"]
+        cnf.activation       = DEFAULT_CNF_ARCH["activation"]
+        cnf.dropout_rate     = DEFAULT_CNF_ARCH["dropout_rate"]
+        cnf.dt               = DEFAULT_CNF_ARCH["dt"]
+        cnf.t1               = DEFAULT_CNF_ARCH["t1"]
+        cnf.solver           = DEFAULT_CNF_ARCH["solver"]
+        cnf.exact_log_prob   = DEFAULT_CNF_ARCH["exact_log_prob"]
+        cnf.use_scaling      = DEFAULT_CNF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
         config.maf = maf = ConfigDict()
         maf.model_type       = "maf" # = model.__class__.__name__
-        maf.width_size       = 32
-        maf.n_layers         = 2
-        maf.nn_depth         = 2
-        maf.activation       = "tanh"
-        maf.use_scaling      = True # Defaults to (mu, std) of (x, y)
+        maf.width_size       = DEFAULT_MAF_ARCH["width_size"]
+        maf.n_layers         = DEFAULT_MAF_ARCH["n_layers"]
+        maf.nn_depth         = DEFAULT_MAF_ARCH["nn_depth"]
+        maf.activation       = DEFAULT_MAF_ARCH["activation"]
+        maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
         config.ndes          = [maf] #cnf]#, cnf, cnf] 
         config.n_ndes        = len(config.ndes)
@@ -200,23 +221,23 @@ def bulk_cumulants_config(
         # NDEs
         config.cnf = cnf = ConfigDict()
         cnf.model_type       = "cnf"
-        cnf.width_size       = 8
-        cnf.depth            = 0
-        cnf.activation       = "tanh"
-        cnf.dropout_rate     = 0.
-        cnf.dt               = 0.1
-        cnf.t1               = 1.
-        cnf.solver           = "Euler" 
-        cnf.exact_log_prob   = True
-        cnf.use_scaling      = True # Defaults to (mu, std) of (x, y)
+        cnf.width_size       = DEFAULT_CNF_ARCH["width_size"]
+        cnf.depth            = DEFAULT_CNF_ARCH["depth"]
+        cnf.activation       = DEFAULT_CNF_ARCH["activation"]
+        cnf.dropout_rate     = DEFAULT_CNF_ARCH["dropout_rate"]
+        cnf.dt               = DEFAULT_CNF_ARCH["dt"]
+        cnf.t1               = DEFAULT_CNF_ARCH["t1"]
+        cnf.solver           = DEFAULT_CNF_ARCH["solver"]
+        cnf.exact_log_prob   = DEFAULT_CNF_ARCH["exact_log_prob"]
+        cnf.use_scaling      = DEFAULT_CNF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
         config.maf = maf = ConfigDict()
         maf.model_type       = "maf" # = model.__class__.__name__
-        maf.width_size       = 32
-        maf.n_layers         = 8
-        maf.nn_depth         = 2
-        maf.activation       = "tanh"
-        maf.use_scaling      = True # Defaults to (mu, std) of (x, y)
+        maf.width_size       = DEFAULT_MAF_ARCH["width_size"]
+        maf.n_layers         = DEFAULT_MAF_ARCH["n_layers"]
+        maf.nn_depth         = DEFAULT_MAF_ARCH["nn_depth"]
+        maf.activation       = DEFAULT_MAF_ARCH["activation"]
+        maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
         config.ndes          = [maf]#, cnf, cnf]  
         config.n_ndes        = len(config.ndes)
@@ -234,23 +255,23 @@ def bulk_cumulants_config(
         # NDEs
         config.cnf = cnf = ConfigDict()
         cnf.model_type       = "cnf"
-        cnf.width_size       = 32 # 8
-        cnf.depth            = 2 # 0
-        cnf.activation       = "tanh"
-        cnf.dropout_rate     = 0.
-        cnf.dt               = 0.01
-        cnf.t1               = 1.
-        cnf.solver           = "Euler"
-        cnf.exact_log_prob   = True
-        cnf.use_scaling      = True # Defaults to (mu, std) of (x, y)
+        cnf.width_size       = DEFAULT_CNF_ARCH["width_size"]
+        cnf.depth            = DEFAULT_CNF_ARCH["depth"]
+        cnf.activation       = DEFAULT_CNF_ARCH["activation"]
+        cnf.dropout_rate     = DEFAULT_CNF_ARCH["dropout_rate"]
+        cnf.dt               = DEFAULT_CNF_ARCH["dt"]
+        cnf.t1               = DEFAULT_CNF_ARCH["t1"]
+        cnf.solver           = DEFAULT_CNF_ARCH["solver"]
+        cnf.exact_log_prob   = DEFAULT_CNF_ARCH["exact_log_prob"]
+        cnf.use_scaling      = DEFAULT_CNF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
         config.maf = maf = ConfigDict()
         maf.model_type       = "maf" # = model.__class__.__name__
-        maf.width_size       = 32
-        maf.n_layers         = 8
-        maf.nn_depth         = 2
-        maf.activation       = "tanh"
-        maf.use_scaling      = True # Defaults to (mu, std) of (x, y)
+        maf.width_size       = DEFAULT_MAF_ARCH["width_size"]
+        maf.n_layers         = DEFAULT_MAF_ARCH["n_layers"]
+        maf.nn_depth         = DEFAULT_MAF_ARCH["nn_depth"]
+        maf.activation       = DEFAULT_MAF_ARCH["activation"]
+        maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
         config.ndes          = [maf]#, cnf, cnf] #maf, maf, maf]  
         config.n_ndes        = len(config.ndes)

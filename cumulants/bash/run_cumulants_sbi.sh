@@ -7,7 +7,7 @@
 #SBATCH --partition=cluster
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=12G
+#SBATCH --mem=20G
 #SBATCH --mail-user=jed.homer@physik.lmu.de
 #SBATCH --mail-type=begin,end,fail
 
@@ -24,7 +24,7 @@ cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 
 source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
 
-for freeze in false true; do
+for freeze in false; do # NOTE: true false (skipping freeze for now)
 
     freeze_flag=""
     if [ "$freeze" = true ]; then
@@ -251,10 +251,8 @@ for freeze in false true; do
         echo ">>Sampling tails multi-z with non-linearised datavectors... Completed."
 
 
-
-            current_time=$(date +"%H:%M:%S")
-            echo "The current time is: $current_time"
-        done
+        current_time=$(date +"%H:%M:%S")
+        echo "The current time is: $current_time"
 
 
         # Plot figure one (only for non-linearised?)

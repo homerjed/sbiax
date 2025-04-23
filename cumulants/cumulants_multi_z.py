@@ -51,6 +51,8 @@ typecheck = jaxtyped(typechecker=typechecker)
 
 CompressionFn = Callable[[Float[Array, "d"], Float[Array, "p"]], Float[Array, "p"]]
 
+jax.clear_caches()
+
 
 def default(v, d):
     return v if v is not None else d
@@ -181,15 +183,19 @@ def get_z_config_and_datavector(
 
     # Input scaler functions for individual NDEs (NOTE: scaling on X which may need to be linearised or not)
     # NOTE: make sure this is consistent with training data-scaling
-    scalers = [
-        Scaler(X, dataset.parameters, use_scaling=config_z.use_scalers)
-    ]
+    # scalers = [
+    #     Scaler(X, dataset.parameters, use_scaling=config_z.use_scalers)
+    # ]
+    # NOTE: data_preprocess_fn ...
+    scaler = Scaler(
+        X, dataset.parameters, use_scaling=config_z.use_scalers
+    )
 
     # Get NDEs
     ndes = get_ndes_from_config(
         config_z, 
         event_dim=dataset.alpha.size, 
-        scalers=scalers, 
+        scalers=scaler, 
         use_scalers=config_z.use_scalers,
         key=key_model
     )
@@ -197,6 +203,7 @@ def get_z_config_and_datavector(
     # Ensemble of NDEs
     ensemble = Ensemble(ndes, sbi_type=config_z.sbi_type)
 
+    # Precision of weights bug
     # ensemble = eqx.tree_at(
     #     lambda e: e.weights, 
     #     ensemble, 
@@ -533,14 +540,7 @@ if __name__ == "__main__":
 
         alpha_log_prob = log_prob_fn(jnp.asarray(alpha))
         samples_log_prob = jax.vmap(log_prob_fn)(samples)
-        samples_log_prob = jnp.where(jnp.isneginf(samples_log_prob), -1e100, samples_log_prob)
-        
-        # Remove NaNs
-        # ix = jnp.isfinite(samples_log_prob)
-        # samples_log_prob = samples_log_prob[ix]
-        # samples = samples[ix]
-        # assert jnp.all(jnp.isfinite(samples_log_prob))
-        # assert jnp.all(jnp.isfinite(samples))
+        samples_log_prob = jnp.where(jnp.isneginf(samples_log_prob), -1e100, samples_log_prob) # Remove NaNs?
 
         # Save posterior, Fisher and summary
         posterior_save_dir = get_multi_z_posterior_dir(config, args)

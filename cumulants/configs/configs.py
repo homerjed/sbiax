@@ -44,6 +44,15 @@ def make_dirs(results_dir: str) -> None:
     print("RESULTS_DIR:\n", results_dir)
 
 
+def dump_args_and_config(args: argparse.Namespace, config: ConfigDict, results_dir: str) -> None:
+    # Save command line arguments and config together
+    with open(os.path.join(results_dir, "config.yml"), "w") as f:
+        yaml.dump({"args": ""}, f, default_flow_style=False)
+        yaml.dump(vars(args), f, default_flow_style=False)
+        yaml.dump({"config": ""}, f, default_flow_style=False)
+        yaml.dump(config.to_dict(), f, default_flow_style=False)
+
+
 def get_results_dir(config: ConfigDict, args: argparse.Namespace, *, arch_search: bool = False) -> str:
 
     results_dir = "{}{}{}{}{}{}{}{}{}{}{}".format( # Import this from a constants file
@@ -62,12 +71,7 @@ def get_results_dir(config: ConfigDict, args: argparse.Namespace, *, arch_search
 
     make_dirs(results_dir)
 
-    # Save command line arguments and config together
-    with open(os.path.join(results_dir, "config.yml"), "w") as f:
-        yaml.dump({"args": ""}, f, default_flow_style=False)
-        yaml.dump(vars(args), f, default_flow_style=False)
-        yaml.dump({"config": ""}, f, default_flow_style=False)
-        yaml.dump(config.to_dict(), f, default_flow_style=False)
+    dump_args_and_config(args, config, results_dir=results_dir)
 
     return results_dir
 
@@ -95,14 +99,14 @@ def get_posteriors_dir(config: ConfigDict, args: argparse.Namespace, *, arch_sea
 
 def get_multi_z_posterior_dir(config: ConfigDict, args: argparse.Namespace) -> str:
 
-    posterior_save_dir = "{}{}{}{}{}{}{}{}{}/multi_z/".format(
+    posterior_save_dir = "{}{}{}{}{}{}{}{}{}multi_z/".format(
         get_base_posteriors_dir(),
         "frozen/" if config.freeze_parameters else "nonfrozen/",
         "{}/".format(args.bulk_or_tails),
-        "reduced_cumulants" if config.reduced_cumulants else "cumulants",
+        "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
         (config.sbi_type + "/") if config.sbi_type else "" , 
-        (config.compression + "/") if config.compression else "",
         "linearised/" if config.linearised else "nonlinearised/",
+        (config.compression + "/") if config.compression else "",
         "pretrain/" if config.pre_train else "nopretrain/",
         (str(config.seed) + "/") if (config.seed is not None) else "", # No exp name here...
     )
@@ -115,28 +119,6 @@ def get_multi_z_posterior_dir(config: ConfigDict, args: argparse.Namespace) -> s
 """
     Configs
 """
-
-
-DEFAULT_MAF_ARCH = dict(
-    width_size       = 32,
-    n_layers         = 2,
-    nn_depth         = 2,
-    activation       = "tanh",
-    use_scaling      = True
-)
-
-DEFAULT_CNF_ARCH = dict(
-    model_type       = "cnf",
-    width_size       = 8,
-    depth            = 0,
-    activation       = "tanh",
-    dropout_rate     = 0.,
-    dt               = 0.1,
-    t1               = 1.,
-    solver           = "Euler",
-    exact_log_prob   = True,
-    use_scaling      = True # Defaults  
-)
 
 
 @typecheck

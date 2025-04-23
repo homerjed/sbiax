@@ -296,6 +296,8 @@ if 1:
     )
     from affine import affine_sample
 
+    jax.clear_caches()
+
     """
         Loop through seeds, getting configs for ensembles for bulk and bulk + tails
         over all redshifts, loading posteriors from them 
@@ -310,9 +312,7 @@ if 1:
         )
         return posterior_tuple
 
-    parser = argparse.ArgumentParser(
-        help="Plotting script for SBI bulk and tails posteriors. These args are for figure one plotting."
-    )
+    parser = argparse.ArgumentParser()
     parser.add_argument(
         "-s", 
         "--seed", 
@@ -419,7 +419,7 @@ if 1:
         # /project/ls-gruen/users/jed.homer/sbiaxpdf/results/posteriors/nonfrozen/bulk/cumulants/multi_z/nle/linearised/
 
         config = ensembles_config(
-            seed=seed, # Defaults if run without argparse args
+            seed=args.seed, # Defaults if run without argparse args
             sbi_type=args.sbi_type, 
             linearised=args.linearised,
             reduced_cumulants=args.reduced_cumulants,
@@ -433,6 +433,8 @@ if 1:
 
         # Posterior for bulk/tails for a given seed
         posterior_save_dir = get_multi_z_posterior_dir(config, args)
+        print(posterior_save_dir)
+        breakpoint()
         posterior_filename = os.path.join(
             posterior_save_dir, "posterior_{}.npz".format(args.seed)
         )

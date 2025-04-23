@@ -44,6 +44,7 @@ from utils.utils import (
     get_dataset_and_config
 )
 
+jax.clear_caches()
 
 """ 
     Run NLE or NPE SBI with the moments of the 1pt matter PDF.
@@ -299,6 +300,18 @@ ensemble, stats = train_ensemble(
     show_tqdm=args.use_tqdm,
     results_dir=results_dir
 )
+
+
+################################ Save / load ensemble test
+
+# print(">Saved ensemble")
+# ensemble = Ensemble(ndes, sbi_type=config.sbi_type)
+# ensemble = eqx.tree_deserialise_leaves(os.path.join(results_dir, "ensemble.eqx"), ensemble)
+# print(">Loaded ensemble")
+
+# print(jax.tree.map(lambda x: x.shape, eqx.filter(ensemble, eqx.is_array)))
+
+################################
 
 print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None)
 
