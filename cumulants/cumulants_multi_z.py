@@ -123,21 +123,23 @@ def get_z_config_and_datavector(
     config_z = cumulants_config(
         seed=seed, 
         redshift=redshift, 
+        reduced_cumulants=reduced_cumulants,
+        sbi_type=sbi_type,
         linearised=linearised, 
         compression=compression,
-        reduced_cumulants=reduced_cumulants,
-        n_linear_sims=n_linear_sims,
         order_idx=order_idx,
         freeze_parameters=freeze_parameters,
+        n_linear_sims=n_linear_sims,
         pre_train=pre_train
     )
 
     bulk_config_z = bulk_cumulants_config(
         seed=seed, 
         redshift=redshift, 
+        reduced_cumulants=reduced_cumulants,
+        sbi_type=sbi_type,
         linearised=linearised, 
         compression=compression,
-        reduced_cumulants=reduced_cumulants,
         n_linear_sims=n_linear_sims,
         order_idx=order_idx,
         freeze_parameters=freeze_parameters,
@@ -227,7 +229,7 @@ def get_z_config_and_datavector(
         datavectors,
         parameter_prior, 
         jnp.asarray(dataset.alpha), 
-        # Scale data and parameter covariances by number of measurements
+        # Scale data and parameter covariances by number of measurements (these are not used in MLEs)
         jnp.asarray(bulk_dataset.Finv) / n_datavectors, 
         jnp.asarray(dataset.Finv) / n_datavectors, 
         jnp.asarray(dataset.C) / n_datavectors, 
@@ -315,17 +317,19 @@ if __name__ == "__main__":
         seed=args.seed, # Defaults if run without argparse args
         sbi_type=args.sbi_type, 
         linearised=args.linearised,
-        reduced_cumulants=args.reduced_cumulants,
-        order_idx=args.order_idx,
-        redshifts=args.redshifts,
+        n_linear_sims=args.n_linear_sims,
         compression=args.compression,
+        reduced_cumulants=args.reduced_cumulants,
+        redshifts=args.redshifts,
+        order_idx=args.order_idx,
         pre_train=args.pre_train,
         freeze_parameters=args.freeze_parameters
     )
 
     parameter_strings = get_parameter_strings()
 
-    linear_str = "linear" if config.linearised else ""
+    linear_str = "linearised" if config.linearised else "nonlinearised"
+    pretrain_str = "pretrain" if config.pre_train else "nopretrain"
 
     # Where SBI's are saved (add on suffix for experiment details)
     posteriors_dir = get_base_posteriors_dir()
@@ -336,8 +340,8 @@ if __name__ == "__main__":
         "frozen/" if config.freeze_parameters else "nonfrozen/",
         "{}/".format(args.bulk_or_tails),
         "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
-        (config.sbi_type + "/"), 
-        (config.compression + "/"),
+        config.sbi_type + "/", 
+        config.compression + "/",
         "linearised/" if config.linearised else "nonlinearised/",
         "pretrain/" if config.pre_train else "nopretrain/",
         "z={}_m={}".format( 
@@ -348,6 +352,8 @@ if __name__ == "__main__":
 
     if not os.path.exists(figs_dir):
         os.makedirs(figs_dir, exist_ok=True)
+
+    print("FIGS_DIR:\n\t", figs_dir)
 
     # Sample multiple posteriors across multiple redshifts
     for n_posterior in range(args.n_posteriors_sample):
@@ -704,7 +710,7 @@ if __name__ == "__main__":
         )
         posterior_plot_filename = os.path.join(
             figs_dir, 
-            "multi_ensemble_posterior_marginalised_cumulants_{}_{}_{}.pdf".format(args.seed, linear_str, n_posterior)
+            "multi_ensemble_posterior_marginalised_cumulants_{}_{}_{}_{}.pdf".format(args.seed, linear_str, pretrain_str, n_posterior)
         )
         plt.savefig(posterior_plot_filename)
         plt.close()
