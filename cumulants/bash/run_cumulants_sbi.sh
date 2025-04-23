@@ -18,6 +18,8 @@ id=$SLURM_ARRAY_TASK_ID
 
 start=`date +%s`
 
+RUN_LINEARIZED=false # Set this to false to skip linearised script blocks
+
 echo "Currently running array index: " "$id"
 
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
@@ -37,82 +39,74 @@ for freeze in false; do # NOTE: true false (skipping freeze for now)
     for i in {0..2}; do
 
         order_idx_args=$(seq -s " " 0 $i)
+        echo ">>Running seed=$id, redshift $z, cumulants=$order_idx_args..."
 
-        # Fit bulk linearised
-        for z in 0.0 0.5 1.0; do
-
-            echo ">>Running seed=$id, redshift $z, cumulants=$order_idx_args..."
-
+        if [ "$RUN_LINEARIZED" = true ]; then
+            # Fit bulk linearised
             echo ">>Running bulk linearised scripts..."
-            python cumulants_sbi.py \
-                --seed "$id" \
-                --sbi_type "nle" \
-                --compression "linear" \
-                --linearised \
-                --n_linear_sims 10000 \
-                --order_idx $order_idx_args \
-                --redshift $z \
-                --no-use-tqdm \
-                --bulk_or_tails "bulk" \
-                "$freeze_flag"
+            for z in 0.0 0.5 1.0; do
+                python cumulants_sbi.py \
+                    --seed "$id" \
+                    --sbi_type "nle" \
+                    --compression "linear" \
+                    --linearised \
+                    --n_linear_sims 10000 \
+                    --order_idx $order_idx_args \
+                    --redshift $z \
+                    --no-use-tqdm \
+                    --bulk_or_tails "bulk" \
+                    "$freeze_flag"
+            done 
             echo ">>Running bulk linearised scripts... Complete."
 
-        done 
-
-        # Bulk, linearised
-        echo ">>Sampling bulk multi-z with linearised datavectors..."
-        python cumulants_multi_z.py \
-            --seed "$id" \
-            --sbi_type "nle" \
-            --compression "linear" \
-            --linearised \
-            --order_idx $order_idx_args \
-            --bulk_or_tails "bulk" \
-            "$freeze_flag"
-        echo ">>Sampling bulk multi-z with linearised datavectors... Completed."
-
-
-
-        # Fit tails linearised
-        for z in 0.0 0.5 1.0; do
-
-            echo ">>Running seed=$id, redshift $z, cumulants=$order_idx_args..."
-
-            echo ">>Running tails linearised scripts..."
-            python cumulants_sbi.py \
+            # Bulk, linearised
+            echo ">>Sampling bulk multi-z with linearised datavectors..."
+            python cumulants_multi_z.py \
                 --seed "$id" \
                 --sbi_type "nle" \
                 --compression "linear" \
                 --linearised \
-                --n_linear_sims 10000 \
                 --order_idx $order_idx_args \
-                --redshift $z \
-                --no-use-tqdm \
-                --bulk_or_tails "tails" \
+                --bulk_or_tails "bulk" \
                 "$freeze_flag"
+            echo ">>Sampling bulk multi-z with linearised datavectors... Completed."
+
+
+
+            # Fit tails linearised
+            echo ">>Running tails linearised scripts..."
+            for z in 0.0 0.5 1.0; do
+                python cumulants_sbi.py \
+                    --seed "$id" \
+                    --sbi_type "nle" \
+                    --compression "linear" \
+                    --linearised \
+                    --n_linear_sims 10000 \
+                    --order_idx $order_idx_args \
+                    --redshift $z \
+                    --no-use-tqdm \
+                    --bulk_or_tails "tails" \
+                    "$freeze_flag"
+            done
             echo ">>Running tails linearised scripts... Complete."
 
-        done
-
-        # Tails, linearised
-        echo ">>Sampling tails multi-z with linearised datavectors..."
-        python cumulants_multi_z.py \
-            --seed "$id" \
-            --sbi_type "nle" \
-            --compression "linear" \
-            --linearised \
-            --order_idx $order_idx_args \
-            --bulk_or_tails "tails" \
-            "$freeze_flag"
-        echo ">>Sampling tails multi-z with linearised datavectors... Completed."
-
+            # Tails, linearised
+            echo ">>Sampling tails multi-z with linearised datavectors..."
+            python cumulants_multi_z.py \
+                --seed "$id" \
+                --sbi_type "nle" \
+                --compression "linear" \
+                --linearised \
+                --order_idx $order_idx_args \
+                --bulk_or_tails "tails" \
+                "$freeze_flag"
+            echo ">>Sampling tails multi-z with linearised datavectors... Completed."
+        fi
 
 
         # Fit bulk pre-train non-linearised
+        echo ">>Running bulk pre-train non-linearised scripts..."
         for z in 0.0 0.5 1.0; do
-
-            echo ">>Running bulk pre-train non-linearised scripts..."
-
             python cumulants_sbi.py \
                 --seed "$id" \
                 --sbi_type "nle" \
@@ -125,8 +119,8 @@ for freeze in false; do # NOTE: true false (skipping freeze for now)
                 --no-use-tqdm \
                 --bulk_or_tails "bulk" \
                 "$freeze_flag"
-            echo ">>Running bulk pre-train non-linearised scripts... Completed."
         done
+        echo ">>Running bulk pre-train non-linearised scripts... Completed."
 
         # Bulk, pre-train, non-linearised
         echo ">>Sampling bulk multi-z with non-linearised datavectors..."
@@ -145,10 +139,8 @@ for freeze in false; do # NOTE: true false (skipping freeze for now)
 
 
         # Fit tails pre-train, non-linearised
+        echo ">>Running tails pre-train non-linearised scripts..."
         for z in 0.0 0.5 1.0; do
-
-            echo ">>Running tails pre-train non-linearised scripts..."
-
             python cumulants_sbi.py \
                 --seed "$id" \
                 --sbi_type "nle" \
@@ -161,8 +153,8 @@ for freeze in false; do # NOTE: true false (skipping freeze for now)
                 --no-use-tqdm \
                 --bulk_or_tails "tails" \
                 "$freeze_flag"
-            echo ">>Running tails pre-train non-linearised scripts... Completed."
         done
+        echo ">>Running tails pre-train non-linearised scripts... Completed."
 
         # Tails, pre-train, non-linearised
         echo ">>Sampling bulk multi-z with non-linearised datavectors..."
@@ -179,12 +171,21 @@ for freeze in false; do # NOTE: true false (skipping freeze for now)
         echo ">>Sampling bulk multi-z with non-linearised datavectors... Completed."
 
 
+        # Plot figure one (only for non-linearised?)
+        echo ">>Plotting figure one..."
+        python figure_one.py \
+            --seed "$id" \
+            --sbi_type "nle" \
+            --compression "linear" \
+            --pre-train \
+            --order_idx $order_idx_args \
+            "$freeze_flag"
+        echo ">>Plotting figure one... Completed."
+
 
         # Fit bulk no-pre-train non-linearised
+        echo ">>Running tails pre-train non-linearised scripts..."
         for z in 0.0 0.5 1.0; do
-        
-            echo ">>Running tails pre-train non-linearised scripts..."
-
             python cumulants_sbi.py \
                 --seed "$id" \
                 --sbi_type "nle" \
@@ -197,8 +198,8 @@ for freeze in false; do # NOTE: true false (skipping freeze for now)
                 --no-use-tqdm \
                 --bulk_or_tails "bulk" \
                 "$freeze_flag"
-            echo ">>Running tails pre-train non-linearised scripts... Completed."
         done
+        echo ">>Running tails pre-train non-linearised scripts... Completed."
 
         # Bulk, no-pre-train, non-linearised
         echo ">>Sampling tails multi-z with non-linearised datavectors..."
@@ -217,10 +218,8 @@ for freeze in false; do # NOTE: true false (skipping freeze for now)
 
 
         # Fit tails no-pre-train non-linearised
+        echo ">>Running tails pre-train non-linearised scripts..."
         for z in 0.0 0.5 1.0; do
-        
-            echo ">>Running tails pre-train non-linearised scripts..."
-
             python cumulants_sbi.py \
                 --seed "$id" \
                 --sbi_type "nle" \
@@ -233,8 +232,8 @@ for freeze in false; do # NOTE: true false (skipping freeze for now)
                 --no-use-tqdm \
                 --bulk_or_tails "tails" \
                 "$freeze_flag"
-            echo ">>Running tails pre-train non-linearised scripts... Completed."
         done
+        echo ">>Running tails pre-train non-linearised scripts... Completed."
 
         # Tails, no-pre-train, non-linearised
         echo ">>Sampling tails multi-z with non-linearised datavectors..."
@@ -256,7 +255,6 @@ for freeze in false; do # NOTE: true false (skipping freeze for now)
 
 
         # Plot figure one (only for non-linearised?)
-
         echo ">>Plotting figure one..."
         python figure_one.py \
             --seed "$id" \
@@ -267,14 +265,6 @@ for freeze in false; do # NOTE: true false (skipping freeze for now)
             "$freeze_flag"
         echo ">>Plotting figure one... Completed."
 
-        python figure_one.py \
-            --seed "$id" \
-            --sbi_type "nle" \
-            --compression "linear" \
-            --pre-train \
-            --order_idx $order_idx_args \
-            "$freeze_flag"
-        echo ">>Plotting figure one... Completed."
 
     done
 done
