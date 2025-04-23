@@ -33,6 +33,16 @@ DEFAULT_CNF_ARCH = dict(
     use_scaling      = True # Defaults  
 )
 
+DEFAULT_OPT = dict(
+    start_step     = 0,
+    n_epochs       = 10_000,
+    n_batch        = 100,
+    patience       = 200,
+    lr             = 1e-3,
+    opt            = "adam",
+    opt_kwargs     = {}
+)
+
 
 @typecheck
 def cumulants_config(
