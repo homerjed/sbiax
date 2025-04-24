@@ -326,16 +326,23 @@ for marginalised in [True, False]:
     )
 
     # Naming convention for figure one
+    frozen_str = "frozen" if args.freeze_parameters else "nofrozen"
     linear_str = "linearised" if args.linearised else "nonlinearised"
     pretrain_str = "pretrain" if args.pre_train else "nopretrain"
-    marginalised_str = "_marginalised" if marginalised else ""
+    order_idx_str = "m{}".format("".join(map(str, args.order_idx)))
 
-    sub_figs_dir = os.path.join(figs_dir, linear_str + "/", pretrain_str + "/")
+    sub_figs_dir = os.path.join(
+        figs_dir, 
+        frozen_str + "/", 
+        linear_str + "/", 
+        pretrain_str + "/", 
+        order_idx_str + "/"
+    )
     if not os.path.exists(sub_figs_dir):
         os.makedirs(sub_figs_dir, exist_ok=True)
 
     filename = os.path.join(
-        sub_figs_dir, "figure_one_{}{}.pdf".format(args.seed, marginalised_str)
+        sub_figs_dir, "figure_one_{}{}.pdf".format(args.seed, "_marginalised" if marginalised else "")
     )
 
     plt.savefig(filename)

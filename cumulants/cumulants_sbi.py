@@ -97,7 +97,7 @@ results_dir = get_results_dir(config, args)
 
 posteriors_dir = get_posteriors_dir(config, args)
 
-# Dataset of simulations, parameters, covariance, ...
+# Dataset of simulations, parameters, covariance, ... (NOTE: this is only here to pass pdf argument...)
 if args.bulk_or_tails == "tails":
     cumulants_dataset = _dataset(config, results_dir=results_dir)
 if args.bulk_or_tails in ["bulk", "bulk_pdf"]:
@@ -110,6 +110,42 @@ parameter_prior: Distribution = cumulants_dataset.prior
 
 bulk_pdfs = False # Use PDFs for Finv_bulk or cumulants of bulk of PDF
 bulk_dataset: Dataset = get_bulk_dataset(args, pdfs=bulk_pdfs) # For Fisher forecast comparisons
+
+################################ Check fisher forecasts
+if args.seed == 0:
+    c = ChainConsumer()
+    
+    # NOTE: if running on bulk, won't get tails cumulants Finv!
+
+    _dataset, _ = get_dataset_and_config("bulk_pdf") 
+    bulk_pdf_dataset = _dataset(config, pdfs=True, results_dir=results_dir)
+
+    for i, (name, Finv) in enumerate(zip(
+        [
+            "$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]"),
+            "$F_{\Sigma^{-1}}$" + " {}".format("Cumulants[bulk]"),
+            "$F_{\Sigma^{-1}}$" + " {}".format("Cumulants[tails]"),
+        ],
+        [bulk_pdf_dataset, bulk_dataset.Finv, dataset.Finv]
+    )):
+        c.add_chain(
+            Chain.from_covariance(
+                dataset.alpha,
+                Finv,
+                columns=dataset.parameter_strings,
+                name=name,
+                shade_alpha=0.
+            )
+        )
+    c.add_marker(
+        location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
+        name=r"$\alpha$", 
+        color="#7600bc"
+    )
+    fig = c.plotter.plot()
+    plt.savefig(os.path.join(results_dir, "Fisher_tests.pdf"))
+    plt.close()
+################################
 
 """
     Compression
@@ -301,7 +337,6 @@ ensemble, stats = train_ensemble(
     show_tqdm=args.use_tqdm,
     results_dir=results_dir
 )
-
 
 ################################ Save / load ensemble test
 

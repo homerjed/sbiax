@@ -1,33 +1,57 @@
 #!/bin/bash
-#SBATCH --job-name=arch
-#SBATCH --output=/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/arch_search/%A/arch_search_%A_%a.out
-#SBATCH --error=/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/arch_search/%A/nle_arch_search_%A_%a.err
+
+# This script is used to run the arch search for the NLE models.
+# - Assume that these hyperparameters work best for all other runs (e.g. tails, bulk, non-linearised, frozen)
+
+TIMESTAMP=$(date +'%m%d_%H%M')
+OUT_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/arch_search/$TIMESTAMP"
+mkdir -p "$OUT_DIR"
+
+for PRETRAIN_FLAG in "--pre-train" "--no-pre-train"; do
+for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
+
+if [[ "$PRETRAIN_FLAG" == "--pre-train" ]]; then
+    JOB_NAME="arch_pt"
+else
+    JOB_NAME="arch_npt"
+fi
+
+if [[ "$LINEARISED_FLAG" == "--linearised" ]]; then
+    JOB_NAME="${JOB_NAME}_l"
+else
+    JOB_NAME="${JOB_NAME}_nl"
+fi
+
+sbatch <<EOF
+#!/bin/bash
+#SBATCH --job-name=$JOB_NAME
+#SBATCH --output=$OUT_DIR/%A/${JOBNAME}_%A_%a.out
+#SBATCH --error=$OUT_DIR/%A/${JOBNAME}_%A_%a.err
 #SBATCH --array=0%1
 #SBATCH --time=48:00:00
 #SBATCH --partition=cluster
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=20 ## This number divided by n_processes is number of parallel runs
-#SBATCH --mem=16G
+#SBATCH --cpus-per-task=20
+#SBATCH --mem=12G
 #SBATCH --mail-user=jed.homer@physik.lmu.de
 #SBATCH --mail-type=begin,end,fail
 
-# Run multiple hyperparameter search jobs, each multiprocessing individual search jobs.
+id=\$SLURM_ARRAY_TASK_ID
 
-id=$SLURM_ARRAY_TASK_ID
+echo ">>Currently running array index: \$id"
+echo ">>JOB_NAME: $JOB_NAME"
+echo ">>Pretrain flag: $PRETRAIN_FLAG"
+echo ">>Linearised flag: $LINEARISED_FLAG"
 
-echo ">>Currently running array index: " "${id}"
-
-# Activate env
+# Activate environment
 source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
 
-# Run job, ensuring same log file with --exp_name
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 
-# Be sure to re-init the exp name, job halts otherwise (--multiprocess --n_processes 10 --n_parallel 1 # 2 CPUs per trial being run)
-echo ">>Running arch search on id: " "${id}"
-# echo ">>order_idx 0 1 2"
-# python arch_search.py --seed 0 --redshift 0.0 --order_idx 0 1 2 --no-linearised --no-reduced_cumulants
-# echo ">>order_idx 0"
-python arch_search.py --seed 0 --redshift 0.0 --order_idx 0 1 2 --no-linearised --no-freeze-parameters
-# echo ">>order_idx 0 1"
-# python arch_search.py --seed 0 --redshift 0.0 --order_idx 0 1 --no-linearised  
+echo ">>Running arch search on id: \$id"
+python arch_search.py --seed 0 --redshift 0.0 --order_idx 0 1 2 --no-linearised --no-freeze-parameters $PRETRAIN_FLAG
+
+EOF
+
+done
+done

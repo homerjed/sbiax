@@ -1,8 +1,8 @@
 #!/bin/bash
 
-RUN_LINEARISED=false
-N_SEEDS=4
-N_PARALLEL=5
+RUN_LINEARISED=true
+N_SEEDS=2
+N_PARALLEL=3
 
 TIMESTAMP=$(date +'%m%d_%H%M')
 OUT_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/cumulants_sbi/$TIMESTAMP"

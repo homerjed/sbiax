@@ -52,7 +52,8 @@ from utils.utils import (
     plot_latin_moments, 
     plot_summaries, 
     plot_fisher_summaries, 
-    replace_scalers
+    replace_scalers,
+    finite_samples_log_prob
 )
 
 """
@@ -69,7 +70,9 @@ def date_stamp():
 def assign_trial_parameters_to_config(
     hyperparameters: dict, config: ConfigDict
 ) -> ConfigDict:
-    """ Experiments run on configs, optuna uses trials, so assign trials to configs """
+    """ 
+        Experiments run on configs, optuna uses trials, so assign trials to configs 
+    """
 
     # Assign non-NDE hyperparameters e.g. lr, opt, patience...
     for key, value in hyperparameters.items():
@@ -89,9 +92,13 @@ def assign_trial_parameters_to_config(
 
 def objective(
     trial: optuna.trial.Trial, 
+    random_seeds: bool,
     arch_search_dir: str, 
     show_tqdm: bool = False
 ) -> Array:
+    
+    jax.clear_caches()
+
     t0 = time.time()
 
     args = get_cumulants_sbi_args() # Don't conflate with arch_search_args
@@ -106,8 +113,10 @@ def objective(
         Config
     """
 
+    seed = args.seed + trial.number if random_seeds else args.seed
+
     config = cumulants_config(
-        seed=args.seed, 
+        seed=seed, 
         redshift=args.redshift, 
         reduced_cumulants=args.reduced_cumulants,
         sbi_type=args.sbi_type,
@@ -151,10 +160,11 @@ def objective(
     cumulants_dataset: CumulantsDataset = CumulantsDataset(config, results_dir=results_dir)
 
     dataset: Dataset = cumulants_dataset.data
+
     parameter_prior: Distribution = cumulants_dataset.prior
 
-    print("DATA:", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (dataset.fiducial_data, dataset.data)])
-    print("DATA:", [_.shape for _ in (dataset.fiducial_data, dataset.data)])
+    # bulk_pdfs = False # Use PDFs for Finv_bulk or cumulants of bulk of PDF
+    # bulk_dataset: Dataset = get_bulk_dataset(args, pdfs=bulk_pdfs) # For Fisher forecast comparisons
 
     """
         Compression
@@ -163,60 +173,6 @@ def objective(
     compression_fn = cumulants_dataset.compression_fn
 
     X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
-
-    # Fiducial
-    X0 = jax.vmap(compression_fn, in_axes=(0, None))(dataset.fiducial_data, dataset.alpha)
-
-    if 1:
-        c = ChainConsumer()
-        c.add_chain(
-            Chain(
-                samples=make_df(X0, parameter_strings=dataset.parameter_strings), 
-                name="X (fiducial)", 
-                color="b", 
-                plot_contour=False, 
-                plot_cloud=True
-            )
-        )
-        c.add_chain(
-            Chain.from_covariance(
-                dataset.alpha,
-                dataset.Finv,
-                columns=dataset.parameter_strings,
-                name=r"$F_{\Sigma^{-1}}$",
-                color="k",
-                linestyle=":",
-                shade_alpha=0.
-            )
-        )
-        # c.add_chain(
-        #     Chain(
-        #         samples=make_df(dataset.parameters, parameter_strings=dataset.parameter_strings), 
-        #         plot_contour=False, 
-        #         plot_cloud=True, 
-        #         name="P", 
-        #         color="r"
-        #     )
-        # )
-        c.add_marker(
-            location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
-            name=r"$\alpha$", 
-            color="#7600bc"
-        )
-        fig = c.plotter.plot()
-        fig.suptitle(
-            r"$k_n/k_2^{n-1}$ SBI & $F_{{\Sigma}}^{{-1}}$" + "\n" +
-            "z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
-                    config.redshift, 
-                    len(X), 
-                    config.n_linear_sims if config.pre_train else None,
-                    "[{}]".format(", ".join(map(str, config.scales))),
-                    "[{}]".format(",".join(map(str, [["var.", "skew.", "kurt."][_] for _ in config.order_idx])))
-                ),
-            multialignment='center'
-        )
-        plt.savefig(os.path.join(results_dir, "X0.png"))
-        plt.close()
 
     # Plot summaries
     plot_summaries(X, dataset.parameters, dataset, results_dir=results_dir)
@@ -228,20 +184,26 @@ def objective(
     """
         Build NDEs
     """
+    # cov_sqrt_inv = fractional_matrix_power(cov_X, -0.5)
+    # X_whitened = (X - mean_X) @ cov_sqrt_inv
 
-    scaler = Scaler(X, dataset.parameters, use_scaling=config.use_scalers)
+    scaler = Scaler(
+        X, dataset.parameters, use_scaling=config.use_scalers
+    )
 
     ndes = get_ndes_from_config(
         config, 
         event_dim=dataset.alpha.size, 
         scalers=scaler, # Same scaler for all NDEs 
-        use_scalers=config.use_scalers,
+        use_scalers=config.use_scalers, # NOTE: not to be trusted
         key=model_key
     )
 
+    print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None) # Check scaler mu, std are not changed by gradient
+
     ensemble = Ensemble(ndes, sbi_type=config.sbi_type)
 
-    data_preprocess_fn = lambda x: x # 2.0 * (x - X.min()) / (X.max() - X.min()) - 1.0 # jnp.log(jnp.clip(x, min=1e-10)) 
+    data_preprocess_fn = lambda x: x #2.0 * (x - X.min()) / (X.max() - X.min()) - 1.0 #/ jnp.max(dataset.fiducial_data, axis=0) #jnp.log(jnp.clip(x, min=1e-10))
 
     """
         Pre-train NDEs on linearised data
@@ -266,7 +228,7 @@ def objective(
 
         if config.use_scalers:
             ensemble = replace_scalers(
-                ensemble, X=data_preprocess_fn(X_l), P=dataset.parameters, config=config
+                ensemble, X=data_preprocess_fn(X_l), P=Y_l, config=config
             )
 
         ensemble, stats = train_ensemble(
@@ -310,8 +272,9 @@ def objective(
             show_tqdm=args.use_tqdm
         )
 
-        samples_log_prob = jax.vmap(log_prob_fn)(samples) # No pre-processing on parameters
         alpha_log_prob = log_prob_fn(jnp.asarray(dataset.alpha))
+        samples_log_prob = jax.vmap(log_prob_fn)(samples) # No pre-processing on parameters
+        samples_log_prob = finite_samples_log_prob(samples_log_prob)
 
         posterior_df = make_df(
             samples, 
@@ -408,9 +371,6 @@ def objective(
 
     opt = getattr(optax, config.train.opt)(config.train.lr)
 
-    print("Data / Parameters", [_.shape for _ in (X, dataset.parameters)])
-    print("Data / Parameters", [(jnp.min(X).item(), jnp.max(X).item()), (jnp.min(dataset.parameters).item(), jnp.max(dataset.parameters).item())])
-
     if config.use_scalers:
         ensemble = replace_scalers(
             ensemble, X=data_preprocess_fn(X), P=dataset.parameters, config=config
@@ -462,8 +422,9 @@ def objective(
         show_tqdm=args.use_tqdm
     )
 
-    samples_log_prob = jax.vmap(log_prob_fn)(samples)
     alpha_log_prob = log_prob_fn(jnp.asarray(dataset.alpha))
+    samples_log_prob = jax.vmap(log_prob_fn)(samples)
+    samples_log_prob = finite_samples_log_prob(samples_log_prob) 
 
     np.savez(
         os.path.join(results_dir, "posterior.npz"), 
@@ -736,7 +697,10 @@ if __name__ == "__main__":
         # study.enqueue_trial(good_hyperparams) 
 
         trial_fn = lambda trial: objective(
-            trial, arch_search_dir=arch_search_dir, show_tqdm=False
+            trial, 
+            random_seeds=args.random_seeds,
+            arch_search_dir=arch_search_dir, 
+            show_tqdm=False
         )
 
         callback_fn = partial(
