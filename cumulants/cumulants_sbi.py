@@ -117,23 +117,31 @@ if args.seed == 0:
     
     # NOTE: if running on bulk, won't get tails cumulants Finv!
 
-    _dataset, _ = get_dataset_and_config("bulk_pdf") 
-    bulk_pdf_dataset = _dataset(config, pdfs=True, results_dir=results_dir)
+    _dataset, _bulk_config = get_dataset_and_config("bulk_pdf") 
+    _bulk_config = _bulk_config(
+        seed=args.seed, 
+        redshift=args.redshift, 
+        reduced_cumulants=args.reduced_cumulants,
+        sbi_type=args.sbi_type,
+        linearised=args.linearised, 
+        compression=args.compression,
+        order_idx=args.order_idx,
+        n_linear_sims=args.n_linear_sims,
+        freeze_parameters=args.freeze_parameters,
+        pre_train=args.pre_train
+    )
+    bulk_pdf_dataset = _dataset(_bulk_config, pdfs=True, results_dir=results_dir)
 
     for i, (name, Finv) in enumerate(zip(
-        [
-            "$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]"),
-            "$F_{\Sigma^{-1}}$" + " {}".format("Cumulants[bulk]"),
-            "$F_{\Sigma^{-1}}$" + " {}".format("Cumulants[tails]"),
-        ],
-        [bulk_pdf_dataset, bulk_dataset.Finv, dataset.Finv]
+        [" PDF[bulk]", " Cumulants[bulk]", " Cumulants[tails]"],
+        [bulk_pdf_dataset.data.Finv, bulk_dataset.Finv, dataset.Finv]
     )):
         c.add_chain(
             Chain.from_covariance(
                 dataset.alpha,
                 Finv,
                 columns=dataset.parameter_strings,
-                name=name,
+                name=r"$F_{\Sigma^{-1}}$" + name,
                 shade_alpha=0.
             )
         )

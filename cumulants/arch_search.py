@@ -5,6 +5,7 @@ import yaml
 import pickle
 import gc
 from datetime import datetime
+from typing import Callable, Optional
 import multiprocessing as mp
 from functools import partial
 
@@ -12,7 +13,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import equinox as eqx
-from jaxtyping import Array
+from jaxtyping import PRNGKeyArray, Array
 import optax
 
 import numpy as np 
@@ -61,6 +62,10 @@ from utils.utils import (
     - get meta functions above                      x
 """
 
+# jax.config.update("jax_debug_nans", True)
+
+TEST = True if os.environ.get('TEST', '').lower() in ('1', 'true') else False
+
 
 def date_stamp():
     now = datetime.now()
@@ -94,6 +99,7 @@ def objective(
     trial: optuna.trial.Trial, 
     random_seeds: bool,
     arch_search_dir: str, 
+    n_repeats: Optional[int] = None,
     show_tqdm: bool = False
 ) -> Array:
     
@@ -131,7 +137,7 @@ def objective(
     # Set config attributes based on these hyperparameters
     config = get_trial_hyperparameters(trial, config)
 
-    key = jr.key(int(trial.number)) # config.seed
+    key = jr.key(int(trial.number)) 
 
     ( 
         model_key, train_key, key_prior, 
@@ -166,94 +172,258 @@ def objective(
     # bulk_pdfs = False # Use PDFs for Finv_bulk or cumulants of bulk of PDF
     # bulk_dataset: Dataset = get_bulk_dataset(args, pdfs=bulk_pdfs) # For Fisher forecast comparisons
 
-    """
-        Compression
-    """
+    # key = jax.random.PRNGKey(0)  # or pass an existing key
+    # perm = jax.random.permutation(key, dataset.parameters.shape[0])
 
-    compression_fn = cumulants_dataset.compression_fn
+    # # Apply the permutation in-place
+    # dataset.parameters = dataset.parameters[perm]
+    # dataset.data = dataset.data[perm]V
 
-    X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
+    if n_repeats is None:
+        n_repeats = 1
 
-    # Plot summaries
-    plot_summaries(X, dataset.parameters, dataset, results_dir=results_dir)
+    scores = []
+    for i_repeat in range(n_repeats):
+        jax.clear_caches()
 
-    plot_moments(dataset.fiducial_data, config, results_dir=results_dir)
+        """
+            Compression
+        """
 
-    plot_latin_moments(dataset.data, config, results_dir=results_dir)
+        compression_fn = cumulants_dataset.compression_fn
 
-    """
-        Build NDEs
-    """
-    # cov_sqrt_inv = fractional_matrix_power(cov_X, -0.5)
-    # X_whitened = (X - mean_X) @ cov_sqrt_inv
+        X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
 
-    scaler = Scaler(
-        X, dataset.parameters, use_scaling=config.use_scalers
-    )
+        # Plot summaries
+        # plot_summaries(X, dataset.parameters, dataset, results_dir=results_dir)
 
-    ndes = get_ndes_from_config(
-        config, 
-        event_dim=dataset.alpha.size, 
-        scalers=scaler, # Same scaler for all NDEs 
-        use_scalers=config.use_scalers, # NOTE: not to be trusted
-        key=model_key
-    )
+        # plot_moments(dataset.fiducial_data, config, results_dir=results_dir)
 
-    print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None) # Check scaler mu, std are not changed by gradient
+        # plot_latin_moments(dataset.data, config, results_dir=results_dir)
 
-    ensemble = Ensemble(ndes, sbi_type=config.sbi_type)
+        """
+            Build NDEs
+        """
+        # cov_sqrt_inv = fractional_matrix_power(cov_X, -0.5)
+        # X_whitened = (X - mean_X) @ cov_sqrt_inv
 
-    data_preprocess_fn = lambda x: x #2.0 * (x - X.min()) / (X.max() - X.min()) - 1.0 #/ jnp.max(dataset.fiducial_data, axis=0) #jnp.log(jnp.clip(x, min=1e-10))
+        scaler = Scaler(
+            X, dataset.parameters, use_scaling=config.use_scalers
+        )
 
-    """
-        Pre-train NDEs on linearised data
-    """
+        ndes = get_ndes_from_config(
+            config, 
+            event_dim=dataset.alpha.size, 
+            scalers=scaler, # Same scaler for all NDEs 
+            use_scalers=config.use_scalers, # NOTE: not to be trusted
+            key=model_key
+        )
 
-    # Only pre-train if required and not inferring from linear simulations
-    if ((not config.linearised) and config.pre_train and (config.n_linear_sims is not None)):
-        print("Linearised pre-training...")
+        print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None) # Check scaler mu, std are not changed by gradient
 
-        pre_train_key, summaries_key = jr.split(key)
+        ensemble = Ensemble(ndes, sbi_type=config.sbi_type)
 
-        # Pre-train data = linearised simulations
-        D_l, Y_l = cumulants_dataset.get_linearised_data()
+        data_preprocess_fn = lambda x: x #2.0 * (x - X.min()) / (X.max() - X.min()) - 1.0 #/ jnp.max(dataset.fiducial_data, axis=0) #jnp.log(jnp.clip(x, min=1e-10))
 
-        X_l = jax.vmap(compression_fn)(D_l, Y_l)
+        """
+            Pre-train NDEs on linearised data
+        """
 
-        print("Pre-training with", D_l.shape, X_l.shape, Y_l.shape)
+        # Only pre-train if required and not inferring from linear simulations
+        if ((not config.linearised) and config.pre_train and (config.n_linear_sims is not None)):
+            print("Linearised pre-training...")
 
-        plot_fisher_summaries(X_l, Y_l, dataset, results_dir)
+            pre_train_key, summaries_key = jr.split(key)
 
-        opt = getattr(optax, config.pretrain.opt)(config.pretrain.lr)
+            # Pre-train data = linearised simulations
+            D_l, Y_l = cumulants_dataset.get_linearised_data()
+
+            X_l = jax.vmap(compression_fn)(D_l, Y_l)
+
+            print("Pre-training with", D_l.shape, X_l.shape, Y_l.shape)
+
+            plot_fisher_summaries(X_l, Y_l, dataset, results_dir)
+
+            opt = getattr(optax, config.pretrain.opt)(config.pretrain.lr)
+
+            if config.use_scalers:
+                ensemble = replace_scalers(
+                    ensemble, X=data_preprocess_fn(X_l), P=Y_l, config=config
+                )
+
+            ensemble, stats = train_ensemble(
+                pre_train_key, 
+                ensemble,
+                train_mode=config.sbi_type,
+                train_data=(data_preprocess_fn(X_l), Y_l), 
+                opt=opt,
+                use_ema=config.use_ema,
+                ema_rate=config.ema_rate,
+                n_batch=config.pretrain.n_batch,
+                patience=config.pretrain.patience,
+                n_epochs=config.pretrain.n_epochs,
+                valid_fraction=config.valid_fraction,
+                tqdm_description="Training (pre-train)",
+                show_tqdm=args.use_tqdm,
+                trial=trial,
+                results_dir=results_dir
+            )
+
+            # Test pre-training on a linearised datavector...
+            mu = jnp.mean(dataset.fiducial_data, axis=0)
+            datavector = jr.multivariate_normal(key, mu, dataset.C)
+
+            x_ = compression_fn(datavector, dataset.alpha)
+
+            log_prob_fn = ensemble.ensemble_log_prob_fn(data_preprocess_fn(x_), parameter_prior)
+
+            state = jr.multivariate_normal(
+                key_state, x_, dataset.Finv, (2 * config.n_walkers,)
+            )
+
+            samples, weights = affine_sample(
+                key_sample, 
+                log_prob=log_prob_fn,
+                n_walkers=config.n_walkers, 
+                n_steps=config.n_steps + config.burn, 
+                burn=config.burn, 
+                current_state=state,
+                description="Sampling",
+                show_tqdm=args.use_tqdm
+            )
+
+            alpha_log_prob = log_prob_fn(jnp.asarray(dataset.alpha))
+            samples_log_prob = jax.vmap(log_prob_fn)(samples) # No pre-processing on parameters
+            samples_log_prob = finite_samples_log_prob(samples_log_prob)
+
+            posterior_df = make_df(
+                samples, 
+                samples_log_prob, 
+                parameter_strings=dataset.parameter_strings
+            )
+
+            np.savez(
+                os.path.join(results_dir, "posterior.npz"), 
+                alpha=dataset.alpha,
+                samples=samples,
+                samples_log_prob=samples_log_prob,
+                datavector=datavector,
+                summary=x_
+            )
+
+            c = ChainConsumer()
+            c.add_chain(
+                Chain.from_covariance(
+                    dataset.alpha,
+                    dataset.Finv,
+                    columns=dataset.parameter_strings,
+                    name=r"$F_{\Sigma^{-1}}$",
+                    color="k",
+                    linestyle=":",
+                    shade_alpha=0.
+                )
+            )
+            c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
+            c.add_marker(
+                location=marker(x_, parameter_strings=dataset.parameter_strings),
+                name=r"$\hat{x}$", 
+                color="b"
+            )
+            c.add_marker(
+                location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
+                name=r"$\alpha$", 
+                color="#7600bc"
+            )
+            fig = c.plotter.plot()
+            plt.savefig(os.path.join(results_dir, "posterior_affine_pretrain.pdf"))
+            plt.savefig(os.path.join(posteriors_dir, "posterior_affine_pretrain.pdf"))
+            plt.close()
+
+            c = ChainConsumer()
+            c.add_chain(
+                Chain(
+                    samples=make_df(dataset.parameters, parameter_strings=dataset.parameter_strings), 
+                    name="Params", 
+                    color="blue", 
+                    plot_cloud=True, 
+                    plot_contour=False
+                )
+            )
+            c.add_chain(
+                Chain(
+                    samples=make_df(X_l, parameter_strings=dataset.parameter_strings), 
+                    name="Summaries (linearised)", 
+                    color="red", 
+                    plot_cloud=True, 
+                    plot_contour=False
+                )
+            )
+            c.add_chain(
+                Chain(
+                    samples=make_df(X, parameter_strings=dataset.parameter_strings),
+                    name="Summaries", 
+                    color="green", 
+                    plot_cloud=True, 
+                    plot_contour=False
+                )
+            )
+            c.add_truth(
+                Truth(location=dict(zip(dataset.parameter_strings, dataset.alpha)), name=r"$\pi^0$")
+            )
+            fig = c.plotter.plot()
+            plt.close()
+
+            fig, axs = plt.subplots(1, dataset.alpha.size, figsize=(2. + 2. * dataset.alpha.size, 2.5))
+            for p, ax in enumerate(axs):
+                ax.scatter(Y_l[:, p], X_l[:, p], s=0.1)
+                ax.scatter(dataset.parameters[:, p], X[:, p], s=0.1)
+                ax.axline((0, 0), slope=1., color="k", linestyle="--")
+                ax.set_xlim(dataset.lower[p], dataset.upper[p])
+                ax.set_ylim(dataset.lower[p], dataset.upper[p])
+                ax.set_xlabel(dataset.parameter_strings[p])
+                ax.set_ylabel(dataset.parameter_strings[p] + "'")
+            plt.savefig(os.path.join(results_dir, "Xl.png"))
+            plt.close()
+
+        """
+            Train NDE on data
+        """
+
+        opt = getattr(optax, config.train.opt)(config.train.lr)
 
         if config.use_scalers:
             ensemble = replace_scalers(
-                ensemble, X=data_preprocess_fn(X_l), P=Y_l, config=config
+                ensemble, X=data_preprocess_fn(X), P=dataset.parameters, config=config
             )
 
         ensemble, stats = train_ensemble(
-            pre_train_key, 
+            train_key, 
             ensemble,
             train_mode=config.sbi_type,
-            train_data=(data_preprocess_fn(X_l), Y_l), 
+            train_data=(data_preprocess_fn(X), dataset.parameters), 
             opt=opt,
             use_ema=config.use_ema,
             ema_rate=config.ema_rate,
-            n_batch=config.pretrain.n_batch,
-            patience=config.pretrain.patience,
-            n_epochs=config.pretrain.n_epochs,
+            n_batch=config.train.n_batch,
+            patience=config.train.patience,
+            n_epochs=config.train.n_epochs,
             valid_fraction=config.valid_fraction,
-            tqdm_description="Training (pre-train)",
-            show_tqdm=args.use_tqdm,
+            tqdm_description="Training (data)",
             trial=trial,
-            results_dir=results_dir
+            show_tqdm=args.use_tqdm,
+            # results_dir=results_dir
         )
 
-        # Test pre-training on a linearised datavector...
-        mu = jnp.mean(dataset.fiducial_data, axis=0)
-        datavector = jr.multivariate_normal(key, mu, dataset.C)
+        """ 
+            Sample and plot posterior for NDE with noisy datavectors
+        """
+
+        # Generates linearised (or not) datavector at fiducial parameters
+        datavector = cumulants_dataset.get_datavector(key_datavector)
 
         x_ = compression_fn(datavector, dataset.alpha)
+
+        print("datavector", x_, dataset.alpha)
 
         log_prob_fn = ensemble.ensemble_log_prob_fn(data_preprocess_fn(x_), parameter_prior)
 
@@ -273,14 +443,8 @@ def objective(
         )
 
         alpha_log_prob = log_prob_fn(jnp.asarray(dataset.alpha))
-        samples_log_prob = jax.vmap(log_prob_fn)(samples) # No pre-processing on parameters
-        samples_log_prob = finite_samples_log_prob(samples_log_prob)
-
-        posterior_df = make_df(
-            samples, 
-            samples_log_prob, 
-            parameter_strings=dataset.parameter_strings
-        )
+        samples_log_prob = jax.vmap(log_prob_fn)(samples)
+        samples_log_prob = finite_samples_log_prob(samples_log_prob) 
 
         np.savez(
             os.path.join(results_dir, "posterior.npz"), 
@@ -289,6 +453,12 @@ def objective(
             samples_log_prob=samples_log_prob,
             datavector=datavector,
             summary=x_
+        )
+
+        posterior_df = make_df(
+            samples, 
+            samples_log_prob, 
+            parameter_strings=dataset.parameter_strings
         )
 
         c = ChainConsumer()
@@ -315,233 +485,85 @@ def objective(
             color="#7600bc"
         )
         fig = c.plotter.plot()
-        plt.savefig(os.path.join(results_dir, "posterior_affine_pretrain.pdf"))
-        plt.savefig(os.path.join(posteriors_dir, "posterior_affine_pretrain.pdf"))
+        fig.suptitle(
+            r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n/k_2^{n-1}$" if config.reduced_cumulants else "$k_n$") + "\n" +
+            "{} z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
+                    ("linearised" if config.linearised else "non-linear") + "\n",
+                    config.redshift, 
+                    len(X), 
+                    config.n_linear_sims if config.pre_train else None,
+                    "[{}]".format(", ".join(map(str, config.scales))),
+                    "[{}]".format(", ".join(map(str, [["var.", "skew.", "kurt."][_] for _ in config.order_idx])))
+                ),
+            multialignment='center'
+        )
+        # plt.show()
+        plt.savefig(os.path.join(results_dir, "posterior_affine.pdf"))
+        plt.savefig(os.path.join(posteriors_dir, "posterior_affine.pdf"))
         plt.close()
+
+        # %%
+        # X.min(), X.max()
+        # jnp.log(jnp.clip(X, a=1e-5)).min(), jnp.log(jnp.clip(X, a=1e-5)).max()
+
+        # %%
+        Om_s8_idx = np.array([0, -1])
+        posterior_df = make_df(
+            samples[:, Om_s8_idx], 
+            samples_log_prob, 
+            parameter_strings=[dataset.parameter_strings[p] for p in Om_s8_idx]
+        )
 
         c = ChainConsumer()
         c.add_chain(
-            Chain(
-                samples=make_df(dataset.parameters, parameter_strings=dataset.parameter_strings), 
-                name="Params", 
-                color="blue", 
-                plot_cloud=True, 
-                plot_contour=False
+            Chain.from_covariance(
+                dataset.alpha[Om_s8_idx],
+                dataset.Finv[:, Om_s8_idx][Om_s8_idx, :],
+                columns=[dataset.parameter_strings[p] for p in Om_s8_idx],
+                name=r"$F_{\Sigma^{-1}}$",
+                color="k",
+                linestyle=":",
+                shade_alpha=0.
             )
         )
-        c.add_chain(
-            Chain(
-                samples=make_df(X_l, parameter_strings=dataset.parameter_strings), 
-                name="Summaries (linearised)", 
-                color="red", 
-                plot_cloud=True, 
-                plot_contour=False
-            )
+        c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
+        c.add_marker(
+            location=marker(x_[Om_s8_idx], parameter_strings=[dataset.parameter_strings[p] for p in Om_s8_idx]),
+            name=r"$\hat{x}$", 
+            color="b"
         )
-        c.add_chain(
-            Chain(
-                samples=make_df(X, parameter_strings=dataset.parameter_strings),
-                name="Summaries", 
-                color="green", 
-                plot_cloud=True, 
-                plot_contour=False
-            )
-        )
-        c.add_truth(
-            Truth(location=dict(zip(dataset.parameter_strings, dataset.alpha)), name=r"$\pi^0$")
+        c.add_marker(
+            location=marker(dataset.alpha[Om_s8_idx], parameter_strings=[dataset.parameter_strings[p] for p in Om_s8_idx]),
+            name=r"$\alpha$", 
+            color="#7600bc"
         )
         fig = c.plotter.plot()
+        fig.suptitle(
+            r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n/k_2^{n-1}$" if config.reduced_cumulants else "$k_n$") + "\n" +
+            "{} z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
+                    ("linearised" if config.linearised else "non-linear") + "\n",
+                    config.redshift, 
+                    len(X), 
+                    config.n_linear_sims if config.pre_train else None,
+                    "[{}]".format(", ".join(map(str, config.scales))),
+                    "[{}]".format(", ".join(map(str, [["var.", "skew.", "kurt."][_] for _ in config.order_idx])))
+                ),
+            multialignment='center'
+        )
+        # plt.show()
+        plt.savefig(os.path.join(results_dir, "posterior_affine_Oms8.pdf"))
+        plt.savefig(os.path.join(posteriors_dir, "posterior_affine_Oms8.pdf"))
         plt.close()
 
-        fig, axs = plt.subplots(1, dataset.alpha.size, figsize=(2. + 2. * dataset.alpha.size, 2.5))
-        for p, ax in enumerate(axs):
-            ax.scatter(Y_l[:, p], X_l[:, p], s=0.1)
-            ax.scatter(dataset.parameters[:, p], X[:, p], s=0.1)
-            ax.axline((0, 0), slope=1., color="k", linestyle="--")
-            ax.set_xlim(dataset.lower[p], dataset.upper[p])
-            ax.set_ylim(dataset.lower[p], dataset.upper[p])
-            ax.set_xlabel(dataset.parameter_strings[p])
-            ax.set_ylabel(dataset.parameter_strings[p] + "'")
-        plt.savefig(os.path.join(results_dir, "Xl.png"))
-        plt.close()
+        # Free memory
+        del ensemble, X, dataset
+        gc.collect()
+        jax.clear_backends()
+        jax.clear_caches()
 
-    """
-        Train NDE on data
-    """
+        scores.append(stats[0]["all_valid_loss"]) # Assuming one NDE
 
-    opt = getattr(optax, config.train.opt)(config.train.lr)
-
-    if config.use_scalers:
-        ensemble = replace_scalers(
-            ensemble, X=data_preprocess_fn(X), P=dataset.parameters, config=config
-        )
-
-    ensemble, stats = train_ensemble(
-        train_key, 
-        ensemble,
-        train_mode=config.sbi_type,
-        train_data=(data_preprocess_fn(X), dataset.parameters), 
-        opt=opt,
-        use_ema=config.use_ema,
-        ema_rate=config.ema_rate,
-        n_batch=config.train.n_batch,
-        patience=config.train.patience,
-        n_epochs=config.train.n_epochs,
-        valid_fraction=config.valid_fraction,
-        tqdm_description="Training (data)",
-        trial=trial,
-        show_tqdm=args.use_tqdm,
-        # results_dir=results_dir
-    )
-
-    """ 
-        Sample and plot posterior for NDE with noisy datavectors
-    """
-
-    # Generates linearised (or not) datavector at fiducial parameters
-    datavector = cumulants_dataset.get_datavector(key_datavector)
-
-    x_ = compression_fn(datavector, dataset.alpha)
-
-    print("datavector", x_, dataset.alpha)
-
-    log_prob_fn = ensemble.ensemble_log_prob_fn(data_preprocess_fn(x_), parameter_prior)
-
-    state = jr.multivariate_normal(
-        key_state, x_, dataset.Finv, (2 * config.n_walkers,)
-    )
-
-    samples, weights = affine_sample(
-        key_sample, 
-        log_prob=log_prob_fn,
-        n_walkers=config.n_walkers, 
-        n_steps=config.n_steps + config.burn, 
-        burn=config.burn, 
-        current_state=state,
-        description="Sampling",
-        show_tqdm=args.use_tqdm
-    )
-
-    alpha_log_prob = log_prob_fn(jnp.asarray(dataset.alpha))
-    samples_log_prob = jax.vmap(log_prob_fn)(samples)
-    samples_log_prob = finite_samples_log_prob(samples_log_prob) 
-
-    np.savez(
-        os.path.join(results_dir, "posterior.npz"), 
-        alpha=dataset.alpha,
-        samples=samples,
-        samples_log_prob=samples_log_prob,
-        datavector=datavector,
-        summary=x_
-    )
-
-    posterior_df = make_df(
-        samples, 
-        samples_log_prob, 
-        parameter_strings=dataset.parameter_strings
-    )
-
-    c = ChainConsumer()
-    c.add_chain(
-        Chain.from_covariance(
-            dataset.alpha,
-            dataset.Finv,
-            columns=dataset.parameter_strings,
-            name=r"$F_{\Sigma^{-1}}$",
-            color="k",
-            linestyle=":",
-            shade_alpha=0.
-        )
-    )
-    c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
-    c.add_marker(
-        location=marker(x_, parameter_strings=dataset.parameter_strings),
-        name=r"$\hat{x}$", 
-        color="b"
-    )
-    c.add_marker(
-        location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
-        name=r"$\alpha$", 
-        color="#7600bc"
-    )
-    fig = c.plotter.plot()
-    fig.suptitle(
-        r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n/k_2^{n-1}$" if config.reduced_cumulants else "$k_n$") + "\n" +
-        "{} z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
-                ("linearised" if config.linearised else "non-linear") + "\n",
-                config.redshift, 
-                len(X), 
-                config.n_linear_sims if config.pre_train else None,
-                "[{}]".format(", ".join(map(str, config.scales))),
-                "[{}]".format(", ".join(map(str, [["var.", "skew.", "kurt."][_] for _ in config.order_idx])))
-            ),
-        multialignment='center'
-    )
-    # plt.show()
-    plt.savefig(os.path.join(results_dir, "posterior_affine.pdf"))
-    plt.savefig(os.path.join(posteriors_dir, "posterior_affine.pdf"))
-    plt.close()
-
-    # %%
-    # X.min(), X.max()
-    # jnp.log(jnp.clip(X, a=1e-5)).min(), jnp.log(jnp.clip(X, a=1e-5)).max()
-
-    # %%
-    Om_s8_idx = np.array([0, -1])
-    posterior_df = make_df(
-        samples[:, Om_s8_idx], 
-        samples_log_prob, 
-        parameter_strings=[dataset.parameter_strings[p] for p in Om_s8_idx]
-    )
-
-    c = ChainConsumer()
-    c.add_chain(
-        Chain.from_covariance(
-            dataset.alpha[Om_s8_idx],
-            dataset.Finv[:, Om_s8_idx][Om_s8_idx, :],
-            columns=[dataset.parameter_strings[p] for p in Om_s8_idx],
-            name=r"$F_{\Sigma^{-1}}$",
-            color="k",
-            linestyle=":",
-            shade_alpha=0.
-        )
-    )
-    c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
-    c.add_marker(
-        location=marker(x_[Om_s8_idx], parameter_strings=[dataset.parameter_strings[p] for p in Om_s8_idx]),
-        name=r"$\hat{x}$", 
-        color="b"
-    )
-    c.add_marker(
-        location=marker(dataset.alpha[Om_s8_idx], parameter_strings=[dataset.parameter_strings[p] for p in Om_s8_idx]),
-        name=r"$\alpha$", 
-        color="#7600bc"
-    )
-    fig = c.plotter.plot()
-    fig.suptitle(
-        r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n/k_2^{n-1}$" if config.reduced_cumulants else "$k_n$") + "\n" +
-        "{} z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
-                ("linearised" if config.linearised else "non-linear") + "\n",
-                config.redshift, 
-                len(X), 
-                config.n_linear_sims if config.pre_train else None,
-                "[{}]".format(", ".join(map(str, config.scales))),
-                "[{}]".format(", ".join(map(str, [["var.", "skew.", "kurt."][_] for _ in config.order_idx])))
-            ),
-        multialignment='center'
-    )
-    # plt.show()
-    plt.savefig(os.path.join(results_dir, "posterior_affine_Oms8.pdf"))
-    plt.savefig(os.path.join(posteriors_dir, "posterior_affine_Oms8.pdf"))
-    plt.close()
-
-    # Free memory
-    del ensemble, X, dataset
-    gc.collect()
-    jax.clear_backends()
-    jax.clear_caches()
-
-    return stats[0]["all_valid_loss"] # Assuming one NDE
+    return np.mean(scores) # Assuming one NDE
 
 
 def callback(
@@ -694,12 +716,22 @@ if __name__ == "__main__":
             load_if_exists=True
         ) 
 
+        # if TEST:
+        #     objective(
+        #         trial=,
+        #         random_seeds=False,
+        #         arch_search_dir=arch_search_dir,
+        #         n_repeats=1,
+        #         show_tqdm=True
+        #     )
+
         # study.enqueue_trial(good_hyperparams) 
 
         trial_fn = lambda trial: objective(
             trial, 
             random_seeds=args.random_seeds,
             arch_search_dir=arch_search_dir, 
+            n_repeats=args.n_repeats, # 'Cross validation' of trials... doesn't work with pruning
             show_tqdm=False
         )
 

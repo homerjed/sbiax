@@ -157,10 +157,16 @@ args.freeze_parameters = ARGS.freeze_parameters
 
 # Get the bulk Fisher forecast for all redshifts (same whether linearised or not)
 try:
-    Finv_bulk_pdfs_all_z = np.load(os.path.join(data_dir, "Finv_bulk_pdfs_all_z.npy"))
+    Finv_bulk_pdfs_all_z = np.load(
+        os.path.join(data_dir, "Finv_bulk_pdfs_all_z_m{}.npy".format("".join(map(str, args.order_idx))))
+    )
 except:
     Finv_bulk_pdfs_all_z = get_multi_z_bulk_pdf_fisher_forecast(args)
-    np.save(os.path.join(data_dir, "Finv_bulk_pdfs_all_z.npy"), Finv_bulk_pdfs_all_z)
+
+    np.save(
+        os.path.join(data_dir, "Finv_bulk_pdfs_all_z_m{}.npy".format("".join(map(str, args.order_idx)))), 
+        Finv_bulk_pdfs_all_z
+    )
 
 if args.freeze_parameters:
     target_idx = get_target_idx()
@@ -249,7 +255,7 @@ for marginalised in [True, False]:
             alpha, 
             parameter_strings, 
             Finv_bulk_pdfs_all_z, 
-            marginalised
+            marginalised=marginalised
         )
 
         # Fisher forecast for bulk or tails
@@ -326,17 +332,12 @@ for marginalised in [True, False]:
     )
 
     # Naming convention for figure one
-    frozen_str = "frozen" if args.freeze_parameters else "nofrozen"
-    linear_str = "linearised" if args.linearised else "nonlinearised"
-    pretrain_str = "pretrain" if args.pre_train else "nopretrain"
-    order_idx_str = "m{}".format("".join(map(str, args.order_idx)))
-
     sub_figs_dir = os.path.join(
         figs_dir, 
-        frozen_str + "/", 
-        linear_str + "/", 
-        pretrain_str + "/", 
-        order_idx_str + "/"
+        "frozen/" if args.freeze_parameters else "nofrozen/", 
+        "linearised/" if args.linearised else "nonlinearised/", 
+        "pretrain/" if args.pre_train else "nopretrain/", 
+        "m{}/".format("".join(map(str, args.order_idx)))
     )
     if not os.path.exists(sub_figs_dir):
         os.makedirs(sub_figs_dir, exist_ok=True)

@@ -367,6 +367,7 @@ def get_arch_search_args(using_notebook: bool = False):
         n_trials = 1000
         n_startup_trials = 100
         random_seeds = True
+        n_repeats = 1
 
     args = Args()
 

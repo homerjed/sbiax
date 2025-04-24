@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # This script is used to run the arch search for the NLE models.
-# - Assume that these hyperparameters work best for all other runs (e.g. tails, bulk, non-linearised, frozen)
+# - Assume that these hyperparameters work best for all other runs 
+# (e.g. tails, bulk, non-linearised, redshift, frozen)
 
 TIMESTAMP=$(date +'%m%d_%H%M')
 OUT_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/arch_search/$TIMESTAMP"
@@ -49,7 +50,13 @@ source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 
 echo ">>Running arch search on id: \$id"
-python arch_search.py --seed 0 --redshift 0.0 --order_idx 0 1 2 --$LINEARISED_FLAG --no-freeze-parameters $PRETRAIN_FLAG
+python arch_search.py \
+--seed 0 \
+--redshift 0.0 \
+--order_idx 0 1 2 \
+$LINEARISED_FLAG \
+--no-freeze-parameters \
+$PRETRAIN_FLAG
 
 EOF
 
