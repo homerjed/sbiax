@@ -1,7 +1,6 @@
 #!/bin/bash
 
-RUN_LINEARIZED=false
-FREEZE_FLAG="--no-freeze-parameters"
+RUN_LINEARISED=false
 N_SEEDS=4
 N_PARALLEL=5
 
@@ -10,9 +9,11 @@ OUT_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/cumulants_sbi/$T
 mkdir -p "$OUT_DIR"
 
 order_idxs=(
+    "0"
     "0 1 2"
 )
 
+for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
 for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
 for PRETRAIN_FLAG in "--pre-train" "--no-pre-train"; do
 
@@ -21,8 +22,14 @@ for PRETRAIN_FLAG in "--pre-train" "--no-pre-train"; do
         continue
     fi
 
+    # Skip linearised datavector if required (above)
+    if [[ "$RUN_LINEARISED" == false && "$LINEARISED_FLAG" == "--linearised" ]]; then
+        continue
+    fi
+
     all_job_ids=()
 
+    # Bulk and tails SBI experiments for cumulant combinations (repeated for seeds)
     for bt in "bulk" "tails"; do
 
         if [ "$bt" == "bulk" ]; then
@@ -122,7 +129,7 @@ END
 --compression linear \
 $LINEARISED_FLAG \
 $PRETRAIN_FLAG \
---order_idx 0 1 2 \
+--order_idx $order_idx_args \
 $FREEZE_FLAG"
 
     figure_job=$(cat <<END
@@ -149,5 +156,6 @@ END
 
     echo "$figure_job" | sbatch
 
+done
 done
 done
