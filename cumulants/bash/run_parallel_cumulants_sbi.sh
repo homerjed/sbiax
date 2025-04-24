@@ -27,6 +27,7 @@ for PRETRAIN_FLAG in "--pre-train" "--no-pre-train"; do
         continue
     fi
 
+    # Container for SBI jobs to run (sbatch job arrays => multiple seeds)
     all_job_ids=()
 
     # Bulk and tails SBI experiments for cumulant combinations (repeated for seeds)

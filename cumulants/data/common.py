@@ -190,15 +190,16 @@ def freeze_out_parameters_dataset(dataset: Dataset) -> Dataset:
 @typecheck
 def get_prior(config: ConfigDict, dataset: Dataset) -> tfd.Distribution:
 
-    lower = jnp.asarray(dataset.lower)
+    lower = jnp.asarray(dataset.lower) # Avoid tfp warning
     upper = jnp.asarray(dataset.upper)
 
     assert jnp.all((upper - lower) > 0.)
 
     print("Using flat prior")
     prior = tfd.Blockwise(
-        # [tfd.Uniform(lower[p], upper[p]) for p in range(dataset.alpha.size)]
-        [tfd.Uniform(-1e4, 1e4) for p in range(dataset.alpha.size)]
+        [tfd.Uniform(lower[p], upper[p]) for p in range(dataset.alpha.size)]
+        # [tfd.Uniform(-1e4, 1e4) for p in range(dataset.alpha.size)]
+        # [tfd.Uniform(l, u) for l, u in zip(lower, upper)]
     )
 
     return prior
@@ -226,8 +227,7 @@ def sample_prior(
 ) -> Float[Array, "n p"]:
     # Forcing Quijote prior for simulating, this prior for inference
 
-    # Avoid tfp warning
-    lower = lower.astype(jnp.float32)
+    lower = lower.astype(jnp.float32) # Avoid tfp warning
     upper = upper.astype(jnp.float32)
 
     assert jnp.all((upper - lower) > 0.)

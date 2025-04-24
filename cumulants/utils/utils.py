@@ -2,6 +2,7 @@ import os
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import jax
+import jax.numpy as jnp
 import equinox as eqx
 import numpy as np
 from chainconsumer import Chain, ChainConsumer, Truth, PlotConfig
@@ -12,6 +13,16 @@ from sbiax.ndes import Scaler
 from configs import cumulants_config, bulk_cumulants_config
 from data.pdfs import BulkCumulantsDataset
 from data.cumulants import CumulantsDataset
+
+
+def finite_samples_log_prob(samples_log_prob):
+    samples_log_prob = jnp.where(
+        jnp.logical_or(jnp.isnan(samples_log_prob), jnp.isneginf(samples_log_prob)),
+        -1e32,
+        samples_log_prob
+    )
+    # samples_log_prob = jnp.where(jnp.isneginf(samples_log_prob), -1e100, samples_log_prob)
+    return samples_log_prob
 
 
 def get_dataset_and_config(bulk_or_tails):

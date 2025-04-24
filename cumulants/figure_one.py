@@ -25,6 +25,7 @@ from configs import (
     get_posteriors_dir, 
     get_ndes_from_config
 )
+from configs.args import get_cumulants_sbi_args, get_cumulants_multi_z_args
 from configs.configs import (
     get_base_results_dir, 
     get_results_dir, 
@@ -34,7 +35,6 @@ from configs.configs import (
 from configs.ensembles_configs import (
     ensembles_cumulants_config, ensembles_bulk_cumulants_config 
 )
-from cumulants_ensemble import Ensemble, MultiEnsemble
 from data.constants import (
     get_quijote_parameters, 
     get_base_posteriors_dir,
@@ -50,23 +50,25 @@ from data.cumulants import (
     get_parameter_strings
 )
 from data.pdfs import get_multi_z_bulk_pdf_fisher_forecast
-from configs.args import (
-    get_cumulants_sbi_args, 
-    get_cumulants_multi_z_args
-)
+from cumulants_ensemble import Ensemble, MultiEnsemble
 from affine import affine_sample
 
 jax.clear_caches()
 
 """
-    Loop through seeds, getting configs for ensembles for bulk and bulk + tails
-    over all redshifts, loading posteriors from them 
+    Loop through seeds, getting...
+    - configs for ensembles for 
+        - bulk and bulk + tails
+        -over all redshifts, 
+    ...loading posteriors from them.
+    Then plot posteriors together with the bulk PDF Fisher forecast.
 """
 
 def get_posterior_object(posterior_file):
     # Posterior object contains samples, log prob, Finv, summary, ...
-    PosteriorTuple = namedtuple("PosteriorTuple", posterior_file.files)
-    print(posterior_file.files) 
+    PosteriorTuple = namedtuple(
+        "PosteriorTuple", posterior_file.files
+    )
     posterior_tuple = PosteriorTuple(
         *(posterior_file[key] for key in posterior_file.files)
     )
@@ -201,8 +203,9 @@ for bulk_or_tails in ["bulk", "tails"]:
 
     posterior_objects[bulk_or_tails] = posterior_object
 
-    print(jax.tree.map(lambda x: x.shape, posterior_object))
+    print("POSTERIOR OBJECT", jax.tree.map(lambda x: x.shape, posterior_object))
 
+# Plot the posteriors for SBI on the bulk and tails, bulk PDF Fisher 
 
 PLOT_SUMMARIES = False
 
@@ -210,9 +213,15 @@ target_idx = get_target_idx()
 
 def maybe_marginalise(posterior_object, alpha, parameter_strings, Finv_bulk_pdfs_all_z, marginalise):
     if marginalise:
-        posterior_object = posterior_object._replace(Finv=posterior_object.Finv[target_idx, :][:, target_idx])
-        posterior_object = posterior_object._replace(samples=posterior_object.samples[:, target_idx])
-        posterior_object = posterior_object._replace(summary=posterior_object.summary[:, target_idx]) # NOTE: check shape...
+        posterior_object = posterior_object._replace(
+            Finv=posterior_object.Finv[target_idx, :][:, target_idx]
+        )
+        posterior_object = posterior_object._replace(
+            samples=posterior_object.samples[:, target_idx]
+        )
+        posterior_object = posterior_object._replace(
+            summary=posterior_object.summary[:, target_idx] # NOTE: check shape... (n, 5)
+        ) 
         alpha = alpha[target_idx] 
         parameter_strings = [parameter_strings[t] for t in target_idx]
         Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z[target_idx, :][:, target_idx] 
@@ -228,6 +237,7 @@ for marginalised in [True, False]:
         # title = " " + bulk_or_tails
         title = "$k_n$[{}]".format(bulk_or_tails) 
 
+        # Marginalise relevant posterior objects if required
         _posterior_object = posterior_objects[bulk_or_tails]
         (
             _posterior_object, 
@@ -242,8 +252,7 @@ for marginalised in [True, False]:
             marginalised
         )
 
-
-        # Fisher forecast
+        # Fisher forecast for bulk or tails
         c.add_chain(
             Chain.from_covariance(
                 _alpha,
@@ -256,7 +265,7 @@ for marginalised in [True, False]:
             )
         )
 
-        # Posterior from SBI
+        # Posterior from SBI on bulk or tails
         posterior_df = make_df(
             _posterior_object.samples, 
             _posterior_object.samples_log_prob, 
@@ -271,8 +280,8 @@ for marginalised in [True, False]:
             )
         )
 
+        # Compressed datavectors (assuming more than one of them)
         if PLOT_SUMMARIES:
-            # Compressed datavectors (assuming more than one of them)
             for n, _summary in enumerate(_posterior_object.summary):
                 c.add_marker(
                     location=marker(_summary, _parameter_strings), 
@@ -302,7 +311,9 @@ for marginalised in [True, False]:
 
     fig = c.plotter.plot()
     fig.suptitle(
-        r"{} SBI (bulk & tails) & $F_{{\Sigma}}^{{-1}}$".format("$k_n/k_2^{n-1}$" if config.reduced_cumulants else "$k_n$") + "\n" +
+        r"{} SBI (bulk & tails) & $F_{{\Sigma}}^{{-1}}$".format(
+            "$k_n/k_2^{n-1}$" if config.reduced_cumulants else "$k_n$"
+        ) + "\n" +
         "{} z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
                 ("linearised" if config.linearised else "non-linear") + "\n",
                 "[{}]".format(", ".join(map(str, config.redshifts))),
@@ -314,15 +325,17 @@ for marginalised in [True, False]:
         multialignment='center'
     )
 
+    # Naming convention for figure one
     linear_str = "linearised" if args.linearised else "nonlinearised"
     pretrain_str = "pretrain" if args.pre_train else "nopretrain"
     marginalised_str = "_marginalised" if marginalised else ""
 
+    sub_figs_dir = os.path.join(figs_dir, linear_str + "/", pretrain_str + "/")
+    if not os.path.exists(sub_figs_dir):
+        os.makedirs(sub_figs_dir, exist_ok=True)
+
     filename = os.path.join(
-        figs_dir, 
-        "figure_one_{}_{}_{}{}.pdf".format(
-            args.seed, linear_str, pretrain_str, marginalised_str
-        )
+        sub_figs_dir, "figure_one_{}{}.pdf".format(args.seed, marginalised_str)
     )
 
     plt.savefig(filename)

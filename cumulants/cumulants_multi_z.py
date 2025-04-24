@@ -45,7 +45,7 @@ from data.pdfs import BulkCumulantsDataset, get_bulk_dataset
 from cumulants_ensemble import Ensemble, MultiEnsemble
 from compression.pca import PCA
 from affine import affine_sample
-from utils.utils import get_dataset_and_config
+from utils.utils import get_dataset_and_config, finite_samples_log_prob
 
 typecheck = jaxtyped(typechecker=typechecker)
 
@@ -153,44 +153,38 @@ def get_z_config_and_datavector(
     # Set to current redshift, ensure matching NLE or NPE and linearisation
     config_z.exp_name = exp_name_format.format(redshift, "".join(map(str, config.order_idx)))
 
+    # Cumulants bulk and tails datasets
     cumulants_dataset = CumulantsDataset(
         config_z, results_dir=None, verbose=verbose
     )
+    dataset: Dataset = cumulants_dataset.data
 
     bulk_cumulants_dataset = BulkCumulantsDataset(
         bulk_config_z, pdfs=("pdf" in bulk_or_tails), results_dir=None, verbose=verbose
     )
-
-    dataset: Dataset = cumulants_dataset.data
-
     bulk_dataset: Dataset = bulk_cumulants_dataset.data # For Fisher forecast comparisons
 
-    # bulk_pdfs = True
-    # bulk_dataset: Dataset = get_bulk_dataset(args, pdfs=bulk_pdfs) 
-
+    # Parameter prior
     parameter_prior: Distribution = cumulants_dataset.prior # Quijote prior (same for all z, only applied once with combined z-likelihoods)
 
+    # Compression function (neural network or linear)
     compression_fn: CompressionFn = cumulants_dataset.get_compression_fn() 
  
+    # Sample datavector(s) at the fiducial parameters
     datavectors = cumulants_dataset.get_datavector(key_datavector, n=n_datavectors) # Generates linearised (or not) datavector 
 
     if datavectors.ndim == 1:
         datavectors = datavectors[jnp.newaxis, ...] # Add axis for vmapping...
 
-    # Compressed datavectors, NOTE: at true parameters
+    # Compressed datavectors at fiducial parameters
     x_ = jax.vmap(compression_fn, in_axes=(0, None))(datavectors, dataset.alpha) 
 
-    # Compressed hypercube simulations (defines scaler)
+    # Compressed hypercube simulations (defines mu/std of NDE scalers)
     X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
 
-    # Input scaler functions for individual NDEs (NOTE: scaling on X which may need to be linearised or not)
-    # NOTE: make sure this is consistent with training data-scaling
-    # scalers = [
-    #     Scaler(X, dataset.parameters, use_scaling=config_z.use_scalers)
-    # ]
-    # NOTE: data_preprocess_fn ...
+    # Input scaler functions for individual NDEs (NOTE: scaling on X which may need to be linearised or not) 
     scaler = Scaler(
-        X, dataset.parameters, use_scaling=config_z.use_scalers
+        X, dataset.parameters, use_scaling=config_z.use_scalers # NOTE: data_preprocess_fn ...
     )
 
     # Get NDEs
@@ -212,10 +206,8 @@ def get_z_config_and_datavector(
     #     ensemble.weights.squeeze().astype(jnp.int32)
     # )
 
-    # Load Ensemble
-    ensemble_path = os.path.join(
-        get_results_dir(config_z, args=args), "ensemble.eqx"
-    )
+    # Load ensemble
+    ensemble_path = os.path.join(get_results_dir(config_z, args=args), "ensemble.eqx")
     ensemble = eqx.tree_deserialise_leaves(ensemble_path, ensemble)
 
     print("Loaded ensemble from:\n\t", ensemble_path)
@@ -513,7 +505,7 @@ if __name__ == "__main__":
             datavectors, 
             Finv=Finv_all_z,
             mus=mus, 
-            covariances=covariances, 
+            covariances=covariances, # Block-diagonalised in this function
             derivatives=derivatives_
         )
 
@@ -546,11 +538,7 @@ if __name__ == "__main__":
 
         alpha_log_prob = log_prob_fn(jnp.asarray(alpha))
         samples_log_prob = jax.vmap(log_prob_fn)(samples)
-        samples_log_prob = jnp.where(
-            jnp.logical_or(jnp.isnan(samples_log_prob), jnp.isneginf(samples_log_prob)),
-            -1e32,
-            samples_log_prob
-        )
+        samples_log_prob = finite_samples_log_prob(samples_log_prob)
 
         # Save posterior, Fisher and summary
         posterior_save_dir = get_multi_z_posterior_dir(config, args)

@@ -11,7 +11,9 @@ mkdir -p "$OUT_DIR"
 
 all_job_ids=()
 
+# Test datavectors [variance,] and [variance, skewness, kurtosis]
 order_idxs=(
+    "0"
     "0 1 2"
 )
 
