@@ -16,6 +16,11 @@ order_idxs=(
 for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
 for PRETRAIN_FLAG in "--pre-train" "--no-pre-train"; do
 
+    # Skip linearised datavector with pre-training
+    if [[ "$LINEARISED_FLAG" == "--linearised" && "$PRETRAIN_FLAG" == "--pre-train" ]]; then
+        continue
+    fi
+
     all_job_ids=()
 
     for bt in "bulk" "tails"; do
