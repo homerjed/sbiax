@@ -2,8 +2,10 @@ import warnings
 import os
 import time
 import yaml
+import json
 import pickle
 import gc
+import argparse
 from datetime import datetime
 from typing import Callable, Optional
 import multiprocessing as mp
@@ -36,8 +38,8 @@ from configs import (
     get_posteriors_dir, 
     get_ndes_from_config
 )
-from data.constants import get_base_results_dir
 from configs.args import get_arch_search_args, get_cumulants_sbi_args
+from data.constants import get_base_results_dir
 from data.cumulants import (
     Dataset, 
     CumulantsDataset, 
@@ -97,6 +99,8 @@ def assign_trial_parameters_to_config(
 
 def objective(
     trial: optuna.trial.Trial, 
+    args: argparse.Namespace, # Use same args for all trials
+    config: ConfigDict, # Use same config for all trials
     random_seeds: bool,
     arch_search_dir: str, 
     n_repeats: Optional[int] = None,
@@ -107,8 +111,6 @@ def objective(
 
     t0 = time.time()
 
-    args = get_cumulants_sbi_args() # Don't conflate with arch_search_args
-
     print("TIME:", datetime.now().strftime("%H:%M %d-%m-%y"))
     print("SEED:", args.seed)
     print("MOMENTS:", args.order_idx)
@@ -118,21 +120,9 @@ def objective(
     """
         Config
     """
-
+    # Seed overwritten in config
     seed = args.seed + trial.number if random_seeds else args.seed
-
-    config = cumulants_config(
-        seed=seed, 
-        redshift=args.redshift, 
-        reduced_cumulants=args.reduced_cumulants,
-        sbi_type=args.sbi_type,
-        linearised=args.linearised, 
-        compression=args.compression,
-        order_idx=args.order_idx,
-        n_linear_sims=args.n_linear_sims,
-        freeze_parameters=args.freeze_parameters,
-        pre_train=args.pre_train
-    )
+    config.seed = seed
 
     # Set config attributes based on these hyperparameters
     config = get_trial_hyperparameters(trial, config)
@@ -182,6 +172,7 @@ def objective(
     if n_repeats is None:
         n_repeats = 1
 
+    # Container for cross-validation scores 
     scores = []
     for i_repeat in range(n_repeats):
         jax.clear_caches()
@@ -558,7 +549,6 @@ def objective(
         # Free memory
         del ensemble, X, dataset
         gc.collect()
-        jax.clear_backends()
         jax.clear_caches()
 
         scores.append(stats[0]["all_valid_loss"]) # Assuming one NDE
@@ -573,46 +563,75 @@ def callback(
     figs_dir: str, 
     arch_search_dir: str
 ) -> None:
-    try:
-        trial_dict = study.best_trial.__dict__
-        filtered = {k: v for k, v in trial_dict.items() if k != "intermediate_values"} # Remove long list of losses
 
-        print("@" * 80 + datetime.today().strftime('%Y-%m-%d %H:%M:%S'))
-        print("Best values so far:\n\t{}\n\t{}".format(study.best_trial.params))
-        print("Best trial so far:\n\t{}\n\t{}".format(filtered))
-        print("Optuna figures saved at:\n\t{}".format(figs_dir))
-        print("@" * 80 + "n_trials=" + str(len(study.trials)))
+    def json_serial(obj):
+        """ JSON serializer for objects not serializable by default json """
+        if isinstance(obj, (datetime)):
+            return obj.isoformat()
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, set):
+            return list(obj)
+        return str(obj)
 
-        layout_kwargs = dict(template="simple_white", title=dict(text=None))
-        fig = optuna.visualization.plot_param_importances(study)
-        fig.update_layout(**layout_kwargs)
-        # fig.show()
-        fig.write_image(os.path.join(figs_dir, "importances.pdf"))
+    # try:
+    trial_dict = study.best_trial.__dict__
+    filtered = {k: v for k, v in trial_dict.items() if k != "intermediate_values"} # Remove long list of losses
 
-        fig = optuna.visualization.plot_optimization_history(study)
-        fig.update_layout(**layout_kwargs)
-        # fig.show()
-        fig.write_image(os.path.join(figs_dir, "history.pdf"))
+    print("@" * 80 + datetime.today().strftime('%Y-%m-%d %H:%M:%S'))
+    print("Best values so far:\n\t{}\n\t{}".format(study.best_trial.params, study.best_trial.value))
+    print("Best trial so far:\n\t{}".format(filtered))
+    print("Optuna figures saved at:\n\t{}".format(figs_dir))
+    print("@" * 80 + "n_trials=" + str(len(study.trials)))
 
-        fig = optuna.visualization.plot_contour(study)
-        fig.update_layout(**layout_kwargs)
-        # fig.show()
-        fig.write_image(os.path.join(figs_dir, "contour.pdf"))
+    # Write best trial to json
+    trial_json_path = os.path.join(figs_dir, "best_trial.json")
+    # with open(trial_json_path, "w") as f:
+    #     json.dump(filtered, f, indent=2, default=json_serial)
 
-        fig = optuna.visualization.plot_intermediate_values(study)
-        fig.update_layout(**layout_kwargs)
-        # fig.show()
-        fig.write_image(os.path.join(figs_dir, "intermediates.pdf"))
+    # Append new entry to json file (load previous json and append to it)
+    if os.path.exists(trial_json_path):
+        with open(trial_json_path, "r") as f:
+            try:
+                data = json.load(f)
+                if not isinstance(data, list): # Corrupted or wrong format
+                    data = []
+            except json.JSONDecodeError:
+                data = []
+    else:
+        data = []
 
-        fig = optuna.visualization.plot_timeline(study)
-        fig.update_layout(**layout_kwargs)
-        # fig.show()
-        fig.write_image(os.path.join(figs_dir, "timeline.pdf"))
+    data.append(filtered)
 
-        df = study.trials_dataframe()
-        df.to_pickle(os.path.join(arch_search_dir, df_name)) 
-    except Exception as e:
-        print("HYPERPARAMETER PLOT ISSUE:\n\t", e) # Not enough trials to plot yet
+    with open(trial_json_path, "w") as f:
+        json.dump(data, f, indent=2, default=json_serial)
+
+    layout_kwargs = dict(template="simple_white", title=dict(text=None))
+
+    fig = optuna.visualization.plot_param_importances(study)
+    fig.update_layout(**layout_kwargs)
+    fig.write_image(os.path.join(figs_dir, "importances.pdf"))
+
+    fig = optuna.visualization.plot_optimization_history(study)
+    fig.update_layout(**layout_kwargs)
+    fig.write_image(os.path.join(figs_dir, "history.pdf"))
+
+    fig = optuna.visualization.plot_contour(study)
+    fig.update_layout(**layout_kwargs)
+    fig.write_image(os.path.join(figs_dir, "contour.pdf"))
+
+    fig = optuna.visualization.plot_intermediate_values(study)
+    fig.update_layout(**layout_kwargs)
+    fig.write_image(os.path.join(figs_dir, "intermediates.pdf"))
+
+    fig = optuna.visualization.plot_timeline(study)
+    fig.update_layout(**layout_kwargs)
+    fig.write_image(os.path.join(figs_dir, "timeline.pdf"))
+
+    df = study.trials_dataframe()
+    df.to_pickle(os.path.join(arch_search_dir, df_name)) 
+    # except Exception as e:
+    #     print("HYPERPARAMETER PLOT ISSUE:\n\t", e) # Not enough trials to plot yet
 
 
 def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> ConfigDict:
@@ -625,7 +644,7 @@ def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> Config
     # Arrange hyperparameters to optimise for and return to the experiment
     if model_type == "cnf":
         model_hyperparameters = {
-            "width" : trial.suggest_int(name="width", low=2, high=6, step=1), # NN width
+            "width" : trial.suggest_int(name="width", low=2, high=6, step=1), # NN width (NOTE: base 2!)
             "depth" : trial.suggest_int(name="depth", low=0, high=4, step=1), # NN depth
             "dt" : trial.suggest_float(name="dt", low=0.01, high=0.15, step=0.01), # ODE solver timestep
             "solver" : trial.suggest_categorical(name="solver", choices=["Euler", "Heun", "Tsit5"]), # ODE solver
@@ -638,12 +657,12 @@ def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> Config
 
     if model_type == "maf":
         model_hyperparameters = {
-            "width" : trial.suggest_int(name="width", low=3, high=8, step=1), # Hidden units in NNs
+            "width" : trial.suggest_int(name="width", low=3, high=8, step=1), # Hidden units in NNs (NOTE: base 2!)
             "depth" : trial.suggest_int(name="depth", low=1, high=10, step=1), # Flow depth
             "layers" : trial.suggest_int(name="layers", low=1, high=3, step=1), # NN layers
             "activation" : trial.suggest_categorical(name="activation", choices=["tanh", "gelu", "leaky_relu", "swish"])
         }
-        config.ndes[0].width_size = 2 ** model_hyperparameters["width"]
+        config.ndes[0].width_size = 2 ** model_hyperparameters["width"] 
         config.ndes[0].n_layers = model_hyperparameters["depth"]
         config.ndes[0].nn_depth = model_hyperparameters["layers"]
 
@@ -666,16 +685,39 @@ def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> Config
 
 if __name__ == "__main__":
 
-    args = get_arch_search_args()
+    search_args = get_arch_search_args() # Specification for architecture search
 
     show_results_dataframe = False # Simply show best trial from existing dataframe
 
     arch_search_dir = os.path.join(get_base_results_dir(), "arch_search/")
 
+    args = get_cumulants_sbi_args() # Don't conflate with arch_search_args 
+
+    config = cumulants_config(
+        seed=0, # Gets replaced in objective!
+        redshift=args.redshift, 
+        reduced_cumulants=args.reduced_cumulants,
+        sbi_type=args.sbi_type,
+        linearised=args.linearised, 
+        compression=args.compression,
+        order_idx=args.order_idx,
+        n_linear_sims=args.n_linear_sims,
+        freeze_parameters=args.freeze_parameters,
+        pre_train=args.pre_train
+    )
+
+    # Identify this arch search run later on
+    identifier_str = "arch_search_{}_{}_{}_m{}".format(
+        "l" if args.linearised else "nl", 
+        "f" if args.freeze_parameters else "nf", 
+        "pt" if args.pre_train else "npt", 
+        "".join(map(str, args.order_idx))
+    )
+
     if show_results_dataframe:
         # df.to_pickle(os.path.join(arch_search_dir, "arch_search_df.pkl")) # Where to save it, usually as a .pkl
 
-        with open(os.path.join(arch_search_dir, "arch_search_df.pkl"), "rb") as f:
+        with open(os.path.join(arch_search_dir, "arch_search_df_{}.pkl".format(identifier_str)), "rb") as f:
             loaded_df = pickle.load(f)
 
         # Find the trial with the best value (minimum objective value)
@@ -686,13 +728,13 @@ if __name__ == "__main__":
         print(best_trial_row)
 
     else:
-        assert args.multiprocess and args.n_processes
+        assert search_args.multiprocess and search_args.n_processes
 
-        journal_name = "1pt_arch_search_{}.log".format(date_stamp())
-        study_name = "1pt_nle_{}".format(date_stamp())
-        df_name = "arch_search_df_{}.pkl".format(date_stamp())
+        journal_name = "1pt_arch_search_{}_{}.log".format(identifier_str, date_stamp())
+        study_name = "1pt_nle_{}_{}".format(identifier_str, date_stamp())
+        df_name = "arch_search_df_{}_{}.pkl".format(identifier_str, date_stamp())
 
-        arch_search_figs_dir = os.path.join(arch_search_dir, "figs/")
+        arch_search_figs_dir = os.path.join(arch_search_dir, "figs_{}/".format(identifier_str))
 
         for _dir in [arch_search_dir, arch_search_figs_dir]:
             if not os.path.exists(_dir):
@@ -711,27 +753,20 @@ if __name__ == "__main__":
             direction="minimize", 
             storage=storage,
             sampler=optuna.samplers.TPESampler(
-                n_startup_trials=args.n_startup_trials, multivariate=False
+                n_startup_trials=search_args.n_startup_trials, multivariate=False
             ),
             load_if_exists=True
         ) 
-
-        # if TEST:
-        #     objective(
-        #         trial=,
-        #         random_seeds=False,
-        #         arch_search_dir=arch_search_dir,
-        #         n_repeats=1,
-        #         show_tqdm=True
-        #     )
 
         # study.enqueue_trial(good_hyperparams) 
 
         trial_fn = lambda trial: objective(
             trial, 
-            random_seeds=args.random_seeds,
+            args=args,
+            config=config,
+            random_seeds=search_args.random_seeds,
             arch_search_dir=arch_search_dir, 
-            n_repeats=args.n_repeats, # 'Cross validation' of trials... doesn't work with pruning
+            n_repeats=search_args.n_repeats, # 'Cross validation' of trials... doesn't work with pruning
             show_tqdm=False
         )
 
@@ -743,21 +778,21 @@ if __name__ == "__main__":
         )
 
         # Run multiprocessed architecture search or single process
-        if args.multiprocess:
+        if search_args.multiprocess:
 
             def mp_optimize(process, study): 
                 # Function links processes to same study (lambdas not allowed)
                 study.optimize(
-                    trial_fn, n_trials=args.n_trials, callbacks=[callback_fn]
+                    trial_fn, n_trials=search_args.n_trials, callbacks=[callback_fn]
                 )
 
-            with mp.Pool(processes=args.n_processes) as pool:
+            with mp.Pool(processes=search_args.n_processes) as pool:
                 pool.map(
                     partial(mp_optimize, study=study), 
-                    [*range(args.n_parallel)] # Number of parallel jobs per process in args.n_processes?
+                    [*range(search_args.n_parallel)] # Number of parallel jobs per process in args.n_processes?
                 )
         else:
-            study.optimize(trial_fn, n_trials=args.n_trials, callbacks=[callback])
+            study.optimize(trial_fn, n_trials=search_args.n_trials, callbacks=[callback])
 
         print("Number of finished trials: {}".format(len(study.trials)))
 

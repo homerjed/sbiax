@@ -155,22 +155,33 @@ args.pre_train = ARGS.pre_train
 args.order_idx = ARGS.order_idx
 args.freeze_parameters = ARGS.freeze_parameters
 
-# Get the bulk Fisher forecast for all redshifts (same whether linearised or not)
+# Get the bulk Fisher forecast for all redshifts 
+# but easier to load frozen or not since it autosaves...
 try:
     Finv_bulk_pdfs_all_z = np.load(
-        os.path.join(data_dir, "Finv_bulk_pdfs_all_z_m{}.npy".format("".join(map(str, args.order_idx))))
+        os.path.join(
+            data_dir, 
+            "Finv_bulk_pdfs_all_z_m{}_{}.npy".format(
+                "".join(map(str, args.order_idx)),
+                "f" if args.freeze_parameters else "nf"
+            )
+        )
     )
 except:
     Finv_bulk_pdfs_all_z = get_multi_z_bulk_pdf_fisher_forecast(args)
 
     np.save(
-        os.path.join(data_dir, "Finv_bulk_pdfs_all_z_m{}.npy".format("".join(map(str, args.order_idx)))), 
+        os.path.join(
+            data_dir, 
+            "Finv_bulk_pdfs_all_z_m{}_{}.npy".format(
+                "".join(map(str, args.order_idx)),
+                "f" if args.freeze_parameters else "nf"
+            )
+        ),
         Finv_bulk_pdfs_all_z
     )
 
-if args.freeze_parameters:
-    target_idx = get_target_idx()
-    Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z[:target_idx, :][:, :target_idx]
+print("FINV_BULK_PDFS_ALL_Z", Finv_bulk_pdfs_all_z.shape)
 
 posterior_objects = dict(bulk=None, tails=None)
 
@@ -183,7 +194,7 @@ for bulk_or_tails in ["bulk", "tails"]:
     if bulk_or_tails == "bulk" or bulk_or_tails == "bulk_pdf":
         ensembles_config = ensembles_bulk_cumulants_config
 
-    # Force args for posterior to be bulk or tails
+    # Force args for posterior to be bulk or tails (for posterior save dir)
     args.bulk_or_tails = bulk_or_tails 
 
     config = ensembles_config(
@@ -235,16 +246,20 @@ def maybe_marginalise(posterior_object, alpha, parameter_strings, Finv_bulk_pdfs
 
 for marginalised in [True, False]:
 
+    # Don't plot marginalised posterior if freezing parameters, same effect...
+    if marginalised and args.freeze_parameters:
+        continue
+
     # Plot 
     c = ChainConsumer() 
 
     for bulk_or_tails in ["bulk", "tails"]:
 
-        # title = " " + bulk_or_tails
         title = "$k_n$[{}]".format(bulk_or_tails) 
 
-        # Marginalise relevant posterior objects if required
         _posterior_object = posterior_objects[bulk_or_tails]
+
+        # Marginalise relevant posterior objects if required
         (
             _posterior_object, 
             _alpha,
@@ -255,8 +270,14 @@ for marginalised in [True, False]:
             alpha, 
             parameter_strings, 
             Finv_bulk_pdfs_all_z, 
-            marginalised=marginalised
+            marginalise=marginalised
         )
+
+        if args.freeze_parameters: 
+            _alpha = alpha[target_idx]
+            _parameter_strings = [parameter_strings[t] for t in target_idx]
+        
+        print("_alpha", _alpha.shape, "_posterior_object", jax.tree.map(lambda x: x.shape, _posterior_object), "_Finv_bulk", _Finv_bulk_pdfs_all_z.shape)
 
         # Fisher forecast for bulk or tails
         c.add_chain(
@@ -301,7 +322,7 @@ for marginalised in [True, False]:
             _alpha,
             _Finv_bulk_pdfs_all_z, 
             columns=_parameter_strings,
-            name=r"$F_{\Sigma^{-1}}$ " + "bulk pdf",
+            name=r"$F_{\Sigma^{-1}}$ PDF[bulk]",
             color="g",
             linestyle=":",
             shade_alpha=0.
