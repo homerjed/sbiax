@@ -21,11 +21,11 @@ from sbiax.utils import make_df, marker
 from configs import (
     cumulants_config, 
     bulk_cumulants_config, 
-    get_results_dir, 
-    get_posteriors_dir, 
-    get_ndes_from_config
+    get_posteriors_dir
 )
-from configs.args import get_cumulants_sbi_args, get_cumulants_multi_z_args
+from configs.args import (
+    get_cumulants_sbi_args, get_cumulants_multi_z_args
+)
 from configs.configs import (
     get_base_results_dir, 
     get_results_dir, 
@@ -155,14 +155,14 @@ args.pre_train = ARGS.pre_train
 args.order_idx = ARGS.order_idx
 args.freeze_parameters = ARGS.freeze_parameters
 
-# Get the bulk Fisher forecast for all redshifts 
-# but easier to load frozen or not since it autosaves...
+# Get the bulk PDF Fisher forecast for all redshifts 
+# (easier to load frozen or not since it autosaves...)
 try:
     Finv_bulk_pdfs_all_z = np.load(
         os.path.join(
             data_dir, 
-            "Finv_bulk_pdfs_all_z_m{}_{}.npy".format(
-                "".join(map(str, args.order_idx)),
+            "Finv_bulk_pdfs_all_z_{}.npy".format(
+                # "".join(map(str, args.order_idx)), NOTE: no cumulants associated with bulk pdf?!
                 "f" if args.freeze_parameters else "nf"
             )
         )
@@ -173,8 +173,8 @@ except:
     np.save(
         os.path.join(
             data_dir, 
-            "Finv_bulk_pdfs_all_z_m{}_{}.npy".format(
-                "".join(map(str, args.order_idx)),
+            "Finv_bulk_pdfs_all_z_{}.npy".format(
+                # "".join(map(str, args.order_idx)),
                 "f" if args.freeze_parameters else "nf"
             )
         ),
@@ -191,7 +191,7 @@ for bulk_or_tails in ["bulk", "tails"]:
     # Multi-z inference concerning the bulk or bulk + tails
     if bulk_or_tails == "tails":
         ensembles_config = ensembles_cumulants_config
-    if bulk_or_tails == "bulk" or bulk_or_tails == "bulk_pdf":
+    if bulk_or_tails == "bulk": # or bulk_or_tails == "bulk_pdf":
         ensembles_config = ensembles_bulk_cumulants_config
 
     # Force args for posterior to be bulk or tails (for posterior save dir)
@@ -277,7 +277,11 @@ for marginalised in [True, False]:
             _alpha = alpha[target_idx]
             _parameter_strings = [parameter_strings[t] for t in target_idx]
         
-        print("_alpha", _alpha.shape, "_posterior_object", jax.tree.map(lambda x: x.shape, _posterior_object), "_Finv_bulk", _Finv_bulk_pdfs_all_z.shape)
+        print(
+            "_alpha", _alpha.shape, 
+            "_posterior_object", jax.tree.map(lambda x: x.shape, _posterior_object), 
+            "_Finv_bulk", _Finv_bulk_pdfs_all_z.shape
+        )
 
         # Fisher forecast for bulk or tails
         c.add_chain(

@@ -30,7 +30,7 @@ from configs.configs import (
     get_ndes_from_config
 )
 from configs.args import get_cumulants_sbi_args, get_cumulants_multi_z_args
-from data.constants import get_base_posteriors_dir
+from data.constants import get_base_posteriors_dir, get_save_and_load_dirs
 from data.cumulants import (
     CumulantsDataset,
     Dataset, 
@@ -41,7 +41,11 @@ from data.cumulants import (
     get_linearised_data,
     get_parameter_strings
 )
-from data.pdfs import BulkCumulantsDataset, get_bulk_dataset
+from data.pdfs import (
+    BulkCumulantsDataset, 
+    get_bulk_dataset, 
+    get_multi_z_bulk_pdf_fisher_forecast
+)
 from cumulants_ensemble import Ensemble, MultiEnsemble
 from compression.pca import PCA
 from affine import affine_sample
@@ -69,6 +73,7 @@ def default(v, d):
     Datavector is made of one measurement at each redshift, 
     assumed to be independent between redshifts. 
     - Can use more than one datavector now, for scaling as a survey.
+    - Fisher adds across redshifts
 
     Ensure scaling is switched on / off and EVERYTHING matches
     training configs.
@@ -248,7 +253,7 @@ def get_multi_redshift_mle(
     Cinv = jnp.linalg.inv(C) # Hartlap? Individual covariances are corrected?
 
     # Concatenate objects across redshift to match block-diagonal covariance
-    derivatives = jnp.concatenate(derivatives, axis=1) # Stack on data axis
+    derivatives = jnp.concatenate(derivatives, axis=1) # Stack on data axis, having averaged over realisations
     mu = jnp.concatenate(mus)
     d = jnp.concatenate(d)
 
@@ -317,6 +322,32 @@ if __name__ == "__main__":
         pre_train=args.pre_train,
         freeze_parameters=args.freeze_parameters
     )
+
+    # Get the bulk Fisher forecast for all redshifts 
+    # but easier to load frozen or not since it autosaves...
+    data_dir, _, _ = get_save_and_load_dirs()
+    try:
+        Finv_bulk_pdfs_all_z = np.load(
+            os.path.join(
+                data_dir, 
+                "Finv_bulk_pdfs_all_z_{}.npy".format(
+                    # "".join(map(str, args.order_idx)), NOTE: no cumulants associated with bulk pdf?!
+                    "f" if args.freeze_parameters else "nf"
+                )
+            )
+        )
+    except:
+        Finv_bulk_pdfs_all_z = get_multi_z_bulk_pdf_fisher_forecast(args)
+
+        np.save(
+            os.path.join(
+                data_dir, 
+                "Finv_bulk_pdfs_all_z_{}.npy".format(
+                    "f" if args.freeze_parameters else "nf"
+                )
+            ),
+            Finv_bulk_pdfs_all_z
+        )
 
     parameter_strings = get_parameter_strings()
 
@@ -572,7 +603,7 @@ if __name__ == "__main__":
                     alpha,
                     Finv_all_z, # NOTE: Get multi redshift Fisher matrix, use a multi-inference config
                     columns=parameter_strings,
-                    name=r"$F_{\Sigma^{-1}}$",
+                    name=r"$F_{\Sigma^{-1}}$ (all z) $k_n$[tails]",
                     color="k",
                     linestyle=":",
                     shade_alpha=0.
@@ -583,11 +614,23 @@ if __name__ == "__main__":
                     alpha,
                     bulk_Finv_all_z,
                     columns=parameter_strings,
-                    name=r"$F_{\Sigma^{-1}}$ (all z) [bulk]",
+                    name=r"$F_{\Sigma^{-1}}$ (all z) $k_n$[bulk]",
                     color="g",
                     shade_alpha=0.
                 )
             )
+            c.add_chain(
+                Chain.from_covariance(
+                    alpha,
+                    Finv_bulk_pdfs_all_z,
+                    columns=parameter_strings,
+                    name=r"$F_{\Sigma^{-1}}$ (all z) PDF[bulk]",
+                    color="g",
+                    linestyle=":",
+                    shade_alpha=0.
+                )
+            )
+            Finv_bulk_pdfs_all_z
             posterior_df = make_df(
                 samples, samples_log_prob, parameter_strings=parameter_strings
             )
@@ -645,7 +688,7 @@ if __name__ == "__main__":
                 alpha[ix],
                 Finv_all_z[ix, :][:, ix],
                 columns=parameter_names_,
-                name=r"$F_{\Sigma^{-1}}$",
+                name=r"$F_{\Sigma^{-1}}$ $k_n$[tails]",
                 color="k",
                 linestyle=":",
                 shade_alpha=0.
@@ -656,11 +699,23 @@ if __name__ == "__main__":
                 alpha[ix],
                 bulk_Finv_all_z[ix, :][:, ix],
                 columns=parameter_names_,
-                name=r"$F_{\Sigma^{-1}}$ (all z) [bulk]",
+                name=r"$F_{\Sigma^{-1}}$ (all z) $k_n$[bulk]",
                 color="g",
                 shade_alpha=0.
             )
         )
+        c.add_chain(
+            Chain.from_covariance(
+                alpha[ix],
+                Finv_bulk_pdfs_all_z[ix, :][:, ix],
+                columns=parameter_names_,
+                name=r"$F_{\Sigma^{-1}}$ (all z) PDF[bulk]",
+                color="g",
+                linestyle=":",
+                shade_alpha=0.
+            )
+        )
+
         posterior_df = make_df(
             samples[:, ix], samples_log_prob, parameter_strings=parameter_names_
         )
@@ -698,7 +753,9 @@ if __name__ == "__main__":
         )
         posterior_plot_filename = os.path.join(
             figs_dir, 
-            "multi_ensemble_posterior_marginalised_cumulants_{}_{}_{}_{}.pdf".format(args.seed, linear_str, pretrain_str, n_posterior)
+            "multi_ensemble_posterior_marginalised_cumulants_{}_{}_{}_{}.pdf".format(
+                args.seed, linear_str, pretrain_str, n_posterior
+            )
         )
         plt.savefig(posterior_plot_filename)
         plt.close()

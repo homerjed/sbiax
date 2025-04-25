@@ -133,7 +133,7 @@ if args.seed == 0:
     bulk_pdf_dataset = _dataset(_bulk_config, pdfs=True, results_dir=results_dir)
 
     for i, (name, Finv) in enumerate(zip(
-        [" PDF[bulk]", " Cumulants[bulk]", " Cumulants[tails]"],
+        [" PDF[bulk]", " $k_n$[bulk]", " $k_n$[tails]"],
         [bulk_pdf_dataset.data.Finv, bulk_dataset.Finv, dataset.Finv]
     )):
         c.add_chain(
@@ -296,7 +296,7 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
             dataset.alpha,
             bulk_dataset.Finv,
             columns=dataset.parameter_strings,
-            name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]" if bulk_pdfs else "Cumulants[bulk]"),
+            name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]" if bulk_pdfs else "$k_n$[bulk]"),
             color="g",
             linestyle=":",
             shade_alpha=0.
@@ -431,7 +431,7 @@ if 1:
             bulk_dataset.Finv,
             columns=dataset.parameter_strings,
             name=r"$F_{\Sigma^{-1}}$" + " {}".format(
-                "PDF[bulk]" if bulk_pdfs else "Cumulants[bulk]"
+                "PDF[bulk]" if bulk_pdfs else "$k_n$[bulk]"
             ),
             color="g",
             linestyle=":",
@@ -515,7 +515,7 @@ if 0:
                 bulk_dataset.Finv,
                 columns=dataset.parameter_strings,
                 name=r"$F_{\Sigma^{-1}}$" + " {}".format(
-                    "PDF[bulk]" if bulk_pdfs else "Cumulants[bulk]"
+                    "PDF[bulk]" if bulk_pdfs else "$k_n$[bulk]"
                 ),
                 color="g",
                 linestyle=":",

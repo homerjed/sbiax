@@ -4,6 +4,7 @@ RUN_LINEARISED=true
 ONLY_RUN_FIGURES=false # Only run figure_one.py jobs
 N_SEEDS=2
 N_PARALLEL=3
+N_LINEAR_SIMS=100000
 
 TIMESTAMP=$(date +'%m%d_%H%M')
 OUT_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/cumulants_sbi/$TIMESTAMP"
@@ -49,7 +50,7 @@ for PRETRAIN_FLAG in "--pre-train" "--no-pre-train"; do
 --compression linear \
 $LINEARISED_FLAG \
 $PRETRAIN_FLAG \
---n_linear_sims 10000 \
+--n_linear_sims $N_LINEAR_SIMS \
 --order_idx $order_idx_args \
 --redshift $z \
 --no-use-tqdm \
@@ -89,7 +90,7 @@ END
 --compression linear \
 $LINEARISED_FLAG \
 $PRETRAIN_FLAG \
---n_linear_sims 10000 \
+--n_linear_sims $N_LINEAR_SIMS \
 --order_idx $order_idx_args \
 --bulk_or_tails $bt \
 $FREEZE_FLAG"

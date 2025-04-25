@@ -53,67 +53,131 @@ def dump_args_and_config(args: argparse.Namespace, config: ConfigDict, results_d
         yaml.dump(config.to_dict(), f, default_flow_style=False)
 
 
-def get_results_dir(config: ConfigDict, args: argparse.Namespace, *, arch_search: bool = False) -> str:
+def get_config_subdir(
+    config: ConfigDict, 
+    args: argparse.Namespace, 
+    *, 
+    arch_search: bool = False, 
+    include_exp: bool = True, 
+    multi_z: bool = False
+) -> str:
+    parts = [
+        "arch_search" if arch_search else None,
+        "frozen" if config.freeze_parameters else "nonfrozen",
+        args.bulk_or_tails,
+        "reduced_cumulants" if config.reduced_cumulants else "cumulants",
+        config.sbi_type,
+        "linearised" if config.linearised else "nonlinearised",
+        config.compression,
+        "pretrain" if config.pre_train else "nopretrain",
+        config.exp_name if include_exp and config.exp_name else None,
+        str(config.seed),
+        "multi_z" if multi_z else None
+    ]
+    return "/".join(filter(None, parts)) + "/"
 
-    results_dir = "{}{}{}{}{}{}{}{}{}{}{}".format( # Import this from a constants file
-        get_base_results_dir(),
-        "arch_search/" if arch_search else "",
-        "frozen/" if config.freeze_parameters else "nonfrozen/",
-        "{}/".format(args.bulk_or_tails),
-        "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
-        (config.sbi_type + "/") if config.sbi_type else "" ,
-        "linearised/" if config.linearised else "nonlinearised/",
-        (config.compression + "/") if config.compression else "",
-        "pretrain/" if config.pre_train else "nopretrain/",
-        (config.exp_name + "/") if config.exp_name else "",
-        (str(config.seed) + "/") if (config.seed is not None) else ""
+
+def get_results_dir(
+    config: ConfigDict, 
+    args: argparse.Namespace, 
+    *, 
+    arch_search: bool = False
+) -> str:
+    results_dir = os.path.join(
+        get_base_results_dir(), 
+        get_config_subdir(config, args, arch_search=arch_search)
     )
-
     make_dirs(results_dir)
-
-    dump_args_and_config(args, config, results_dir=results_dir)
-
+    dump_args_and_config(args, config, results_dir=results_dir) # Save conifg and args in run dir
     return results_dir
 
 
-def get_posteriors_dir(config: ConfigDict, args: argparse.Namespace, *, arch_search: bool = False) -> str:
-
-    results_dir = "{}{}{}{}{}{}{}{}{}{}{}".format( 
-        get_base_posteriors_dir(),
-        "arch_search/" if arch_search else "",
-        "frozen/" if config.freeze_parameters else "nonfrozen/",
-        "{}/".format(args.bulk_or_tails),
-        "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
-        (config.sbi_type + "/") if config.sbi_type else "" ,
-        "linearised/" if config.linearised else "nonlinearised/",
-        (config.compression + "/") if config.compression else "",
-        "pretrain/" if config.pre_train else "nopretrain/",
-        (config.exp_name + "/") if config.exp_name else "",
-        (str(config.seed) + "/") if (config.seed is not None) else ""
+def get_posteriors_dir(
+    config: ConfigDict, 
+    args: argparse.Namespace, 
+    *, 
+    arch_search: bool = False
+) -> str:
+    posteriors_dir = os.path.join(
+        get_base_posteriors_dir(), 
+        get_config_subdir(config, args, arch_search=arch_search)
     )
-
-    make_dirs(results_dir)
-
-    return results_dir
+    make_dirs(posteriors_dir)
+    return posteriors_dir
 
 
-def get_multi_z_posterior_dir(config: ConfigDict, args: argparse.Namespace) -> str:
-
-    posterior_save_dir = "{}{}{}{}{}{}{}{}{}multi_z/".format(
-        get_base_posteriors_dir(),
-        "frozen/" if config.freeze_parameters else "nonfrozen/",
-        "{}/".format(args.bulk_or_tails),
-        "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
-        (config.sbi_type + "/") if config.sbi_type else "" , 
-        "linearised/" if config.linearised else "nonlinearised/",
-        (config.compression + "/") if config.compression else "",
-        "pretrain/" if config.pre_train else "nopretrain/",
-        (str(config.seed) + "/") if (config.seed is not None) else "", # No exp name here...
+def get_multi_z_posterior_dir(
+    config: ConfigDict, args: argparse.Namespace
+) -> str:
+    multi_z_dir = os.path.join(
+        get_base_posteriors_dir(), 
+        get_config_subdir(config, args, include_exp=False, multi_z=True) # NOTE: possible bug with include_exp....?
     )
+    print("Multi-z posterior dir:\n", multi_z_dir)
+    return multi_z_dir
 
-    print("Multi-z posterior dir:\n", posterior_save_dir)
 
-    return posterior_save_dir
+# def get_results_dir(config: ConfigDict, args: argparse.Namespace, *, arch_search: bool = False) -> str:
+
+#     results_dir = "{}{}{}{}{}{}{}{}{}{}{}".format( # Import this from a constants file
+#         get_base_results_dir(),
+#         "arch_search/" if arch_search else "",
+#         "frozen/" if config.freeze_parameters else "nonfrozen/",
+#         "{}/".format(args.bulk_or_tails),
+#         "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
+#         (config.sbi_type + "/") if config.sbi_type else "" ,
+#         "linearised/" if config.linearised else "nonlinearised/",
+#         (config.compression + "/") if config.compression else "",
+#         "pretrain/" if config.pre_train else "nopretrain/",
+#         (config.exp_name + "/") if config.exp_name else "",
+#         (str(config.seed) + "/") if (config.seed is not None) else ""
+#     )
+
+#     make_dirs(results_dir)
+
+#     dump_args_and_config(args, config, results_dir=results_dir)
+
+#     return results_dir
+
+
+# def get_posteriors_dir(config: ConfigDict, args: argparse.Namespace, *, arch_search: bool = False) -> str:
+
+#     results_dir = "{}{}{}{}{}{}{}{}{}{}{}".format( 
+#         get_base_posteriors_dir(),
+#         "arch_search/" if arch_search else "",
+#         "frozen/" if config.freeze_parameters else "nonfrozen/",
+#         "{}/".format(args.bulk_or_tails),
+#         "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
+#         (config.sbi_type + "/") if config.sbi_type else "" ,
+#         "linearised/" if config.linearised else "nonlinearised/",
+#         (config.compression + "/") if config.compression else "",
+#         "pretrain/" if config.pre_train else "nopretrain/",
+#         (config.exp_name + "/") if config.exp_name else "",
+#         (str(config.seed) + "/") if (config.seed is not None) else ""
+#     )
+
+#     make_dirs(results_dir)
+
+#     return results_dir
+
+
+# def get_multi_z_posterior_dir(config: ConfigDict, args: argparse.Namespace) -> str:
+
+#     posterior_save_dir = "{}{}{}{}{}{}{}{}{}multi_z/".format(
+#         get_base_posteriors_dir(),
+#         "frozen/" if config.freeze_parameters else "nonfrozen/",
+#         "{}/".format(args.bulk_or_tails),
+#         "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
+#         (config.sbi_type + "/") if config.sbi_type else "" , 
+#         "linearised/" if config.linearised else "nonlinearised/",
+#         (config.compression + "/") if config.compression else "",
+#         "pretrain/" if config.pre_train else "nopretrain/",
+#         (str(config.seed) + "/") if (config.seed is not None) else "", # No exp name here...
+#     )
+
+#     print("Multi-z posterior dir:\n", posterior_save_dir)
+
+#     return posterior_save_dir
 
 
 """

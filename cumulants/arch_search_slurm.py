@@ -68,10 +68,17 @@ from utils.utils import (
 
 TEST = True if os.environ.get('TEST', '').lower() in ('1', 'true') else False
 
+# Implies no datestamping for dirs (so everything writes so same storage)
+RUNNING_MULTIPLE_SLURM_JOBS = True if os.environ.get('MULTI_SLURM', '').lower() in ('1', 'true') else False 
+
 
 def date_stamp():
-    now = datetime.now()
-    return "{}_{}_{}_{}".format(now.hour, now.day, now.month, now.year)
+    if RUNNING_MULTIPLE_SLURM_JOBS:
+        stamp = ""
+    else:
+        now = datetime.now()
+        stamp = "{}_{}_{}_{}".format(now.hour, now.day, now.month, now.year)
+    return stamp
 
 
 def assign_trial_parameters_to_config(
@@ -686,7 +693,7 @@ def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> Config
 if __name__ == "__main__":
 
     search_args = get_arch_search_args() # Specification for architecture search
-
+    
     show_results_dataframe = False # Simply show best trial from existing dataframe
 
     arch_search_dir = os.path.join(get_base_results_dir(), "arch_search/")
@@ -746,16 +753,15 @@ if __name__ == "__main__":
                 os.makedirs(_dir, exist_ok=True)
 
         # Journal storage allows independent process optimisation
-        # storage = optuna.storages.JournalStorage(
-        #     optuna.storages.journal.JournalFileBackend(
-        #         os.path.join(arch_search_dir, journal_name)
-        #     )
-        # )
-
-        storage = optuna.storages.RDBStorage(
-            url="sqlite:///optuna_study.db",  # Creates optuna_study.db in current dir
-            engine_kwargs={"connect_args": {"timeout": 10}},  # Prevents DB lock issues
+        storage = optuna.storages.JournalStorage(
+            optuna.storages.journal.JournalFileBackend(
+                os.path.join(arch_search_dir, journal_name)
+            )
         )
+        # storage = optuna.storages.RDBStorage(
+        #     url="sqlite:///optuna_study.db",  # Creates optuna_study.db in current dir
+        #     engine_kwargs={"connect_args": {"timeout": 10}},  # Prevents DB lock issues
+        # )
 
         # Minimise negative log-likelihood
         study = optuna.create_study(
@@ -787,22 +793,8 @@ if __name__ == "__main__":
             df_name=df_name
         )
 
-        # Run multiprocessed architecture search or single process
-        if search_args.multiprocess:
-
-            def mp_optimize(process, study): 
-                # Function links processes to same study (lambdas not allowed)
-                study.optimize(
-                    trial_fn, n_trials=search_args.n_trials, callbacks=[callback_fn]
-                )
-
-            with mp.Pool(processes=search_args.n_processes) as pool:
-                pool.map(
-                    partial(mp_optimize, study=study), 
-                    [*range(search_args.n_parallel)] # Number of parallel jobs per process in args.n_processes?
-                )
-        else:
-            study.optimize(trial_fn, n_trials=search_args.n_trials, callbacks=[callback])
+        # Only run one trial per worker...
+        study.optimize(trial_fn, n_trials=search_args.n_trials, callbacks=[callback])
 
         print("Number of finished trials: {}".format(len(study.trials)))
 
