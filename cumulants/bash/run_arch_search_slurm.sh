@@ -1,8 +1,14 @@
 #!/bin/bash
 
+# Submit multiple jobs that each load an optuna study from journal storage 
+# and add a trial. 
+# - N_JOBS here will run individual trials (or as many as can be run in the time given to the sbatch job)
+#   so that 
+
 # --- Config ---
 STUDY_NAME="arch_para"
-N_JOBS=10
+N_JOBS=20
+FREEZE_FLAG="--no-freeze-parameters"
 
 # Don't time stamp so storage is in the same place for each slurm job
 OUT_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/arch_search/"
@@ -51,7 +57,7 @@ MULTI_SLURM=1 python arch_search_slurm.py \
 --redshift 0.0 \
 --order_idx 0 1 2 \
 $LINEARISED_FLAG \
---no-freeze-parameters \
+$FREEZE_FLAG \
 $PRETRAIN_FLAG
 
 EOF

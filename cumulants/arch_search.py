@@ -564,48 +564,53 @@ def callback(
     arch_search_dir: str
 ) -> None:
 
-    def json_serial(obj):
-        """ JSON serializer for objects not serializable by default json """
-        if isinstance(obj, (datetime)):
-            return obj.isoformat()
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        if isinstance(obj, set):
-            return list(obj)
-        return str(obj)
+    def record_best_trial(study):
+        def json_serial(obj):
+            """ JSON serializer for objects not serializable by default json """
+            if isinstance(obj, (datetime)):
+                return obj.isoformat()
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, set):
+                return list(obj)
+            return str(obj)
 
-    # try:
-    trial_dict = study.best_trial.__dict__
-    filtered = {k: v for k, v in trial_dict.items() if k != "intermediate_values"} # Remove long list of losses
+        trial_dict = study.best_trial.__dict__
+        filtered = {
+            k: v for k, v in trial_dict.items() 
+            if k not in ["_distributions", "intermediate_values"]
+        } 
 
-    print("@" * 80 + datetime.today().strftime('%Y-%m-%d %H:%M:%S'))
-    print("Best values so far:\n\t{}\n\t{}".format(study.best_trial.params, study.best_trial.value))
-    print("Best trial so far:\n\t{}".format(filtered))
-    print("Optuna figures saved at:\n\t{}".format(figs_dir))
-    print("@" * 80 + "n_trials=" + str(len(study.trials)))
+        print("@" * 80 + datetime.today().strftime('%Y-%m-%d %H:%M:%S'))
+        print("Best values so far:\n\t{}\n\t{}".format(study.best_trial.params, study.best_trial.value))
+        print("Best trial so far:\n\t{}".format(filtered))
+        print("Optuna figures saved at:\n\t{}".format(figs_dir))
+        print("@" * 80 + "n_trials=" + str(len(study.trials)))
 
-    # Write best trial to json
-    trial_json_path = os.path.join(figs_dir, "best_trial.json")
-    # with open(trial_json_path, "w") as f:
-    #     json.dump(filtered, f, indent=2, default=json_serial)
+        # Write best trial to json
+        trial_json_path = os.path.join(figs_dir, "best_trial.json")
 
-    # Append new entry to json file (load previous json and append to it)
-    if os.path.exists(trial_json_path):
-        with open(trial_json_path, "r") as f:
-            try:
-                data = json.load(f)
-                if not isinstance(data, list): # Corrupted or wrong format
+        # Append new entry to json file (load previous json and append to it)
+        if os.path.exists(trial_json_path):
+            with open(trial_json_path, "r") as f:
+                try:
+                    data = json.load(f)
+                    if not isinstance(data, list): # Corrupted or wrong format
+                        data = []
+                except json.JSONDecodeError:
                     data = []
-            except json.JSONDecodeError:
-                data = []
-    else:
-        data = []
+        else:
+            data = []
 
-    data.append(filtered)
+        data.append(filtered)
 
-    with open(trial_json_path, "w") as f:
-        json.dump(data, f, indent=2, default=json_serial)
+        with open(trial_json_path, "w") as f:
+            json.dump(data, f, indent=2, default=json_serial)
 
+    # Record best trial
+    record_best_trial(study)
+
+    # Plot hyperparameter search
     layout_kwargs = dict(template="simple_white", title=dict(text=None))
 
     fig = optuna.visualization.plot_param_importances(study)
@@ -630,8 +635,6 @@ def callback(
 
     df = study.trials_dataframe()
     df.to_pickle(os.path.join(arch_search_dir, df_name)) 
-    # except Exception as e:
-    #     print("HYPERPARAMETER PLOT ISSUE:\n\t", e) # Not enough trials to plot yet
 
 
 def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> ConfigDict:
@@ -670,7 +673,7 @@ def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> Config
         # Training
         "n_batch" : trial.suggest_int(name="n_batch", low=40, high=100, step=10), 
         "lr" : trial.suggest_float(name="lr", low=1e-5, high=1e-3, log=True), 
-        "patience" : trial.suggest_int(name="p", low=10, high=500, step=10),
+        "patience" : trial.suggest_int(name="p", low=10, high=200, step=10),
     }
 
     config.train.n_batch = training_hyperparameters["n_batch"]
@@ -746,16 +749,16 @@ if __name__ == "__main__":
                 os.makedirs(_dir, exist_ok=True)
 
         # Journal storage allows independent process optimisation
-        # storage = optuna.storages.JournalStorage(
-        #     optuna.storages.journal.JournalFileBackend(
-        #         os.path.join(arch_search_dir, journal_name)
-        #     )
-        # )
-
-        storage = optuna.storages.RDBStorage(
-            url="sqlite:///optuna_study.db",  # Creates optuna_study.db in current dir
-            engine_kwargs={"connect_args": {"timeout": 10}},  # Prevents DB lock issues
+        storage = optuna.storages.JournalStorage(
+            optuna.storages.journal.JournalFileBackend(
+                os.path.join(arch_search_dir, journal_name)
+            )
         )
+
+        # storage = optuna.storages.RDBStorage(
+        #     url="sqlite:///optuna_study.db",  # Creates optuna_study.db in current dir
+        #     engine_kwargs={"connect_args": {"timeout": 10}},  # Prevents DB lock issues
+        # )
 
         # Minimise negative log-likelihood
         study = optuna.create_study(

@@ -5,6 +5,8 @@
 *.eqx
 *.log
 *.out
+*.db
+*.db-journal
 !paper/sbi_example.png
 !paper/paper.pdf
 !assets/cover.png

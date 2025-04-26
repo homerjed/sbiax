@@ -794,7 +794,7 @@ if __name__ == "__main__":
         )
 
         # Only run one trial per worker...
-        study.optimize(trial_fn, n_trials=search_args.n_trials, callbacks=[callback])
+        study.optimize(trial_fn, n_trials=search_args.n_trials, callbacks=[callback_fn])
 
         print("Number of finished trials: {}".format(len(study.trials)))
 

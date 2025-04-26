@@ -8,8 +8,9 @@ TIMESTAMP=$(date +'%m%d_%H%M')
 OUT_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/arch_search/$TIMESTAMP"
 mkdir -p "$OUT_DIR"
 
+LINEARISED_FLAG="--no-linearised"
+
 for PRETRAIN_FLAG in "--pre-train" "--no-pre-train"; do
-for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
 
 if [[ "$PRETRAIN_FLAG" == "--pre-train" ]]; then
     JOB_NAME="arch_pt"
@@ -60,5 +61,4 @@ $PRETRAIN_FLAG
 
 EOF
 
-done
 done
