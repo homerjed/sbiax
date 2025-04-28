@@ -13,15 +13,31 @@ FREEZE_FLAG="--no-freeze-parameters"
 # Don't time stamp so storage is in the same place for each slurm job
 OUT_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/arch_search/"
 
+# Empty the directory where .out/.err are stored for arch search
+WORKERS_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/arch_search/workers/"
+if [ -d "$WORKERS_DIR" ]; then
+    echo "Emptying directory: $WORKERS_DIR"
+    rm -rf "${WORKERS_DIR:?}/"*
+else
+    echo "Directory does not exist: $WORKERS_DIR"
+fi
+
 for PRETRAIN_FLAG in "--pre-train" "--no-pre-train"; do
 for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
 
+# Skip linearised and pretraining together
+if [[ "$LINEARISED_FLAG" == "--linearised" && "$PRETRAIN_FLAG" == "--pre-train" ]]; then
+    continue
+fi
+
+# Set flag job names based on args
 if [[ "$PRETRAIN_FLAG" == "--pre-train" ]]; then
     JOB_NAME="arch_pt"
 else
     JOB_NAME="arch_npt"
 fi
 
+# Set flag job names based on args
 if [[ "$LINEARISED_FLAG" == "--linearised" ]]; then
     JOB_NAME="${JOB_NAME}_l"
 else

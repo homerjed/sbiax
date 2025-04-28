@@ -12,11 +12,27 @@ typecheck = jaxtyped(typechecker=typechecker)
 
 USE_SCALERS = True
 
+def exists(v):
+    return v is not None
+
+
+def default(v, d):
+    return v if exists(v) else d
+
+
 DEFAULT_MAF_ARCH = dict(
     width_size       = 32,
     n_layers         = 2,
     nn_depth         = 2,
     activation       = "tanh",
+    use_scaling      = True
+)
+
+HP_OPT_MAF_ARCH = dict(
+    width_size       = 2 ** 6, #32,
+    n_layers         = 6,
+    nn_depth         = 2,
+    activation       = "swish",
     use_scaling      = True
 )
 
@@ -42,6 +58,72 @@ DEFAULT_OPT = dict(
     opt            = "adam",
     opt_kwargs     = {}
 )
+
+HP_OPT_OPT = dict(
+    start_step     = 0,
+    n_epochs       = 10_000,
+    n_batch        = 80, #100,
+    patience       = 70, #200,
+    lr             = 0.000489390761268084, #1e-3,
+    opt            = "adam",
+    opt_kwargs     = {}
+)
+
+DEFAULT_OPT = HP_OPT_OPT  
+DEFAULT_MAF_ARCH = HP_OPT_MAF_ARCH
+
+
+def _config_defaults(
+    config: ConfigDict,
+    seed: int,
+    redshift: float,
+    n_linear_sims: int,
+    compression: Literal["nn", "linear"] = "linear",
+    order_idx: list[int] = [0, 1, 2],
+    sbi_type: str = "nle",
+    pre_train: bool = False,
+    freeze_parameters: bool = False,
+    reduced_cumulants: bool = False,
+) -> ConfigDict:
+
+    config.seed               = seed # For argparse script running without args!
+
+    # Data
+    # config.dataset_name       = (
+    #     ("reduced cumulants" if reduced_cumulants else "cumulants")
+    #     if not bulk else ""
+    # )
+    config.redshift           = redshift
+    config.scales             = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
+    config.order_idx          = order_idx # Maximum index is 2
+    config.compression        = compression
+    config.linearised         = linearised
+    config.covariance_epsilon = None # 1e-6
+    config.reduced_cumulants  = reduced_cumulants
+    config.pre_train          = pre_train and (not linearised)
+    config.n_linear_sims      = n_linear_sims # This is for pre-train or linearised simulations 
+    config.use_expectation    = False # Noiseless datavector
+    config.valid_fraction     = 0.1
+    config.freeze_parameters  = freeze_parameters
+
+    # Miscallaneous
+    config.use_scalers        = USE_SCALERS # Input scalers for (xi, pi) in NDEs (NOTE: checked that scalings aren't optimised!)
+    config.use_pca            = False # Need to add this into other scripts...
+    config.ema_rate           = 0.995
+    config.use_ema            = False # Use it and sample with it
+
+    # SBI
+    config.sbi_type           = sbi_type
+
+    # Experiments
+    config.exp_name           = "z={}_m={}".format(config.redshift, "".join(map(str, config.order_idx)))
+
+    # Posterior sampling
+    config.n_steps            = 200
+    config.n_walkers          = 1000
+    config.burn               = int(0.1 * config.n_steps)
+
+    return config
 
 
 @typecheck
@@ -151,6 +233,137 @@ def cumulants_config(
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
         config.ndes          = [maf] #cnf]#, cnf, cnf] 
+        config.n_ndes        = len(config.ndes)
+
+        # Optimisation hyperparameters (same for all NDEs...)
+        config.pretrain = pretrain = ConfigDict()
+        pretrain.start_step  = 0
+        pretrain.n_epochs    = 10_000
+        pretrain.n_batch     = 100 
+        pretrain.patience    = 10
+        pretrain.lr          = 1e-3
+        pretrain.opt         = "adam" 
+        pretrain.opt_kwargs  = {}
+
+        config.train = train = ConfigDict()
+        train.start_step     = 0
+        train.n_epochs       = 10_000
+        train.n_batch        = 100 
+        train.patience       = 200
+        train.lr             = 1e-3
+        train.opt            = "adam" 
+        train.opt_kwargs     = {}
+
+    return config
+
+
+@typecheck
+def arch_search_cumulants_config( # Copy of the above config for architecture search
+    seed: int = 0, 
+    redshift: float = 0., 
+    reduced_cumulants: bool = False,
+    sbi_type: Literal["nle", "npe"] = "nle", 
+    linearised: bool = True, 
+    compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
+    order_idx: list[int] = [0, 1, 2],
+    freeze_parameters: bool = False,
+    n_linear_sims: Optional[int] = None,
+    pre_train: bool = False
+) -> ConfigDict:
+
+    config = ConfigDict()
+
+    config.seed               = seed # For argparse script running without args!
+
+    # Data
+    config.dataset_name       = "reduced cumulants" if reduced_cumulants else "cumulants" 
+    config.redshift           = redshift
+    config.scales             = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
+    config.order_idx          = order_idx # Maximum index is 2
+    config.compression        = compression
+    config.linearised         = linearised
+    config.covariance_epsilon = None # 1e-6
+    config.reduced_cumulants  = reduced_cumulants
+    config.pre_train          = pre_train and (not linearised)
+    config.n_linear_sims      = n_linear_sims # This is for pre-train or linearised simulations 
+    config.use_expectation    = False # Noiseless datavector
+    config.valid_fraction     = 0.1
+    config.freeze_parameters  = freeze_parameters
+
+    # Miscallaneous
+    config.use_scalers        = USE_SCALERS # Input scalers for (xi, pi) in NDEs (NOTE: checked that scalings aren't optimised!)
+    config.use_pca            = False # Need to add this into other scripts...
+    config.ema_rate           = 0.995
+    config.use_ema            = False # Use it and sample with it
+
+    # SBI
+    config.sbi_type           = sbi_type
+
+    # Experiments
+    config.exp_name           = "z={}_m={}".format(config.redshift, "".join(map(str, config.order_idx)))
+
+    # Posterior sampling
+    config.n_steps            = 200
+    config.n_walkers          = 1000
+    config.burn               = int(0.1 * config.n_steps)
+
+    if config.linearised:
+        # NDEs
+        config.cnf = cnf = ConfigDict()
+        cnf.model_type       = "cnf"
+        cnf.width_size       = DEFAULT_CNF_ARCH["width_size"]
+        cnf.depth            = DEFAULT_CNF_ARCH["depth"]
+        cnf.activation       = DEFAULT_CNF_ARCH["activation"]
+        cnf.dropout_rate     = DEFAULT_CNF_ARCH["dropout_rate"]
+        cnf.dt               = DEFAULT_CNF_ARCH["dt"]
+        cnf.t1               = DEFAULT_CNF_ARCH["t1"]
+        cnf.solver           = DEFAULT_CNF_ARCH["solver"]
+        cnf.exact_log_prob   = DEFAULT_CNF_ARCH["exact_log_prob"]
+        cnf.use_scaling      = DEFAULT_CNF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
+
+        config.maf = maf = ConfigDict()
+        maf.model_type       = "maf" # = model.__class__.__name__
+        maf.width_size       = DEFAULT_MAF_ARCH["width_size"]
+        maf.n_layers         = DEFAULT_MAF_ARCH["n_layers"]
+        maf.nn_depth         = DEFAULT_MAF_ARCH["nn_depth"]
+        maf.activation       = DEFAULT_MAF_ARCH["activation"]
+        maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
+
+        config.ndes          = [cnf]
+        config.n_ndes        = len(config.ndes)
+
+        # Optimisation hyperparameters (same for all NDEs...)
+        config.train = train = ConfigDict()
+        train.start_step     = 0
+        train.n_epochs       = 10_000
+        train.n_batch        = 100 
+        train.patience       = 10
+        train.lr             = 1e-3
+        train.opt            = "adam" 
+        train.opt_kwargs     = {}
+    else:
+        # NDEs
+        config.cnf = cnf = ConfigDict()
+        cnf.model_type       = "cnf"
+        cnf.width_size       = DEFAULT_CNF_ARCH["width_size"]
+        cnf.depth            = DEFAULT_CNF_ARCH["depth"]
+        cnf.activation       = DEFAULT_CNF_ARCH["activation"]
+        cnf.dropout_rate     = DEFAULT_CNF_ARCH["dropout_rate"]
+        cnf.dt               = DEFAULT_CNF_ARCH["dt"]
+        cnf.t1               = DEFAULT_CNF_ARCH["t1"]
+        cnf.solver           = DEFAULT_CNF_ARCH["solver"]
+        cnf.exact_log_prob   = DEFAULT_CNF_ARCH["exact_log_prob"]
+        cnf.use_scaling      = DEFAULT_CNF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
+
+        config.maf = maf = ConfigDict()
+        maf.model_type       = "maf" # = model.__class__.__name__
+        maf.width_size       = DEFAULT_MAF_ARCH["width_size"]
+        maf.n_layers         = DEFAULT_MAF_ARCH["n_layers"]
+        maf.nn_depth         = DEFAULT_MAF_ARCH["nn_depth"]
+        maf.activation       = DEFAULT_MAF_ARCH["activation"]
+        maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
+
+        config.ndes          = [cnf]
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)

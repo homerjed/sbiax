@@ -34,6 +34,7 @@ from sbiax.inference import nuts_sample
 from configs import (
     arch_search_config, 
     cumulants_config, 
+    arch_search_cumulants_config, 
     get_results_dir, 
     get_posteriors_dir, 
     get_ndes_from_config
@@ -127,6 +128,7 @@ def objective(
     """
         Config
     """
+
     # Seed overwritten in config
     seed = args.seed + trial.number if random_seeds else args.seed
     config.seed = seed
@@ -142,11 +144,11 @@ def objective(
     ) = jr.split(key, 6)
 
     results_dir = os.path.join(
-        get_results_dir(config, args, arch_search=True), "{}/".format(trial.number)
+        get_results_dir(config, args, arch_search=True), #"{}/".format(trial.number)
     )
 
     posteriors_dir = os.path.join(
-        get_posteriors_dir(config, args, arch_search=True), "{}/".format(trial.number)
+        get_posteriors_dir(config, args, arch_search=True), #"{}/".format(trial.number)
     )
 
     for _dir in [posteriors_dir, results_dir]:
@@ -673,16 +675,18 @@ def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> Config
         config.ndes[0].n_layers = model_hyperparameters["depth"]
         config.ndes[0].nn_depth = model_hyperparameters["layers"]
 
+    # Training
     training_hyperparameters = {
-        # Training
         "n_batch" : trial.suggest_int(name="n_batch", low=40, high=100, step=10), 
         "lr" : trial.suggest_float(name="lr", low=1e-5, high=1e-3, log=True), 
-        "patience" : trial.suggest_int(name="p", low=10, high=500, step=10),
+        "patience" : trial.suggest_int(name="p", low=10, high=200, step=10),
+        "opt" : trial.suggest_categorical(name="opt", choices=["adam", "adamw", "adabelief", "lion"])
     }
 
     config.train.n_batch = training_hyperparameters["n_batch"]
     config.train.lr = training_hyperparameters["lr"]
     config.train.patience = training_hyperparameters["patience"]
+    config.train.opt = training_hyperparameters["opt"]
 
     hyperparameters = {**model_hyperparameters, **training_hyperparameters} 
     print("Hyperparameters:\n", hyperparameters)
@@ -694,13 +698,9 @@ if __name__ == "__main__":
 
     search_args = get_arch_search_args() # Specification for architecture search
     
-    show_results_dataframe = False # Simply show best trial from existing dataframe
-
-    arch_search_dir = os.path.join(get_base_results_dir(), "arch_search/")
-
     args = get_cumulants_sbi_args() # Don't conflate with arch_search_args 
 
-    config = cumulants_config(
+    config = arch_search_cumulants_config(
         seed=0, # Gets replaced in objective!
         redshift=args.redshift, 
         reduced_cumulants=args.reduced_cumulants,
@@ -713,7 +713,7 @@ if __name__ == "__main__":
         pre_train=args.pre_train
     )
 
-    # Identify this arch search run later on
+    # Identify this arch search run later on (unique among different dataset/training types)
     identifier_str = "arch_search_{}_{}_{}_m{}".format(
         "l" if args.linearised else "nl", 
         "f" if args.freeze_parameters else "nf", 
@@ -721,92 +721,74 @@ if __name__ == "__main__":
         "".join(map(str, args.order_idx))
     )
 
-    if show_results_dataframe:
-        # df.to_pickle(os.path.join(arch_search_dir, "arch_search_df.pkl")) # Where to save it, usually as a .pkl
+    assert search_args.multiprocess and search_args.n_processes
 
-        with open(
-            os.path.join(
-                arch_search_dir, "arch_search_df_{}.pkl".format(identifier_str)
-            ), 
-            "rb"
-        ) as f:
-            loaded_df = pickle.load(f)
+    journal_name = "1pt_arch_search_{}_{}.log".format(identifier_str, date_stamp())
+    study_name = "1pt_nle_{}_{}".format(identifier_str, date_stamp())
+    df_name = "arch_search_df_{}_{}.pkl".format(identifier_str, date_stamp())
 
-        # Find the trial with the best value (minimum objective value)
-        best_trial_row = loaded_df.loc[loaded_df['value'].idxmin()]
+    arch_search_dir = os.path.join(get_base_results_dir(), "arch_search/")
+    arch_search_figs_dir = os.path.join(arch_search_dir, "figs_{}/".format(identifier_str))
 
-        print("Best Trial Parameters:")
-        print(best_trial_row.filter(like="params_")) 
-        print(best_trial_row)
+    for _dir in [arch_search_dir, arch_search_figs_dir]:
+        if not os.path.exists(_dir):
+            os.makedirs(_dir, exist_ok=True)
 
-    else:
-        assert search_args.multiprocess and search_args.n_processes
-
-        journal_name = "1pt_arch_search_{}_{}.log".format(identifier_str, date_stamp())
-        study_name = "1pt_nle_{}_{}".format(identifier_str, date_stamp())
-        df_name = "arch_search_df_{}_{}.pkl".format(identifier_str, date_stamp())
-
-        arch_search_figs_dir = os.path.join(arch_search_dir, "figs_{}/".format(identifier_str))
-
-        for _dir in [arch_search_dir, arch_search_figs_dir]:
-            if not os.path.exists(_dir):
-                os.makedirs(_dir, exist_ok=True)
-
-        # Journal storage allows independent process optimisation
-        storage = optuna.storages.JournalStorage(
-            optuna.storages.journal.JournalFileBackend(
-                os.path.join(arch_search_dir, journal_name)
-            )
+    # Journal storage allows independent process optimisation
+    storage = optuna.storages.JournalStorage(
+        optuna.storages.journal.JournalFileBackend(
+            os.path.join(arch_search_dir, journal_name)
         )
-        # storage = optuna.storages.RDBStorage(
-        #     url="sqlite:///optuna_study.db",  # Creates optuna_study.db in current dir
-        #     engine_kwargs={"connect_args": {"timeout": 10}},  # Prevents DB lock issues
-        # )
+    )
+    # storage = optuna.storages.RDBStorage(
+    #     url="sqlite:///optuna_study.db",  # Creates optuna_study.db in current dir
+    #     engine_kwargs={"connect_args": {"timeout": 10}},  # Prevents DB lock issues
+    # )
 
-        # Minimise negative log-likelihood
-        study = optuna.create_study(
-            study_name=study_name,
-            direction="minimize", 
-            storage=storage,
-            sampler=optuna.samplers.TPESampler(
-                n_startup_trials=search_args.n_startup_trials, multivariate=False
-            ),
-            load_if_exists=True
-        ) 
+    # Minimise negative log-likelihood
+    study = optuna.create_study(
+        study_name=study_name,
+        direction="minimize", 
+        storage=storage,
+        sampler=optuna.samplers.TPESampler(
+            n_startup_trials=search_args.n_startup_trials, multivariate=False
+        ),
+        load_if_exists=True
+    ) 
 
-        # study.enqueue_trial(good_hyperparams) 
+    # study.enqueue_trial(good_hyperparams) 
 
-        trial_fn = lambda trial: objective(
-            trial, 
-            args=args,
-            config=config,
-            random_seeds=search_args.random_seeds,
-            arch_search_dir=arch_search_dir, 
-            n_repeats=search_args.n_repeats, # 'Cross validation' of trials... doesn't work with pruning
-            show_tqdm=False
-        )
+    trial_fn = lambda trial: objective(
+        trial, 
+        args=args,
+        config=config,
+        random_seeds=search_args.random_seeds,
+        arch_search_dir=arch_search_dir, 
+        n_repeats=search_args.n_repeats, # 'Cross validation' of trials... doesn't work with pruning
+        show_tqdm=False
+    )
 
-        callback_fn = partial(
-            callback, 
-            figs_dir=arch_search_figs_dir, 
-            arch_search_dir=arch_search_dir,
-            df_name=df_name
-        )
+    callback_fn = partial(
+        callback, 
+        figs_dir=arch_search_figs_dir, 
+        arch_search_dir=arch_search_dir,
+        df_name=df_name
+    )
 
-        # Only run one trial per worker...
-        study.optimize(trial_fn, n_trials=search_args.n_trials, callbacks=[callback_fn])
+    # Only run one trial per worker...
+    study.optimize(trial_fn, n_trials=search_args.n_trials, callbacks=[callback_fn])
 
-        print("Number of finished trials: {}".format(len(study.trials)))
+    print("Number of finished trials: {}".format(len(study.trials)))
 
-        print("Best trial:")
+    print("Best trial:")
 
-        trial = study.best_trial
+    trial = study.best_trial
 
-        print(">Value: {}".format(trial.value))
-        print(">Number: {}".format(trial.number))
-        print(">Params: ")
-        for key, value in trial.params.items():
-            print("\t{} : {}".format(key, value))
+    print(">Value: {}".format(trial.value))
+    print(">Number: {}".format(trial.number))
+    print(">Params: ")
+    for key, value in trial.params.items():
+        print("\t{} : {}".format(key, value))
 
-        df = study.trials_dataframe()
-        df.to_pickle(os.path.join(arch_search_dir, df_name)) # Where to save it, usually as a .pkl
+    df = study.trials_dataframe()
+    df.to_pickle(os.path.join(arch_search_dir, df_name)) # Where to save it, usually as a .pkl

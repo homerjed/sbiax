@@ -87,7 +87,9 @@ def get_results_dir(
         get_base_results_dir(), 
         get_config_subdir(config, args, arch_search=arch_search)
     )
-    make_dirs(results_dir)
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir, exist_ok=True)
+    print("RESULTS_DIR:\n", results_dir)
     dump_args_and_config(args, config, results_dir=results_dir) # Save conifg and args in run dir
     return results_dir
 
@@ -102,12 +104,15 @@ def get_posteriors_dir(
         get_base_posteriors_dir(), 
         get_config_subdir(config, args, arch_search=arch_search)
     )
-    make_dirs(posteriors_dir)
+    if not os.path.exists(posteriors_dir):
+        os.makedirs(posteriors_dir, exist_ok=True)
+    print("POSTERIORS_DIR:\n", posteriors_dir)
     return posteriors_dir
 
 
 def get_multi_z_posterior_dir(
-    config: ConfigDict, args: argparse.Namespace
+    config: ConfigDict, 
+    args: argparse.Namespace
 ) -> str:
     multi_z_dir = os.path.join(
         get_base_posteriors_dir(), 

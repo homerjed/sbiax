@@ -674,11 +674,14 @@ def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> Config
         "n_batch" : trial.suggest_int(name="n_batch", low=40, high=100, step=10), 
         "lr" : trial.suggest_float(name="lr", low=1e-5, high=1e-3, log=True), 
         "patience" : trial.suggest_int(name="p", low=10, high=200, step=10),
+        # "opt" : trial.suggest_categorical(name="opt", choices=["adam", "adamw", "adabelief", ""])
     }
 
     config.train.n_batch = training_hyperparameters["n_batch"]
     config.train.lr = training_hyperparameters["lr"]
     config.train.patience = training_hyperparameters["patience"]
+
+    # opt = getattr(optax, config.pretrain.opt)(config.pretrain.lr)
 
     hyperparameters = {**model_hyperparameters, **training_hyperparameters} 
     print("Hyperparameters:\n", hyperparameters)
