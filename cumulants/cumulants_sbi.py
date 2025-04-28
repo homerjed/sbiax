@@ -454,7 +454,7 @@ if 1:
         (
             r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
             + " z={}".format(config.redshift) + "\n"
-            + (" linearised" if config.linearised else " Quijote") + "\n"
+            + (" linearised" if config.linearised else " Quijote") + ("[bulk]" if args.bulk_or_tails == "bulk" else "[tails]") + "\n"
             + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
             + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
             + r"$k_n$ = [{}]".format(

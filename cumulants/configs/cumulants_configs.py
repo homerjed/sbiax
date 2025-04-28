@@ -232,7 +232,7 @@ def cumulants_config(
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf] #cnf]#, cnf, cnf] 
+        config.ndes          = [cnf] #cnf]#, cnf, cnf] 
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
@@ -496,7 +496,7 @@ def bulk_cumulants_config(
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf]#, cnf, cnf] #maf, maf, maf]  
+        config.ndes          = [cnf]#, cnf, cnf] #maf, maf, maf]  
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
