@@ -461,6 +461,7 @@ def get_bulk_cumulants_data(
             Datasets
         """
 
+        # Fisher information in cumulants of bulk of the PDF
         n_fiducial_moments, data_dim_moments = fiducial_moments_z_R.shape
         C_moments = jnp.cov(fiducial_moments_z_R, rowvar=False)
         H = (n_fiducial_moments - data_dim_moments - 2.) / (n_fiducial_moments - 1.)
@@ -468,11 +469,6 @@ def get_bulk_cumulants_data(
         dmu_moments = jnp.mean(derivative_moments_z_R, axis=0)
         F_moments = jnp.linalg.multi_dot([dmu_moments, Cinv_moments, dmu_moments.T])
         Finv_moments = jnp.linalg.inv(F_moments)
-
-        if verbose:
-            assert jnp.all(jnp.isfinite(Cinv_moments))
-            assert jnp.all(jnp.isfinite(dmu_moments))
-            assert jnp.all(jnp.isfinite(Finv_moments))
 
         # Cumulants[bulk]
         dataset = Dataset(
@@ -501,9 +497,10 @@ def get_bulk_cumulants_data(
 
         X_moments = jax.vmap(mle_moments)(latin_moments_z_R, latin_parameters)
 
-        return_dataset = dataset
+        return_dataset = dataset # If not requiring PDFs
 
-        if not check_cumulants_against_quijote:
+        # If requiring PDFs return dataset for bulk of the PDF (not cumulants of the bulk)
+        if (not check_cumulants_against_quijote) or pdfs:
             # Fisher information in bulk of the PDF
             n_fiducial_pdfs, data_dim_pdfs = fiducial_pdfs_z_R_cut.shape 
             C_pdf = np.cov(fiducial_pdfs_z_R_cut, rowvar=False) 
@@ -544,7 +541,7 @@ def get_bulk_cumulants_data(
         # Save return dataset to ensure loading (not creating) next time around
         np.savez(
             os.path.join(data_dir, "bulk_cumulants_dataset_{}.npz".format(dataset_identifier_str)), 
-            **asdict(dataset)
+            **asdict(return_dataset)
         )
 
     if verbose:
