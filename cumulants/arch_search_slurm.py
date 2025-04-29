@@ -143,14 +143,8 @@ def objective(
         key_datavector, key_state, key_sample
     ) = jr.split(key, 6)
 
-    results_dir = os.path.join(
-        get_results_dir(config, args, arch_search=True), #"{}/".format(trial.number)
-    )
-
-    posteriors_dir = os.path.join(
-        get_posteriors_dir(config, args, arch_search=True), #"{}/".format(trial.number)
-    )
-
+    results_dir = get_results_dir(config, args, arch_search=True)
+    posteriors_dir = get_posteriors_dir(config, args, arch_search=True)
     for _dir in [posteriors_dir, results_dir]:
         if not os.path.exists(_dir):
             os.makedirs(_dir, exist_ok=True)
@@ -562,6 +556,10 @@ def objective(
 
         scores.append(stats[0]["all_valid_loss"]) # Assuming one NDE
 
+    # Delete results directories of useless trials
+    if trial.state != optuna.trial.TrialState.COMPLETE:
+        rmtree(results_dir, ignore_errors=True)
+
     return np.mean(scores) # Assuming one NDE
 
 
@@ -573,47 +571,61 @@ def callback(
     arch_search_dir: str
 ) -> None:
 
-    def json_serial(obj):
-        """ JSON serializer for objects not serializable by default json """
-        if isinstance(obj, (datetime)):
-            return obj.isoformat()
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        if isinstance(obj, set):
-            return list(obj)
-        return str(obj)
+    def json_best_trial():
+        def json_serial(obj):
+            """ JSON serializer for objects not serializable by default json """
+            if isinstance(obj, (datetime)):
+                return obj.isoformat()
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, set):
+                return list(obj)
+            return str(obj)
 
-    # try:
-    trial_dict = study.best_trial.__dict__
-    filtered = {k: v for k, v in trial_dict.items() if k != "intermediate_values"} # Remove long list of losses
+        # Filter for outliers
+        trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+        values = np.array([t.value for t in trials]) # Compute validation losses
+        low, high = np.percentile(values, [5, 95])
+        filtered_trials = [t for t in trials if low <= t.value <= high]
+        best_filtered = min(filtered_trials, key=lambda t: t.value)
+        print("Best trial after trimming outliers:\n", best_filtered.params)
 
-    print("@" * 80 + datetime.today().strftime('%Y-%m-%d %H:%M:%S'))
-    print("Best values so far:\n\t{}\n\t{}".format(study.best_trial.params, study.best_trial.value))
-    print("Best trial so far:\n\t{}".format(filtered))
-    print("Optuna figures saved at:\n\t{}".format(figs_dir))
-    print("@" * 80 + "n_trials=" + str(len(study.trials)))
+        trial_dict = best_filtered # study.best_trial.__dict__
+        filtered = {k: v for k, v in trial_dict.items() if k != "intermediate_values"} # Remove long list of losses
 
-    # Write best trial to json
-    trial_json_path = os.path.join(figs_dir, "best_trial.json")
-    # with open(trial_json_path, "w") as f:
-    #     json.dump(filtered, f, indent=2, default=json_serial)
+        print("@" * 80 + datetime.today().strftime('%Y-%m-%d %H:%M:%S'))
+        print("Best values so far:\n\t{}\n\t{}".format(study.best_trial.params, study.best_trial.value))
+        print("Best trial so far:\n\t{}".format(filtered))
+        print("Optuna figures saved at:\n\t{}".format(figs_dir))
+        print("@" * 80 + "n_trials=" + str(len(study.trials)))
 
-    # Append new entry to json file (load previous json and append to it)
-    if os.path.exists(trial_json_path):
-        with open(trial_json_path, "r") as f:
-            try:
-                data = json.load(f)
-                if not isinstance(data, list): # Corrupted or wrong format
+        # Write best trial to json
+        trial_json_path = os.path.join(figs_dir, "best_trial.json")
+        # with open(trial_json_path, "w") as f:
+        #     json.dump(filtered, f, indent=2, default=json_serial)
+
+        # Append new entry to json file (load previous json and append to it)
+        if os.path.exists(trial_json_path):
+            with open(trial_json_path, "r") as f:
+                try:
+                    data = json.load(f)
+                    if not isinstance(data, list): # Corrupted or wrong format
+                        data = []
+                except json.JSONDecodeError:
                     data = []
-            except json.JSONDecodeError:
-                data = []
-    else:
-        data = []
+        else:
+            data = []
 
-    data.append(filtered)
+        data.append(filtered)
 
-    with open(trial_json_path, "w") as f:
-        json.dump(data, f, indent=2, default=json_serial)
+        with open(trial_json_path, "w") as f:
+            json.dump(data, f, indent=2, default=json_serial)
+
+    json_best_trial()
+
+    # def delete_bad_trials():
+    #     if trial.state != optuna.trial.TrialState.COMPLETE:
+
 
     layout_kwargs = dict(template="simple_white", title=dict(text=None))
 

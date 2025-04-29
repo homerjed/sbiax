@@ -78,6 +78,7 @@ for bulk_or_tails in ["bulk", "tails"]:
 
         args.seed = s
         args.bulk_or_tails = bulk_or_tails
+        args.freeze_parameters = False
 
         # Load Bulk PDF Fisher matrix just once
         if s == 0:
@@ -86,7 +87,6 @@ for bulk_or_tails in ["bulk", "tails"]:
                     os.path.join(
                         data_dir, 
                         "Finv_bulk_pdfs_all_z_{}.npy".format(
-                            # "".join(map(str, args.order_idx)), NOTE: no cumulants associated with bulk pdf?!
                             "f" if args.freeze_parameters else "nf"
                         )
                     )
@@ -98,7 +98,6 @@ for bulk_or_tails in ["bulk", "tails"]:
                     os.path.join(
                         data_dir, 
                         "Finv_bulk_pdfs_all_z_{}.npy".format(
-                            # "".join(map(str, args.order_idx)),
                             "f" if args.freeze_parameters else "nf"
                         )
                     ),
@@ -136,7 +135,7 @@ for bulk_or_tails in ["bulk", "tails"]:
 # Plot histogram of posterior widths across all seeds for all multi-z posteriors
 landscape = False
 
-vertical_lines = jnp.diag(Finv_bulk_pdfs_all_z)
+vertical_lines = jnp.diag(Finv_bulk_pdfs_all_z) # Variances (widths) for Bulk PDF Gaussian posterior
 
 plotting_dict = dict(
     bulk=dict(color="b"),
@@ -146,40 +145,59 @@ plotting_dict = dict(
 n_bins = 10
 
 if landscape:
-    fig, axes = plt.subplots(1, 4, figsize=(16, 4), sharey=True)
+    fig, axes = plt.subplots(1, alpha.size, figsize=(16, 4), sharey=True)
 else:
-    fig, axes = plt.subplots(4, 1, figsize=(5, 16), sharex=True)
+    fig, axes = plt.subplots(alpha.size, 1, figsize=(5, 16), sharex=False)
 axes = np.atleast_1d(axes)
 
-for i, (ax, posterior_vars_bulk, posterior_vars_tails, vline) in enumerate(
-    zip(
-        axes, 
-        posterior_widths["bulk"],
-        posterior_widths["tails"],
-        vertical_lines  
-    )
-):
+for i in range(alpha.size):
+
+    ax = axes.ravel()[i]
+
     _ = ax.hist(
-        posterior_vars_bulk[i], bins=n_bins, color=plotting_dict["bulk"]["color"], edgecolor='none', alpha=0.7, label='Bulk'
+        posterior_widths["bulk"][:, i], 
+        bins=n_bins, 
+        color=plotting_dict["bulk"]["color"], 
+        edgecolor="none", 
+        alpha=0.7, 
+        label="SBI[bulk]"
     )
     _ = ax.hist(
-        posterior_vars_bulk[i], bins=n_bins, color='k', histtype="step", alpha=0.7
+        posterior_widths["bulk"][:, i], 
+        bins=n_bins, 
+        color='k', 
+        histtype="step", 
+        alpha=0.7
     )
 
     _ = ax.hist(
-        posterior_vars_tails[i], bins=n_bins, color=plotting_dict["tails"]["color"], edgecolor='none', alpha=0.7, label='Tails'
+        posterior_widths["tails"][:, i], 
+        bins=n_bins, 
+        color=plotting_dict["tails"]["color"], 
+        edgecolor="none", 
+        alpha=0.7, 
+        label="SBI[tails]"
     )
     _ = ax.hist(
-        posterior_vars_tails[i], bins=n_bins, color='k', histtype="step", alpha=0.7
+        posterior_widths["tails"][:, i], 
+        bins=n_bins, 
+        color='k', 
+        histtype="step", 
+        alpha=0.7
     )
 
     # Bulk Fisher information line
-    ax.axvline(vertical_lines[i], color='black', linestyle='--', linewidth=2)
+    ax.axvline(
+        vertical_lines[i], 
+        color="black", 
+        linestyle="--", 
+        linewidth=2, 
+        label=r"$F^{{-1}}[{}]$".format(parameter_strings[i][1:-1])
+    )
 
     ax.set_xlabel(r"$\sigma^2[{}]$".format(parameter_strings[i][1:-1])) # Trim '$' from parameter strings
 
-    # ax.set_title(f"Histogram Set {i}")
-    ax.legend()
+    ax.legend(frameon=False)
 
 fig.tight_layout()
 

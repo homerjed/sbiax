@@ -30,6 +30,11 @@ if [[ "$LINEARISED_FLAG" == "--linearised" && "$PRETRAIN_FLAG" == "--pre-train" 
     continue
 fi
 
+# # Skip linearised training
+# if [[ "$LINEARISED_FLAG" == "--linearised" && "$PRETRAIN_FLAG" == "--pre-train" ]]; then
+#     continue
+# fi
+
 # Set flag job names based on args
 if [[ "$PRETRAIN_FLAG" == "--pre-train" ]]; then
     JOB_NAME="arch_pt"

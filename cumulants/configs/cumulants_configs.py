@@ -69,8 +69,9 @@ HP_OPT_OPT = dict(
     opt_kwargs     = {}
 )
 
-DEFAULT_OPT = HP_OPT_OPT  
+# Set the default training and architectures
 DEFAULT_MAF_ARCH = HP_OPT_MAF_ARCH
+DEFAULT_OPT = HP_OPT_OPT 
 
 
 def _config_defaults(

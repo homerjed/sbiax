@@ -2,16 +2,18 @@
 
 RUN_LINEARISED=true
 ONLY_RUN_FIGURES=false # Only run figure_one.py jobs
-N_SEEDS=2
-N_PARALLEL=3
+N_SEEDS=200
+N_PARALLEL=20
 N_LINEAR_SIMS=100000
+N_GB=4
+N_CPU=4
 
 TIMESTAMP=$(date +'%m%d_%H%M')
 OUT_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/cumulants_sbi/$TIMESTAMP"
 mkdir -p "$OUT_DIR"
 
 order_idxs=(
-    "0"
+    # "0"
     "0 1 2"
 )
 
@@ -65,8 +67,8 @@ $FREEZE_FLAG"
 #SBATCH --array=0-$N_SEEDS%$N_PARALLEL
 #SBATCH --partition=cluster
 #SBATCH --time=24:00:00
-#SBATCH --mem=12G
-#SBATCH --cpus-per-task=8
+#SBATCH --mem=${N_GB}GB
+#SBATCH --cpus-per-task=$N_CPU
 #SBATCH --mail-user=jed.homer@physik.lmu.de
 #SBATCH --mail-type=begin,end,fail
 
@@ -102,9 +104,9 @@ $FREEZE_FLAG"
 #SBATCH --error=$OUT_DIR/%A/multi_z_${bt_flag}_%a.err
 #SBATCH --array=0-$N_SEEDS%$N_PARALLEL
 #SBATCH --partition=cluster
-#SBATCH --time=24:00:00
-#SBATCH --mem=12G
-#SBATCH --cpus-per-task=8
+#SBATCH --time=08:00:00
+#SBATCH --mem=${N_GB}GB
+#SBATCH --cpus-per-task=$N_CPU
 #SBATCH --mail-user=jed.homer@physik.lmu.de
 #SBATCH --mail-type=begin,end,fail
 #SBATCH --dependency=afterok:$deps
@@ -143,9 +145,9 @@ $FREEZE_FLAG"
 #SBATCH --error=$OUT_DIR/figure_one_%a.err
 #SBATCH --array=0-$N_SEEDS%$N_PARALLEL
 #SBATCH --partition=cluster
-#SBATCH --time=24:00:00
-#SBATCH --mem=8G
-#SBATCH --cpus-per-task=8
+#SBATCH --time=02:00:00
+#SBATCH --mem=${N_GB}GB
+#SBATCH --cpus-per-task=$N_CPU
 #SBATCH --mail-user=jed.homer@physik.lmu.de
 #SBATCH --mail-type=begin,end,fail
 ${all_deps:+#SBATCH --dependency=afterok:$all_deps}
