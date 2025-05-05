@@ -18,7 +18,11 @@ from chainconsumer import Chain, ChainConsumer, Truth
 import tensorflow_probability.substrates.jax.distributions as tfd
 from tqdm.auto import trange
 
-from data.constants import get_quijote_parameters, get_save_and_load_dirs, get_target_idx
+from data.constants import (
+    get_quijote_parameters, 
+    get_save_and_load_dirs, 
+    get_target_idx
+)
 from data.common import (
     Dataset,
     get_prior,
@@ -76,7 +80,7 @@ def get_raw_data(
 
     deltas = np.load(os.path.join(data_dir, "deltas.npy"))
 
-    DELTA_BIN_EDGES = np.geomspace(1e-2, 1e2, num=100) # 1911.11158 Section 4.1
+    DELTA_BIN_EDGES = np.geomspace(1e-2, 1e2, num=100) # 1911.11158 Section 4.1, NOTE: This is in rho
     D_DELTAS = DELTA_BIN_EDGES[1:] - DELTA_BIN_EDGES[:-1] 
 
     return fiducials, latins, latin_parameters, derivatives, deltas, D_DELTAS
@@ -97,6 +101,8 @@ def get_bulk_cumulants_data(
           indexes the bins of the PDF.
         - 
     """
+
+    print("Using bulk means..." if use_mean else "Not using bulk means...")
 
     data_dir, *_ = get_save_and_load_dirs()
 
@@ -121,7 +127,7 @@ def get_bulk_cumulants_data(
 
     use_mean           = use_mean # Concatenate mean of bulk to datavector
     cumulants          = True # Use cumulants over moments (NOTE: check not calculating reduced-cumulants, Quijote uses cumulants)
-    stack_mean         = True # For full shape <delta> is very close to zero
+    stack_mean         = True # For full shape <delta> is very close to zero but <rho> approximately one
 
     n_scales           = len(config.scales)
     n_redshifts        = 1
@@ -147,6 +153,8 @@ def get_bulk_cumulants_data(
 
     # Try loading dataset instead of deriving it again and again NOTE: careful not to load PDFs when yhou need cumulants etc
     try:
+        # np.load("ososos.npy") # Force an exception
+
         dataset_filename = os.path.join(
             data_dir, "bulk_cumulants_dataset_{}.npz".format(dataset_identifier_str)
         )
@@ -197,7 +205,7 @@ def get_bulk_cumulants_data(
             print(f"...CDF min/max {cdf.min():.1f} {cdf.max():.1f}.")
 
         # Check CDF bounds
-        assert np.isclose(cdf.min(), 0.) and np.isclose(cdf.max(), 1.), "{} {}".format(cdf.min(), cdf.max())
+        assert np.isclose(cdf.min(), 0.) and np.isclose(cdf.max(), 1.), "CDF: min={} max={}".format(cdf.min(), cdf.max())
 
         # Cut indices for each value of R
         if check_cumulants_against_quijote:
@@ -241,7 +249,7 @@ def get_bulk_cumulants_data(
             pdf = pdf / jnp.sum(pdf * D_deltas_cut) # Denominator is PDF integral
 
             if verbose:
-                print("PDF", jnp.sum(pdf), jnp.sum(pdf * D_deltas_cut))
+                print("PDF (after)", jnp.sum(pdf), jnp.sum(pdf * D_deltas_cut))
 
             return pdf 
 
@@ -268,19 +276,34 @@ def get_bulk_cumulants_data(
             return cumulants
 
         def intersperse_means(means, moments, are_derivatives=False):
-            assert len(means) == len(moments)
             # Put means first in moments vectors for all scales i.e. [[mean, var, skew, kurt]_R, ...]
+            assert len(means) == len(moments)
+
             means_and_moments = np.zeros(moments.shape[:-1] + (n_scales * (1 + n_cumulants),)) # Mean + cumulants for all scales, additional shape info for derivatives or not
+
+            print("FULL MEANS MOMENTS", means_and_moments.shape)
+
+            # Stack cumulants such that 
             for r in range(n_scales):
-                means_and_moments[..., r * (1 + n_cumulants) : (r + 1) * (1 + n_cumulants)] = np.concatenate(
-                    [means[..., [r]], moments[..., r * n_cumulants : (r + 1) * n_cumulants]], axis=1
-                )
+                _means_and_moments = [
+                    means[..., [r]], # Keep last dimension
+                    moments[..., r * n_cumulants : (r + 1) * n_cumulants]
+                ]
+                print("MEANS MOMENTS", [_.shape for _ in _means_and_moments])
+
+                # Stack on last axis
+                means_and_moments[
+                    ..., r * (1 + n_cumulants) : (r + 1) * (1 + n_cumulants)
+                ] = np.concatenate(_means_and_moments, axis=-1)
+
             return means_and_moments
 
         orders = [2, 3, 4] # Variance, skewness and kurtosis
         cut_dim = sum([cut.size for cut in cuts])
 
-        assert np.all([cut.ndim == 1 for cut in cuts])
+        assert np.all([cut.ndim == 1 for cut in cuts]), (
+            "Rank of cut indices arrays not equal to 1 {}".format([cut.ndim for cut in cuts])
+        )
 
         fiducial_pdfs_z_R_cut = np.zeros((n_fiducial_pdfs, cut_dim))
         fiducial_moments_z_R = np.zeros((n_fiducial_pdfs, n_scales * n_cumulants))
@@ -293,9 +316,9 @@ def get_bulk_cumulants_data(
 
                 pdf = fiducials[z_idx, n, R, cut] # Cut PDF p(d_i)
 
-                fiducial_pdfs_z_R_cut[n, _cut_dim : _cut_dim + cuts[R].size] = pdf
+                fiducial_pdfs_z_R_cut[n, _cut_dim : _cut_dim + cut.size] = pdf
 
-                for i in range(len(orders)):
+                for i in range(len(orders)): # Cycle through moment orders
                     order = orders[i]
 
                     moment = moment_n_R(
@@ -307,8 +330,10 @@ def get_bulk_cumulants_data(
                 # Mean for calculating cumulants from moments
                 if use_mean:
                     _delta_ = jnp.sum(pdf * D_deltas[cut] * deltas[cut]) # delta_R
+                    if verbose:
+                        print("mean", _delta_)
                 else:
-                    _delta_ = 0.
+                    _delta_ = 0. # Zero or one? rho=1 for full PDF but not necessarily for bulk
 
                 fiducial_moments_z_R_means[n, R] = _delta_
 
@@ -341,7 +366,7 @@ def get_bulk_cumulants_data(
 
                 pdf = latins[z_idx, n, R, cut]
 
-                latin_pdfs_z_R_cut[n, _cut_dim : _cut_dim + cuts[R].size] = pdf
+                latin_pdfs_z_R_cut[n, _cut_dim : _cut_dim + cut.size] = pdf
 
                 for i in range(len(orders)):
                     order = orders[i]
@@ -355,6 +380,8 @@ def get_bulk_cumulants_data(
                 # Mean for calculating cumulants from moments
                 if use_mean:
                     _delta_ = jnp.sum(pdf * D_deltas[cut] * deltas[cut])
+                    if verbose:
+                        print("mean", _delta_)
                 else:
                     _delta_ = 0.
 
@@ -388,10 +415,10 @@ def get_bulk_cumulants_data(
                 # Including pm axis
                 pdf = derivatives[n, z_idx, :, R, :, cut] # Shape (p, cut_dim), raw shape (n_derivatives, n_redshifts, n_params, n_scales, 2, n_bins_pdf)
 
-                pdf = np.transpose(pdf, (1, 2, 0))
+                pdf = np.transpose(pdf, (1, 2, 0)) # Indexing above transposes... shape~(p, p_or_m, n_d)
 
                 # Including pm axis
-                derivative_pdfs_z_R_cut[n, :, :, _cut_dim : _cut_dim + cuts[R].size] = pdf # NOTE: choose the right axis; params or redshift
+                derivative_pdfs_z_R_cut[n, :, :, _cut_dim : _cut_dim + cut.size] = pdf # NOTE: choose the right axis; params or redshift
 
                 for i in range(len(orders)):
                     order = orders[i]
@@ -406,9 +433,11 @@ def get_bulk_cumulants_data(
 
                             derivative_moments_z_R[n, p, p_or_m, i + R * n_cumulants : (i + 1) + R * n_cumulants] = moment_p
 
-                            # Mean for calculating cumulants from moments
+                            # Mean for calculating cumulants from moments, exists for each plus/minus PDF
                             if use_mean:
                                 _delta_ = jnp.sum(pdf[p, p_or_m] * D_deltas[cut] * deltas[cut])
+                                if verbose:
+                                    print("mean", _delta_)
                             else:
                                 _delta_ = 0. 
 
@@ -426,6 +455,7 @@ def get_bulk_cumulants_data(
                             else:
                                 _delta_ = 0. 
 
+                            # Converting all moments to cumulants at the same time
                             cumulant = moments_to_cumulants(
                                 derivative_moments_z_R[n, p, p_or_m, R * n_cumulants : (R + 1) * n_cumulants], 
                                 _delta_=_delta_
@@ -437,15 +467,17 @@ def get_bulk_cumulants_data(
                     print("\r n={:05d}/{}".format(n, n_derivatives), end="")
 
         if use_mean and stack_mean:
+            # NOTE: possibly need a parameter loop here...
             derivative_moments_z_R = intersperse_means(
                 derivative_moments_z_R_means, derivative_moments_z_R, are_derivatives=True
             )
 
-        # Euler derivative from plus minus statistics
+        # Euler derivative for PDFs from plus minus statistics
         derivative_pdfs_z_R_cut = derivative_pdfs_z_R_cut[:, :, 1, :] - derivative_pdfs_z_R_cut[:, :, 0, :]
         for p in range(n_p):
             derivative_pdfs_z_R_cut[:, p, ...] = derivative_pdfs_z_R_cut[:, p, ...] / dparams[p] # NOTE: parameter / redshifts axis!!!!!
 
+        # Euler derivative for moments from plus minus statistics
         derivative_moments_z_R = derivative_moments_z_R[:, :, 1, :] - derivative_moments_z_R[:, :, 0, :]
         for p in range(n_p):
             derivative_moments_z_R[:, p, ...] = derivative_moments_z_R[:, p, ...] / dparams[p] # NOTE: parameter / redshifts axis!!!!!
@@ -464,6 +496,14 @@ def get_bulk_cumulants_data(
         # Fisher information in cumulants of bulk of the PDF
         n_fiducial_moments, data_dim_moments = fiducial_moments_z_R.shape
         C_moments = jnp.cov(fiducial_moments_z_R, rowvar=False)
+
+        # Ill-conditioned matrix when using means
+        if config.linearised:
+            print("Conditioning matrix...")
+            C_moments = C_moments + jnp.eye(data_dim_moments) * 1e-3
+
+        assert np.all(np.linalg.eigvals(C_moments) > 0)
+
         H = (n_fiducial_moments - data_dim_moments - 2.) / (n_fiducial_moments - 1.)
         Cinv_moments = H * jnp.linalg.inv(C_moments)
         dmu_moments = jnp.mean(derivative_moments_z_R, axis=0)
@@ -500,7 +540,10 @@ def get_bulk_cumulants_data(
         return_dataset = dataset # If not requiring PDFs
 
         # If requiring PDFs return dataset for bulk of the PDF (not cumulants of the bulk)
-        if (not check_cumulants_against_quijote) or pdfs:
+        if (not check_cumulants_against_quijote) or pdfs: # If wanting PDFs or not wanting to check calculated cumulants 
+
+            print("Returning PDFs as dataset...")
+
             # Fisher information in bulk of the PDF
             n_fiducial_pdfs, data_dim_pdfs = fiducial_pdfs_z_R_cut.shape 
             C_pdf = np.cov(fiducial_pdfs_z_R_cut, rowvar=False) 
@@ -536,7 +579,7 @@ def get_bulk_cumulants_data(
             if config.freeze_parameters:
                 pdf_dataset = freeze_out_parameters_dataset(pdf_dataset)
 
-            return_dataset = pdf_dataset if pdfs else dataset
+            return_dataset = pdf_dataset if pdfs else dataset # NOTE: careful with this logic and if ... above
 
         # Save return dataset to ensure loading (not creating) next time around
         np.savez(
@@ -648,7 +691,7 @@ def get_bulk_cumulants_data(
 @dataclass
 class BulkCumulantsDataset:
     """ 
-        Dataset for Simulation-Based Inference with cumulants of the matter PDF 
+        Dataset for Simulation-Based Inference with cumulants of the bulk of the matter PDF 
     """
 
     config: ConfigDict
@@ -672,7 +715,7 @@ class BulkCumulantsDataset:
         self.data = get_bulk_cumulants_data(
             config, 
             pdfs=pdfs,
-            use_mean=use_mean,
+            use_mean=use_mean or config.use_bulk_means,
             check_cumulants_against_quijote=check_cumulants_against_quijote, 
             verbose=verbose, 
             results_dir=results_dir
@@ -787,9 +830,49 @@ def get_multi_z_bulk_pdf_fisher_forecast(args):
     return Finv
 
 
-# if __name__ == "__main__":
-#     from configs import bulk_cumulants_config
+if __name__ == "__main__":
+    from configs import bulk_cumulants_config
+    from sbiax.utils import make_df, marker
 
-#     config = bulk_cumulants_config()
+    config = bulk_cumulants_config()
 
-#     dataset = BulkCumulantsDataset(config, verbose=True)
+    config.use_bulk_means = True
+
+    dataset = BulkCumulantsDataset(config, verbose=True)
+
+    def mle(d):
+        return dataset.alpha + jnp.linalg.multi_dot(
+            [dataset.Finv, dataset.derivatives.mean(axis=0), dataset.Cinv, d - dataset.fiducial_data.mean(axis=0)]
+        )
+
+    X = jax.vmap(mle)(dataset.fiducial_data)
+
+    X_df = make_df(
+        X, parameter_strings=dataset.parameter_strings
+    )
+
+    c = ChainConsumer()
+    c.add_chain(
+        Chain.from_covariance(
+            dataset.alpha,
+            dataset.Finv,
+            columns=dataset.parameter_strings,
+            name=r"$F_{\Sigma^{-1}}$",
+            color="k",
+            linestyle=":",
+            shade_alpha=0.
+        )
+    )
+    c.add_chain(
+        Chain(samples=X_df, name="X", color="r")
+    )
+    c.add_marker(
+        location=marker(
+            dataset.alpha, parameter_strings=dataset.parameter_strings
+        ),
+        name=r"$\alpha$", 
+        color="#7600bc"
+    )
+    fig = c.plotter.plot()
+    plt.savefig("pdfs_test.pdf")
+    plt.close()

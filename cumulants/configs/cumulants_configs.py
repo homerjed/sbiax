@@ -199,7 +199,7 @@ def cumulants_config(
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf]#, cnf, cnf]  
+        config.ndes          = [maf, maf, maf, maf] #, cnf, cnf]  
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
@@ -233,7 +233,7 @@ def cumulants_config(
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [cnf] #cnf]#, cnf, cnf] 
+        config.ndes          = [maf, maf, maf, maf] #cnf]#, cnf, cnf] 
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
@@ -330,7 +330,7 @@ def arch_search_cumulants_config( # Copy of the above config for architecture se
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [cnf]
+        config.ndes          = [maf]  
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
@@ -364,7 +364,7 @@ def arch_search_cumulants_config( # Copy of the above config for architecture se
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [cnf]
+        config.ndes          = [maf] #, cnf, cnf]  
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
@@ -424,6 +424,8 @@ def bulk_cumulants_config(
     config.valid_fraction     = 0.1
     config.freeze_parameters  = freeze_parameters
 
+    config.use_bulk_means     = True # Stack means of bulk of the PDF at each scale with the other cumulants
+
     # Miscallaneous
     config.use_scalers        = USE_SCALERS # Input scalers for (xi, pi) in NDEs (NOTE: checked that scalings aren't optimised!)
     config.use_pca            = False # Need to add this into other scripts...
@@ -463,7 +465,7 @@ def bulk_cumulants_config(
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf]#, cnf, cnf]  
+        config.ndes          = [maf, maf] #, cnf, cnf]  
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
@@ -497,7 +499,7 @@ def bulk_cumulants_config(
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [cnf]#, cnf, cnf] #maf, maf, maf]  
+        config.ndes          = [maf, maf, maf, maf] #, cnf, cnf]  
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)

@@ -65,13 +65,9 @@ jax.clear_caches()
 """
 
 def get_posterior_object(posterior_file):
-    # Posterior object contains samples, log prob, Finv, summary, ...
-    PosteriorTuple = namedtuple(
-        "PosteriorTuple", posterior_file.files
-    )
-    posterior_tuple = PosteriorTuple(
-        *(posterior_file[key] for key in posterior_file.files)
-    )
+    # Create posterior object from .npz posterior file that contains samples, log prob, Finv, summary, ...
+    PosteriorTuple = namedtuple("PosteriorTuple", posterior_file.files)
+    posterior_tuple = PosteriorTuple(*(posterior_file[key] for key in posterior_file.files))
     return posterior_tuple
 
 parser = argparse.ArgumentParser()
@@ -162,7 +158,6 @@ try:
         os.path.join(
             data_dir, 
             "Finv_bulk_pdfs_all_z_{}.npy".format(
-                # "".join(map(str, args.order_idx)), NOTE: no cumulants associated with bulk pdf?!
                 "f" if args.freeze_parameters else "nf"
             )
         )
@@ -174,7 +169,6 @@ except:
         os.path.join(
             data_dir, 
             "Finv_bulk_pdfs_all_z_{}.npy".format(
-                # "".join(map(str, args.order_idx)),
                 "f" if args.freeze_parameters else "nf"
             )
         ),

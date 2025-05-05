@@ -108,7 +108,7 @@ dataset: Dataset = cumulants_dataset.data
 
 parameter_prior: Distribution = cumulants_dataset.prior
 
-bulk_pdfs = False # Use PDFs for Finv_bulk or cumulants of bulk of PDF
+bulk_pdfs = False # Use PDFs or cumulants of bulk of PDF for Finv_bulk
 bulk_dataset: Dataset = get_bulk_dataset(args, pdfs=bulk_pdfs) # For Fisher forecast comparisons
 
 ################################ Check fisher forecasts
@@ -302,7 +302,9 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
             shade_alpha=0.
         )
     )
-    c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
+    c.add_chain(
+        Chain(samples=posterior_df, name="SBI[{}]".format(args.bulk_or_tails), color="r")
+    )
     c.add_marker(
         location=marker(x_, parameter_strings=dataset.parameter_strings),
         name=r"$\hat{x}$", 
@@ -366,9 +368,11 @@ print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None)
 # Generates linearised (or not) datavector at fiducial parameters
 datavector = cumulants_dataset.get_datavector(key_datavector)
 
+print("datavector", datavector)
+
 x_ = compression_fn(datavector, dataset.alpha)
 
-print("datavector", x_, dataset.alpha)
+print("compressed datavector", x_, dataset.alpha)
 
 log_prob_fn = ensemble.ensemble_log_prob_fn(data_preprocess_fn(x_), parameter_prior)
 

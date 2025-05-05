@@ -190,16 +190,19 @@ def freeze_out_parameters_dataset(dataset: Dataset) -> Dataset:
 @typecheck
 def get_prior(config: ConfigDict, dataset: Dataset) -> tfd.Distribution:
 
-    lower = jnp.asarray(dataset.lower) # Avoid tfp warning
-    upper = jnp.asarray(dataset.upper)
+    if config.linearised:
+        print("Using flat prior")
+        lower = jnp.ones((dataset.alpha.size,)) * -1e-4
+        upper = jnp.ones((dataset.alpha.size,)) * 1e-4
+    else:
+        print("Using Quijote uniform prior")
+        lower = jnp.asarray(dataset.lower) # Avoid tfp warning
+        upper = jnp.asarray(dataset.upper)
 
     assert jnp.all((upper - lower) > 0.)
 
-    print("Using flat prior")
     prior = tfd.Blockwise(
-        [tfd.Uniform(lower[p], upper[p]) for p in range(dataset.alpha.size)]
-        # [tfd.Uniform(-1e4, 1e4) for p in range(dataset.alpha.size)]
-        # [tfd.Uniform(l, u) for l, u in zip(lower, upper)]
+        [tfd.Uniform(l, u) for l, u in zip(lower, upper)]
     )
 
     return prior
@@ -324,9 +327,11 @@ def get_datavector(
     # which corresponds to a non-linearised datavector with Gaussian noise
     if (not config.use_expectation) or (not use_expectation):
         if config.linearised:
+            print("Using linearised datavector")
             mu = jnp.mean(dataset.fiducial_data, axis=0)
 
-            print("Using linearised datavector")
+            # print("C", jnp.log(jnp.linalg.cond(dataset.C)))
+
             datavector = jr.multivariate_normal(key, mean=mu, cov=dataset.C, shape=(n,))
         else:
             print("Using non-linearised datavector")

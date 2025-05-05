@@ -660,7 +660,9 @@ def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> Config
         Trial hyperparameters for CNF/MAF and training
     """
 
-    model_type = config.ndes[0].model_type
+    model_type = config.ndes[0].model_type # NOTE: important; get the model type being used 
+
+    assert model_type in ["cnf", "maf"], ("Model type {} not allowable".format(model_type))
 
     # Arrange hyperparameters to optimise for and return to the experiment
     if model_type == "cnf":
@@ -695,6 +697,7 @@ def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> Config
         "opt" : trial.suggest_categorical(name="opt", choices=["adam", "adamw", "adabelief", "lion"])
     }
 
+    # Set config parameters explicitly
     config.train.n_batch = training_hyperparameters["n_batch"]
     config.train.lr = training_hyperparameters["lr"]
     config.train.patience = training_hyperparameters["patience"]

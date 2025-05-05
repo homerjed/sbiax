@@ -300,7 +300,7 @@ def maybe_vmap_multi_redshift_mle(
 
 if __name__ == "__main__":
 
-    key = jr.key(0) # Only for datavectors
+    key = jr.key(0) # Only for datavectors, split for each redshift, datavector and separate posterior
 
     args = get_cumulants_multi_z_args()
 
@@ -358,7 +358,7 @@ if __name__ == "__main__":
     posteriors_dir = get_base_posteriors_dir()
 
     # Save location for posterior plots
-    figs_dir = "{}figs/{}".format(
+    figs_dir = "{}figs/{}{}{}{}{}{}{}{}".format(
         posteriors_dir, 
         "frozen/" if config.freeze_parameters else "nonfrozen/",
         "{}/".format(args.bulk_or_tails),
@@ -373,6 +373,24 @@ if __name__ == "__main__":
         )
     )
 
+    parts = [
+        "figs",
+        "frozen" if config.freeze_parameters else "nonfrozen",
+        args.bulk_or_tails,
+        "reduced_cumulants" if config.reduced_cumulants else "cumulants",
+        config.sbi_type,
+        "linearised" if config.linearised else "nonlinearised",
+        config.compression,
+        "pretrain" if config.pre_train else "nopretrain",
+        # config.exp_name if include_exp and config.exp_name else None,
+        "z={}_m={}".format( 
+            "".join(map(str, config.redshifts)),
+            "".join(map(str, config.order_idx))
+        )
+    ]
+    path_str = "/".join(filter(None, parts)) + "/"
+
+    figs_dir = os.path.join(posteriors_dir, path_str)
     if not os.path.exists(figs_dir):
         os.makedirs(figs_dir, exist_ok=True)
 
@@ -408,7 +426,7 @@ if __name__ == "__main__":
                     ensemble, 
                     x_z, # MLE[datavectors] at this redshift
                     datavector, 
-                    prior, # Same prior for each z
+                    prior, # Same prior for each z, only needed / used once
                     alpha, # Datavectors generated at these parameters for each redshift
                     bulk_Finv_z,
                     Finv_z, 
@@ -541,7 +559,7 @@ if __name__ == "__main__":
         )
 
         if args.verbose:
-            print("x_", x_.shape, x_)
+            print("x_ (compressed)", x_.shape, x_)
 
         # Sample posterior across multiple redshifts
         log_prob_fn = multi_ensemble.get_multi_ensemble_log_prob_fn(x_s)
@@ -634,7 +652,13 @@ if __name__ == "__main__":
             posterior_df = make_df(
                 samples, samples_log_prob, parameter_strings=parameter_strings
             )
-            c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
+            c.add_chain(
+                Chain(
+                    samples=posterior_df, 
+                    name="SBI[{}]".format(args.bulk_or_tails), 
+                    color="r"
+                )
+            )
             # If using multiple datavectors, plot them individually
             if x_.ndim > 1:
                 for i, _x_ in enumerate(x_):
@@ -719,7 +743,13 @@ if __name__ == "__main__":
         posterior_df = make_df(
             samples[:, ix], samples_log_prob, parameter_strings=parameter_names_
         )
-        c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
+        c.add_chain(
+            Chain(
+                samples=posterior_df, 
+                name="SBI[{}]".format(args.bulk_or_tails), 
+                color="r"
+            )
+        )
         if x_.ndim > 1:
             for i, _x_ in enumerate(x_):
                 c.add_marker(

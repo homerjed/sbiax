@@ -117,12 +117,14 @@ class Ensemble(eqx.Module):
         ) -> Scalar:
 
             L = jnp.zeros(())
-            for n, (nde, weight) in enumerate(zip(self.ndes, jnp.atleast_1d(self.weights))): # NOTE: lax.scan
+            for n, (nde, weight) in enumerate(
+                zip(self.ndes, jnp.atleast_1d(self.weights)) # NOTE: lax.scan
+            ): 
 
                 if exists(key):
                     key = jr.fold_in(key, n)
 
-                nde_log_L = _maybe_vmap_nde_log_L(nde, data, theta, key=key) 
+                nde_log_L = _maybe_vmap_nde_log_L(nde=nde, data=data, theta=theta, key=key) 
 
                 # Add likelihoods together for ensemble ndes
                 L_nde = weight * jnp.exp(nde_log_L) # NOTE: weight inside log-prob fun?! weighting doesn't distribute over batches of datavecotrs?
@@ -157,7 +159,7 @@ class Ensemble(eqx.Module):
         """
         nde_Ls = jnp.array([-losses[n] for n, _ in enumerate(self.ndes)])
 
-        nde_weights = jnp.exp(nde_Ls) / jnp.sum(jnp.exp(nde_Ls)) #jax.nn.softmax(Ls)
+        nde_weights = jnp.exp(nde_Ls) / jnp.sum(jnp.exp(nde_Ls)) # jax.nn.softmax(Ls)
 
         assert nde_weights.shape == (self.n_ndes,)
 
@@ -210,7 +212,7 @@ class MultiEnsemble(eqx.Module):
             # Loop over matched ensembles / datavectors NOTE: vmap over datavectors (when have multiple per redshift)?
             L = jnp.zeros(())
 
-            # Don't need this loop? tree map or something?
+            # Don't need this loop? tree map or something? jax.tree.map(lambda f, x: jax.vmap(f)(x), f, x, is_leaf=lambda l: isinstance(l, ...)) x is stack of datavectors, f is ensemble nde
             for ensemble, _datavectors in zip(self.ensembles, datavectors):
                 ensemble_log_L = ensemble.ensemble_likelihood(_datavectors)(theta) # No use of prior
                 L = L + ensemble_log_L
