@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass, replace
 from functools import partial
-from typing import Callable, Optional
+from typing import Callable, Optional, Literal
 
 import jax
 import jax.numpy as jnp
@@ -46,6 +46,7 @@ def get_parameter_strings() -> list[str]:
 @typecheck
 @dataclass
 class Dataset:
+    name: Literal["bulk_pdf", "bulk", "tails"]
     alpha: Float[Array, "p"] 
     lower: Float[Array, "p"]
     upper: Float[Array, "p"]
@@ -102,6 +103,7 @@ def pca_dataset(dataset: Dataset) -> Dataset:
     Finv = jnp.linalg.multi_dot([_derivatives, Cinv, _derivatives.T])
 
     frozen_dataset = Dataset(
+        name=dataset.name,
         alpha=dataset.alpha,
         lower=dataset.lower,
         upper=dataset.upper,
@@ -169,6 +171,7 @@ def freeze_out_parameters_dataset(dataset: Dataset) -> Dataset:
     )
 
     frozen_dataset = Dataset(
+        name=dataset.name,
         alpha=dataset.alpha[p_idx],
         lower=dataset.lower[p_idx],
         upper=dataset.upper[p_idx],
@@ -330,8 +333,6 @@ def get_datavector(
             print("Using linearised datavector")
             mu = jnp.mean(dataset.fiducial_data, axis=0)
 
-            # print("C", jnp.log(jnp.linalg.cond(dataset.C)))
-
             datavector = jr.multivariate_normal(key, mean=mu, cov=dataset.C, shape=(n,))
         else:
             print("Using non-linearised datavector")
@@ -478,6 +479,7 @@ def get_compression_fn(key, config, dataset, *, results_dir):
     """ 
         Get linear or neural network compressor
     """ 
+    assert config.compression in ["linear", "nn", "nn-lbfgs"]
 
     if config.compression == "nn" or config.compression == "nn-lbfgs":
 

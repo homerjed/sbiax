@@ -70,8 +70,11 @@ HP_OPT_OPT = dict(
 )
 
 # Set the default training and architectures
-DEFAULT_MAF_ARCH = HP_OPT_MAF_ARCH
-DEFAULT_OPT = HP_OPT_OPT 
+DEFAULT_CNF_ARCH = DEFAULT_CNF_ARCH
+DEFAULT_MAF_ARCH = DEFAULT_MAF_ARCH # HP_OPT_MAF_ARCH
+DEFAULT_OPT = DEFAULT_OPT # HP_OPT_OPT 
+
+N_NDES = 1
 
 
 def _config_defaults(
@@ -199,17 +202,17 @@ def cumulants_config(
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf, maf, maf, maf] #, cnf, cnf]  
+        config.ndes          = [maf] * N_NDES #, cnf, cnf]  
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
         config.train = train = ConfigDict()
         train.start_step     = 0
         train.n_epochs       = 10_000
-        train.n_batch        = 100 
-        train.patience       = 10
-        train.lr             = 1e-3
-        train.opt            = "adam" 
+        train.n_batch        = DEFAULT_OPT["n_batch"] # 100 
+        train.patience       = DEFAULT_OPT["patience"] # 200
+        train.lr             = DEFAULT_OPT["lr"] # 1e-3
+        train.opt            = DEFAULT_OPT["opt"] # "adam" 
         train.opt_kwargs     = {}
     else:
         # NDEs
@@ -233,7 +236,7 @@ def cumulants_config(
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf, maf, maf, maf] #cnf]#, cnf, cnf] 
+        config.ndes          = [maf] * N_NDES #cnf]#, cnf, cnf] 
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
@@ -249,10 +252,10 @@ def cumulants_config(
         config.train = train = ConfigDict()
         train.start_step     = 0
         train.n_epochs       = 10_000
-        train.n_batch        = 100 
-        train.patience       = 200
-        train.lr             = 1e-3
-        train.opt            = "adam" 
+        train.n_batch        = DEFAULT_OPT["n_batch"] # 100 
+        train.patience       = DEFAULT_OPT["patience"] # 200
+        train.lr             = DEFAULT_OPT["lr"] # 1e-3
+        train.opt            = DEFAULT_OPT["opt"] # "adam" 
         train.opt_kwargs     = {}
 
     return config
@@ -424,7 +427,9 @@ def bulk_cumulants_config(
     config.valid_fraction     = 0.1
     config.freeze_parameters  = freeze_parameters
 
-    config.use_bulk_means     = True # Stack means of bulk of the PDF at each scale with the other cumulants
+    config.use_bulk_means     = True # Calculate central moments of the bulk or not
+    config.stack_bulk_means   = True # Stack means of bulk of the PDF at each scale with the other cumulants
+    config.stack_bulk_norms   = True # Stack norms of bulk of the PDF at each scale with the other cumulants
 
     # Miscallaneous
     config.use_scalers        = USE_SCALERS # Input scalers for (xi, pi) in NDEs (NOTE: checked that scalings aren't optimised!)
@@ -465,17 +470,17 @@ def bulk_cumulants_config(
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf, maf] #, cnf, cnf]  
+        config.ndes          = [cnf] * N_NDES #, cnf, cnf]  
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
         config.train = train = ConfigDict()
         train.start_step     = 0
         train.n_epochs       = 10_000
-        train.n_batch        = 100 
-        train.patience       = 10
-        train.lr             = 1e-3
-        train.opt            = "adam" 
+        train.n_batch        = DEFAULT_OPT["n_batch"] # 100 
+        train.patience       = DEFAULT_OPT["patience"] # 200
+        train.lr             = DEFAULT_OPT["lr"] # 1e-3
+        train.opt            = DEFAULT_OPT["opt"] # "adam" 
         train.opt_kwargs     = {}
     else:
         # NDEs
@@ -499,7 +504,7 @@ def bulk_cumulants_config(
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf, maf, maf, maf] #, cnf, cnf]  
+        config.ndes          = [maf] * N_NDES #, cnf, cnf]  
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
@@ -515,10 +520,37 @@ def bulk_cumulants_config(
         config.train = train = ConfigDict()
         train.start_step     = 0
         train.n_epochs       = 10_000
-        train.n_batch        = 100 
-        train.patience       = 200
-        train.lr             = 1e-3
-        train.opt            = "adam" 
+        train.n_batch        = DEFAULT_OPT["n_batch"] # 100 
+        train.patience       = DEFAULT_OPT["patience"] # 200
+        train.lr             = DEFAULT_OPT["lr"] # 1e-3
+        train.opt            = DEFAULT_OPT["opt"] # "adam" 
         train.opt_kwargs     = {}
 
     return config
+
+
+@typecheck
+def bulk_pdf_config(
+    seed: int = 0, 
+    redshift: float = 0., 
+    reduced_cumulants: bool = False,
+    sbi_type: Literal["nle", "npe"] = "nle", 
+    linearised: bool = True, 
+    compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
+    order_idx: list[int] = [0, 1, 2],
+    freeze_parameters: bool = False,
+    n_linear_sims: Optional[int] = None,
+    pre_train: bool = False
+) -> ConfigDict:
+    return bulk_cumulants_config(
+        seed=seed,
+        redshift=redshift,
+        reduced_cumulants=reduced_cumulants,
+        sbi_type=sbi_type,
+        linearised=linearised,
+        compression=compression,
+        order_idx=order_idx,
+        freeze_parameters=freeze_parameters,
+        n_linear_sims=n_linear_sims,
+        pre_train=pre_train
+    )

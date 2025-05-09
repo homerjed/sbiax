@@ -71,7 +71,8 @@ DPARAMS = np.array(
     ]
 )
 
-DELTA_BIN_EDGES = np.geomspace(1e-2, 1e2, num=100) 
+# Bins of PDF; edge and middle values, 100 log-spaced bins in rho
+DELTA_BIN_EDGES = np.geomspace(1e-2, 1e2, num=100)
 D_DELTAS = DELTA_BIN_EDGES[1:] - DELTA_BIN_EDGES[:-1]
 
 

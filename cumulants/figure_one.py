@@ -79,6 +79,13 @@ parser.add_argument(
     default=0
 )
 parser.add_argument(
+    "-s_d", 
+    "--seed_datavector", 
+    type=int, 
+    help="Seed for random number generation.", 
+    default=0
+)
+parser.add_argument(
     "-l",
     "--linearised", 
     default=True,
@@ -207,7 +214,11 @@ for bulk_or_tails in ["bulk", "tails"]:
     # Posterior for bulk/tails for a given seed
     posterior_save_dir = get_multi_z_posterior_dir(config, args)
     posterior_filename = os.path.join(
-        posterior_save_dir, "posterior_{}.npz".format(args.seed)
+        posterior_save_dir, 
+        "posterior_{}{}.npz".format(
+            args.seed, 
+            ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else ""
+        ) 
     )
     posterior_file = np.load(posterior_filename)
     posterior_object = get_posterior_object(posterior_file)

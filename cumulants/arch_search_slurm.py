@@ -52,6 +52,8 @@ from data.cumulants import (
 )
 from affine import affine_sample
 from utils.utils import (
+    get_datasets,
+    plot_cumulants,
     plot_moments, 
     plot_latin_moments, 
     plot_summaries, 
@@ -128,6 +130,7 @@ def objective(
     """
         Config
     """
+    _, cumulants_dataset, datasets = get_datasets(args) # Ignore config
 
     # Seed overwritten in config
     seed = args.seed + trial.number if random_seeds else args.seed
@@ -156,21 +159,9 @@ def objective(
         yaml.dump({"config": ""}, f, default_flow_style=False)
         yaml.dump(config.to_dict(), f, default_flow_style=False)
 
-    cumulants_dataset: CumulantsDataset = CumulantsDataset(config, results_dir=results_dir)
-
     dataset: Dataset = cumulants_dataset.data
 
     parameter_prior: Distribution = cumulants_dataset.prior
-
-    # bulk_pdfs = False # Use PDFs for Finv_bulk or cumulants of bulk of PDF
-    # bulk_dataset: Dataset = get_bulk_dataset(args, pdfs=bulk_pdfs) # For Fisher forecast comparisons
-
-    # key = jax.random.PRNGKey(0)  # or pass an existing key
-    # perm = jax.random.permutation(key, dataset.parameters.shape[0])
-
-    # # Apply the permutation in-place
-    # dataset.parameters = dataset.parameters[perm]
-    # dataset.data = dataset.data[perm]V
 
     if n_repeats is None:
         n_repeats = 1

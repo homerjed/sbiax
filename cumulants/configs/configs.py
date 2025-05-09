@@ -22,7 +22,7 @@ def default(v, d):
     return v if exists(v) else d
 
 
-def save_config(config: ConfigDict, filepath: str):
+def save_config(config: ConfigDict, filepath: str) -> None:
     with open(filepath, 'w') as f:
         yaml.dump(config.to_dict(), f)
 
@@ -47,9 +47,9 @@ def make_dirs(results_dir: str) -> None:
 def dump_args_and_config(args: argparse.Namespace, config: ConfigDict, results_dir: str) -> None:
     # Save command line arguments and config together
     with open(os.path.join(results_dir, "config.yml"), "w") as f:
-        yaml.dump({"args": ""}, f, default_flow_style=False)
+        yaml.dump({">ARGS": ""}, f, default_flow_style=False)
         yaml.dump(vars(args), f, default_flow_style=False)
-        yaml.dump({"config": ""}, f, default_flow_style=False)
+        yaml.dump({">CONFIG": ""}, f, default_flow_style=False)
         yaml.dump(config.to_dict(), f, default_flow_style=False)
 
 
@@ -89,8 +89,8 @@ def get_results_dir(
     )
     if not os.path.exists(results_dir):
         os.makedirs(results_dir, exist_ok=True)
-    print("RESULTS_DIR:\n", results_dir)
     dump_args_and_config(args, config, results_dir=results_dir) # Save conifg and args in run dir
+    print("RESULTS_DIR:\n", results_dir)
     return results_dir
 
 
@@ -122,69 +122,6 @@ def get_multi_z_posterior_dir(
     return multi_z_dir
 
 
-# def get_results_dir(config: ConfigDict, args: argparse.Namespace, *, arch_search: bool = False) -> str:
-
-#     results_dir = "{}{}{}{}{}{}{}{}{}{}{}".format( # Import this from a constants file
-#         get_base_results_dir(),
-#         "arch_search/" if arch_search else "",
-#         "frozen/" if config.freeze_parameters else "nonfrozen/",
-#         "{}/".format(args.bulk_or_tails),
-#         "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
-#         (config.sbi_type + "/") if config.sbi_type else "" ,
-#         "linearised/" if config.linearised else "nonlinearised/",
-#         (config.compression + "/") if config.compression else "",
-#         "pretrain/" if config.pre_train else "nopretrain/",
-#         (config.exp_name + "/") if config.exp_name else "",
-#         (str(config.seed) + "/") if (config.seed is not None) else ""
-#     )
-
-#     make_dirs(results_dir)
-
-#     dump_args_and_config(args, config, results_dir=results_dir)
-
-#     return results_dir
-
-
-# def get_posteriors_dir(config: ConfigDict, args: argparse.Namespace, *, arch_search: bool = False) -> str:
-
-#     results_dir = "{}{}{}{}{}{}{}{}{}{}{}".format( 
-#         get_base_posteriors_dir(),
-#         "arch_search/" if arch_search else "",
-#         "frozen/" if config.freeze_parameters else "nonfrozen/",
-#         "{}/".format(args.bulk_or_tails),
-#         "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
-#         (config.sbi_type + "/") if config.sbi_type else "" ,
-#         "linearised/" if config.linearised else "nonlinearised/",
-#         (config.compression + "/") if config.compression else "",
-#         "pretrain/" if config.pre_train else "nopretrain/",
-#         (config.exp_name + "/") if config.exp_name else "",
-#         (str(config.seed) + "/") if (config.seed is not None) else ""
-#     )
-
-#     make_dirs(results_dir)
-
-#     return results_dir
-
-
-# def get_multi_z_posterior_dir(config: ConfigDict, args: argparse.Namespace) -> str:
-
-#     posterior_save_dir = "{}{}{}{}{}{}{}{}{}multi_z/".format(
-#         get_base_posteriors_dir(),
-#         "frozen/" if config.freeze_parameters else "nonfrozen/",
-#         "{}/".format(args.bulk_or_tails),
-#         "reduced_cumulants/" if config.reduced_cumulants else "cumulants/",
-#         (config.sbi_type + "/") if config.sbi_type else "" , 
-#         "linearised/" if config.linearised else "nonlinearised/",
-#         (config.compression + "/") if config.compression else "",
-#         "pretrain/" if config.pre_train else "nopretrain/",
-#         (str(config.seed) + "/") if (config.seed is not None) else "", # No exp name here...
-#     )
-
-#     print("Multi-z posterior dir:\n", posterior_save_dir)
-
-#     return posterior_save_dir
-
-
 """
     Configs
 """
@@ -211,6 +148,10 @@ def get_ndes_from_config(
     ndes = []
     for nde, scaler, key in zip(config.ndes, scalers, keys):
 
+        assert nde.model_type in ["maf", "cnf"], (
+            "Invalid NDE model type (={})".format(nde.model_type)
+        )
+
         if nde.model_type == "maf":
             nde_arch = MAF
         if nde.model_type == "cnf":
@@ -228,5 +169,7 @@ def get_ndes_from_config(
         nde_dict.pop("use_scaling")
 
         ndes.append(nde_arch(**nde_dict))
+
+    assert len(config.ndes) == len(ndes)
 
     return ndes

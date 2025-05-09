@@ -9,6 +9,8 @@
 STUDY_NAME="arch_para"
 N_JOBS=20
 FREEZE_FLAG="--no-freeze-parameters"
+N_GB=8
+N_CPU=8
 
 # Don't time stamp so storage is in the same place for each slurm job
 OUT_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/arch_search/"
@@ -58,8 +60,8 @@ for i in $(seq 1 $N_JOBS); do
 #SBATCH --output=$OUT_DIR/workers/optuna_worker_%j.out
 #SBATCH --error=$OUT_DIR/workers/optuna_worker_%j.err
 #SBATCH --time=08:00:00
-#SBATCH --mem=4G
-#SBATCH --cpus-per-task=8
+#SBATCH --mem=${N_GB}G
+#SBATCH --cpus-per-task=${N_CPU}
 
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate

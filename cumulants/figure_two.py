@@ -63,7 +63,8 @@ data_dir, _, _ = get_save_and_load_dirs()
     _, _, _, alpha, lower, upper, parameter_strings, *_
 ) = get_quijote_parameters()
 
-n_seeds = 2
+global_seed = 0 # Set to None to load different ensembles for each seed
+n_seeds = 5000 # NOTE: decide if seeds are for experiments or datavectors 
 
 # Load all posteriors from multi-z, calculating widths
 posterior_widths = dict(
@@ -76,7 +77,7 @@ for bulk_or_tails in ["bulk", "tails"]:
         # Arguments for given multi-z posterior
         args = get_cumulants_multi_z_args()
 
-        args.seed = s
+        args.seed = global_seed if global_seed is not None else s # Fixed ensemble, diffferent datavectors
         args.bulk_or_tails = bulk_or_tails
         args.freeze_parameters = False
 
@@ -126,7 +127,10 @@ for bulk_or_tails in ["bulk", "tails"]:
         # Load posterior for seed and experiment
         posterior_save_dir = get_multi_z_posterior_dir(config, args)
         posterior_filename = os.path.join(
-            posterior_save_dir, "posterior_{}.npz".format(args.seed)
+            posterior_save_dir, "posterior_{}{}.npz".format(
+                args.seed, 
+                ("_" + str(s)) if global_seed is not None else ""
+            ) 
         )
         posterior = np.load(posterior_filename)
 

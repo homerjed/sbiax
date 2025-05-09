@@ -1,23 +1,29 @@
 import os 
+import argparse
+from typing import Literal
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import jax
 import jax.numpy as jnp
 import equinox as eqx
 import numpy as np
+from ml_collections import ConfigDict
 from chainconsumer import Chain, ChainConsumer, Truth, PlotConfig
 
 from sbiax.utils import make_df, marker
 from sbiax.ndes import Scaler
 
-from configs import cumulants_config, bulk_cumulants_config
-from data.pdfs import BulkCumulantsDataset
+from configs import cumulants_config, bulk_cumulants_config, bulk_pdf_config, get_results_dir
+from data.common import Dataset
+from data.pdfs import BulkCumulantsDataset, BulkPDFsDataset
 from data.cumulants import CumulantsDataset
 
 
 def finite_samples_log_prob(samples_log_prob):
     samples_log_prob = jnp.where(
-        jnp.logical_or(jnp.isnan(samples_log_prob), jnp.isneginf(samples_log_prob)),
+        jnp.logical_or(
+            jnp.isnan(samples_log_prob), jnp.isneginf(samples_log_prob)
+        ),
         -1e32,
         samples_log_prob
     )
@@ -25,17 +31,124 @@ def finite_samples_log_prob(samples_log_prob):
     return samples_log_prob
 
 
-def get_dataset_and_config(bulk_or_tails):
+def get_dataset_and_config(
+    bulk_or_tails: Literal["bulk", "bulk_pdf", "tails"]
+) -> tuple[Dataset, ConfigDict]:
+
     assert bulk_or_tails in ["bulk", "bulk_pdf", "tails"], (
         "bulk_or_tails == {}".format(bulk_or_tails)
     )
-    if (bulk_or_tails == "bulk") or (bulk_or_tails == "bulk_pdf"):
+
+    if bulk_or_tails == "bulk": 
         dataset_constructor = BulkCumulantsDataset
         config = bulk_cumulants_config 
+    if bulk_or_tails == "bulk_pdf":
+        dataset_constructor = BulkPDFsDataset
+        config = bulk_pdf_config 
     if bulk_or_tails == "tails":
         dataset_constructor = CumulantsDataset
         config = cumulants_config 
+
     return dataset_constructor, config
+
+
+def get_datasets(args: argparse.Namespace) -> tuple[Dataset, dict[str, Dataset]]:
+    # Get all configs and dataset objects for the dataset types here
+    dataset_types = ["bulk", "bulk_pdf", "tails"]
+
+    assert args.bulk_or_tails in dataset_types
+
+    use_pdfs_or_cumulants = "pdf" in args.bulk_or_tails
+
+    datasets, configs = dict(), dict()
+    for dataset_type in dataset_types:
+        # Dataset and config constructor for each type
+        _dataset, _config = get_dataset_and_config(dataset_type) 
+
+        config = _config(
+            seed=args.seed, 
+            redshift=args.redshift, 
+            reduced_cumulants=args.reduced_cumulants,
+            sbi_type=args.sbi_type,
+            linearised=args.linearised, 
+            compression=args.compression,
+            order_idx=args.order_idx,
+            n_linear_sims=args.n_linear_sims,
+            freeze_parameters=args.freeze_parameters,
+            pre_train=args.pre_train
+        )
+
+        results_dir = get_results_dir(config, args)
+
+        configs[dataset_type] = config        
+
+        datasets[dataset_type] = _dataset(
+            configs[dataset_type], results_dir=results_dir
+        )
+
+    # Config and dataset being used in the experiment
+    config = configs[args.bulk_or_tails]
+    dataset = datasets[args.bulk_or_tails]
+
+    return config, dataset, datasets
+
+
+def plot_cumulants(args, config, cumulants, results_dir):
+    cumulant_strings = [
+        r"$\langle\delta^0\rangle$", 
+        r"$\langle\delta\rangle$", 
+        r"$\langle\delta^2\rangle$",
+        r"$\langle\delta^3\rangle_c$",
+        r"$\langle\delta^4\rangle_c$"
+    ]
+
+    n_scales = len(config.scales)
+    n_cumulants_plot = 3
+    if args.bulk_or_tails == "bulk":
+        if config.stack_bulk_means:
+            n_cumulants_plot += 1
+        if config.stack_bulk_norms:
+            n_cumulants_plot += 1
+
+    fig, axs = plt.subplots(
+        n_scales, 
+        n_cumulants_plot, 
+        figsize=(15., 27.), 
+        dpi=200, 
+        sharex=False, 
+        sharey=False
+    )
+    if axs.ndim == 1:
+        axs = axs[np.newaxis, :]
+
+    for r in range(n_scales):
+        for c in range(n_cumulants_plot):
+            ax = axs[r, c]
+            _cumulants = cumulants[
+                :, r * n_cumulants_plot + c : (c + 1) + r * n_cumulants_plot
+            ]
+            mu = jnp.mean(_cumulants) 
+            _cumulants = (_cumulants - mu) / jnp.std(_cumulants)
+            ax.hist(
+                _cumulants, 
+                color="firebrick" if args.bulk_or_tails == "tails" else "royalblue",
+                bins=16,
+                density=True
+            )
+            x = np.linspace(-7., 7., 2000)
+            gaussian_pdf = jax.scipy.stats.norm.pdf(x, loc=0., scale=1.)
+            ax.plot(x, gaussian_pdf, color="k")
+            ax.set_title(
+                r"{}, R={}, $\mu$={:.2E}".format(
+                    cumulant_strings[c], config.scales[r], mu
+                )
+            )
+            ax.set_xlim(-7., 7.)
+    plt.savefig(
+        os.path.join(results_dir, "cumulants_test.png"), 
+        bbox_inches="tight"
+    )
+    plt.close()
 
 
 def plot_moments(fiducial_moments_z_R, config, results_dir=None):
@@ -139,15 +252,15 @@ def plot_summaries(X, P, dataset, results_dir=None):
     c.add_truth(
         Truth(location=dict(zip(dataset.parameter_strings, dataset.alpha)), name=r"$\pi^0$")
     )
-    plot_config = PlotConfig(
-        extents=dict(
-            zip(
-                dataset.parameter_strings, 
-                np.stack([dataset.lower, dataset.upper], axis=1)
-            )
-        )
-    )
-    c.set_plot_config(plot_config)
+    # plot_config = PlotConfig(
+    #     extents=dict(
+    #         zip(
+    #             dataset.parameter_strings, 
+    #             np.stack([dataset.lower, dataset.upper], axis=1)
+    #         )
+    #     )
+    # )
+    # c.set_plot_config(plot_config)
     fig = c.plotter.plot()
     if results_dir is not None:
         plt.savefig(os.path.join(results_dir, "params.pdf")) 

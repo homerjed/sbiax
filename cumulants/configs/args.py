@@ -135,6 +135,13 @@ def get_cumulants_multi_z_args(using_notebook: bool = False) -> argparse.Namespa
         default=0
     )
     parser.add_argument(
+        "-sd", 
+        "--seed_datavector", 
+        type=int, 
+        help="Seed for datavector given fixed ensemble/experiment seed.", 
+        default=int
+    )
+    parser.add_argument(
         "-l",
         "--linearised", 
         default=True,
@@ -241,124 +248,6 @@ def get_cumulants_multi_z_args(using_notebook: bool = False) -> argparse.Namespa
 
 
 def get_arch_search_args(using_notebook: bool = False):
-    # parser = argparse.ArgumentParser(
-    #     description="Run architecture and hyperparameters search for cumulants SBI."
-    # )
-    # parser.add_argument(
-    #     "-s", 
-    #     "--seed", 
-    #     type=int, 
-    #     help="Seed for random number generation.", 
-    #     default=0
-    # )
-    # parser.add_argument(
-    #     "-l",
-    #     "--linearised", 
-    #     default=True,
-    #     action=argparse.BooleanOptionalAction, 
-    #     help="Linearised model for datavector."
-    # )
-    # parser.add_argument(
-    #     "-r",
-    #     "--reduced-cumulants", 
-    #     default=True,
-    #     action=argparse.BooleanOptionalAction, 
-    #     help="Reduced cumulants or not."
-    # )
-    # parser.add_argument(
-    #     "-c",
-    #     "--compression", 
-    #     default="linear",
-    #     choices=["linear", "nn", "nn-lbfgs"],
-    #     type=str,
-    #     help="Compression with neural network or MOPED."
-    # )
-    # parser.add_argument(
-    #     "-n",
-    #     "--n_linear_sims", 
-    #     type=int,
-    #     default=10_000,
-    #     help="Number of linearised simulations (used for pre-training if non-linear simulations and requested)."
-    # )
-    # parser.add_argument(
-    #     "-p",
-    #     "--pre-train", 
-    #     default=False,
-    #     action=argparse.BooleanOptionalAction, 
-    #     help="Pre-train (only) when using non-linearised model for datavector. Pre-train on linearised simulations."
-    # )
-    # parser.add_argument(
-    #     "-z", 
-    #     "--redshifts",
-    #     default=[0.0, 0.5, 1.0],
-    #     nargs="+", 
-    #     type=float,
-    #     help="Redshifts."
-    # )
-    # parser.add_argument(
-    #     "-o", 
-    #     "--order_idx",
-    #     default=[0, 1, 2],
-    #     nargs="+", 
-    #     type=int,
-    #     help="Indices of variance, skewness and kurtosis sample cumulants."
-    # )
-    # parser.add_argument(
-    #     "-t",
-    #     "--sbi_type", 
-    #     choices=["nle", "npe"],
-    #     default="nle",
-    #     type=str,
-    #     help="Method of SBI: neural likelihood (NLE) or posterior (NPE)."
-    # )
-    # parser.add_argument(
-    #     "-n_t",
-    #     "--n_trials", 
-    #     type=int,
-    #     default=100,
-    #     help="" 
-    # )
-    # parser.add_argument(
-    #     "-n_st",
-    #     "--n_startup_trials", 
-    #     type=int,
-    #     default=10,
-    #     help="" 
-    # )
-    # parser.add_argument(
-    #     "-m",
-    #     "--multiprocess", 
-    #     default=True,
-    #     action=argparse.BooleanOptionalAction, 
-    #     help="Reduced cumulants or not."
-    # )
-    # parser.add_argument(
-    #     "-n_pro",
-    #     "--n_processes", 
-    #     type=int,
-    #     default=10,
-    #     help="" 
-    # )
-    # parser.add_argument(
-    #     "-n_par",
-    #     "--n_parallel", 
-    #     type=int,
-    #     default=10,
-    #     help="" 
-    # )
-    # parser.add_argument(
-    #     "-v",
-    #     "--verbose", 
-    #     default=False,
-    #     action=argparse.BooleanOptionalAction, 
-    #     help="Say what's going on."
-    # )
-
-    # if using_notebook:
-    #     args = parser.parse_args([])
-    #     args = args_to_namedtuple(args)
-    # else:
-    #     args = parser.parse_args()
 
     class Args:
         n_parallel = 10

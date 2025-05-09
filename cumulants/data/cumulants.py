@@ -308,6 +308,7 @@ def get_cumulant_data(
     Finv = np.linalg.inv(F)
 
     dataset = Dataset(
+        name="tails",
         alpha=jnp.asarray(alpha),
         lower=jnp.asarray(lower),
         upper=jnp.asarray(upper),

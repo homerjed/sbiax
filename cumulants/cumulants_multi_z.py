@@ -101,6 +101,7 @@ def get_z_config_and_datavector(
     exp_name_format: str = "z={}_m={}",
     n_datavectors: int = 1,
     bulk_or_tails: Literal["tails", "bulk", "bulk_pdf"] = "tails",
+    seed_datavector: Optional[int] = None, # Use fixed seed for config (ensemble, ...) and new seed for datavector
     *,
     verbose: bool = False
 ) -> tuple[
@@ -121,6 +122,10 @@ def get_z_config_and_datavector(
     """
 
     key_datavector, key_model = jr.split(key)
+
+    # Change seed for datavector sampling without changing any other seed
+    if seed_datavector is not None:
+        key_datavector = jr.fold_in(key_datavector, seed_datavector)
 
     _dataset, _config = get_dataset_and_config(bulk_or_tails) 
 
@@ -446,6 +451,7 @@ if __name__ == "__main__":
                     pre_train=args.pre_train,
                     bulk_or_tails=args.bulk_or_tails,
                     freeze_parameters=args.freeze_parameters,
+                    seed_datavector=args.seed_datavector,
                     verbose=args.verbose
                 ) 
 
@@ -595,9 +601,13 @@ if __name__ == "__main__":
             os.makedirs(posterior_save_dir, exist_ok=True)
 
         print("Multi-z posterior save dir:\n\t", posterior_save_dir)
-
+        
+        # NOTE: Additional seed added if provided
         posterior_filename = os.path.join(
-            posterior_save_dir, "posterior_{}.npz".format(args.seed)
+            posterior_save_dir, "posterior_{}{}.npz".format(
+                args.seed, 
+                ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else ""
+            ) 
         )
         np.savez(
             posterior_filename,
@@ -613,6 +623,7 @@ if __name__ == "__main__":
         """
             Full posterior
         """
+        # assert not np.allclose(Finv_all_z, bulk_Finv_all_z)
 
         if not config.freeze_parameters:
             c = ChainConsumer() 
@@ -648,7 +659,6 @@ if __name__ == "__main__":
                     shade_alpha=0.
                 )
             )
-            Finv_bulk_pdfs_all_z
             posterior_df = make_df(
                 samples, samples_log_prob, parameter_strings=parameter_strings
             )
@@ -680,7 +690,9 @@ if __name__ == "__main__":
             )
             fig = c.plotter.plot()
             fig.suptitle(
-                r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n/k_2^{n-1}$" if config.reduced_cumulants else "$k_n$") + "\n" +
+                r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format(
+                    "$k_n/k_2^{n-1}$" if config.reduced_cumulants else "$k_n$"
+                ) + "\n" +
                 "{} z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
                         ("linearised" if config.linearised else "non-linear") + "\n",
                         "[{}]".format(", ".join(map(str, config.redshifts))),
