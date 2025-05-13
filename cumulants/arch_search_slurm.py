@@ -308,7 +308,7 @@ def objective(
                     shade_alpha=0.
                 )
             )
-            c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
+            c.add_chain(Chain(samples=posterior_df, name="SBI[{}]".format(args.bulk_or_tails), color="r"))
             c.add_marker(
                 location=marker(x_, parameter_strings=dataset.parameter_strings),
                 name=r"$\hat{x}$", 
@@ -720,10 +720,11 @@ if __name__ == "__main__":
     )
 
     # Identify this arch search run later on (unique among different dataset/training types)
-    identifier_str = "arch_search_{}_{}_{}_m{}".format(
+    identifier_str = "arch_search_{}_{}_{}_{}_m{}".format(
         "l" if args.linearised else "nl", 
         "f" if args.freeze_parameters else "nf", 
         "pt" if args.pre_train else "npt", 
+        args.bulk_or_tails,
         "".join(map(str, args.order_idx))
     )
 

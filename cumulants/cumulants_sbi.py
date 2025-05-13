@@ -14,11 +14,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from chainconsumer import Chain, ChainConsumer, Truth
 from tensorflow_probability.substrates.jax.distributions import Distribution
+import tensorflow_probability.substrates.jax.distributions as tfd
 
-from sbiax.utils import make_df, marker
 from sbiax.ndes import Scaler, CNF, MAF 
-from sbiax.inference import nuts_sample
 from sbiax.train import train_ensemble
+from sbiax.inference import nuts_sample
+from sbiax.utils import make_df, marker
 
 from configs import (
     cumulants_config, 
@@ -122,30 +123,31 @@ if args.seed == 0:
     plt.savefig(os.path.join(results_dir, "Fisher_tests.pdf"))
     plt.close()
 
-    c = ChainConsumer()
+    if not config.freeze_parameters:
+        c = ChainConsumer()
 
-    target_idx = np.array([0, 4])
-    for i, (dataset_type, name) in enumerate(zip(
-        ["bulk_pdf", "bulk", "tails"],
-        [" PDF[bulk]", " $k_n$[bulk]", " $k_n$[tails]"],
-    )):
-        c.add_chain(
-            Chain.from_covariance(
-                datasets[dataset_type].data.alpha[target_idx],
-                datasets[dataset_type].data.Finv[:, target_idx][target_idx, :],
-                columns=[dataset.parameter_strings[_] for _ in target_idx],
-                name=r"$F_{\Sigma^{-1}}$" + name,
-                shade_alpha=0.
+        target_idx = np.array([0, 4])
+        for i, (dataset_type, name) in enumerate(zip(
+            ["bulk_pdf", "bulk", "tails"],
+            [" PDF[bulk]", " $k_n$[bulk]", " $k_n$[tails]"],
+        )):
+            c.add_chain(
+                Chain.from_covariance(
+                    datasets[dataset_type].data.alpha[target_idx],
+                    datasets[dataset_type].data.Finv[:, target_idx][target_idx, :],
+                    columns=[dataset.parameter_strings[_] for _ in target_idx],
+                    name=r"$F_{\Sigma^{-1}}$" + name,
+                    shade_alpha=0.
+                )
             )
+        c.add_marker(
+            location=marker(dataset.alpha[target_idx], parameter_strings=[dataset.parameter_strings[_] for _ in target_idx]),
+            name=r"$\alpha$", 
+            color="#7600bc"
         )
-    c.add_marker(
-        location=marker(dataset.alpha[target_idx], parameter_strings=[dataset.parameter_strings[_] for _ in target_idx]),
-        name=r"$\alpha$", 
-        color="#7600bc"
-    )
-    fig = c.plotter.plot()
-    plt.savefig(os.path.join(results_dir, "Fisher_tests_marginalised.pdf"))
-    plt.close()
+        fig = c.plotter.plot()
+        plt.savefig(os.path.join(results_dir, "Fisher_tests_marginalised.pdf"))
+        plt.close()
 
     plt.figure()
     corr = jnp.corrcoef(dataset.fiducial_data, rowvar=False)
@@ -165,8 +167,6 @@ if args.seed == 0:
     plt.close()
 
     print("Covariance condition number: {:.3E}".format(jnp.linalg.cond(dataset.C)))
-
-    # print(jnp.linalg.cholesky(dataset.C))
 
 ################################
 
@@ -189,8 +189,6 @@ plot_latin_moments(dataset.data, config, results_dir)
 """
     Build NDEs
 """
-# cov_sqrt_inv = fractional_matrix_power(cov_X, -0.5)
-# X_whitened = (X - mean_X) @ cov_sqrt_inv
 
 scaler = Scaler(
     X, dataset.parameters, use_scaling=config.use_scalers
@@ -373,7 +371,8 @@ ensemble, stats = train_ensemble(
     results_dir=results_dir
 )
 
-print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None)
+print("scaler mu:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None)
+print("scaler std:", ndes[0].scaler.std_x if ndes[0].scaler is not None else None)
 
 """ 
     Sample and plot posterior for NDE with noisy datavectors
@@ -390,193 +389,226 @@ print("compressed datavector {} \n {} {}".format(x_.shape, x_, dataset.alpha))
 
 log_prob_fn = ensemble.ensemble_log_prob_fn(data_preprocess_fn(x_), parameter_prior)
 
+print(log_prob_fn(dataset.alpha)) # Scaler works how here?
+
 if 1:
-    state = jr.multivariate_normal(
-        key_state, x_, dataset.Finv, (2 * config.n_walkers,)
-    )
-
-    samples, weights = affine_sample(
-        key_sample, 
-        log_prob=log_prob_fn,
-        n_walkers=config.n_walkers, 
-        n_steps=config.n_steps + config.burn, 
-        burn=config.burn, 
-        current_state=state,
-        description="Sampling",
-        show_tqdm=args.use_tqdm
-    )
-
-    alpha_log_prob = log_prob_fn(dataset.alpha)
-    samples_log_prob = jax.vmap(log_prob_fn)(samples)
-    samples_log_prob = finite_samples_log_prob(samples_log_prob) 
-
-    print("samples:", samples.min(), samples.max())
-    print("probs:", samples_log_prob.min(), samples_log_prob.max())
-
-    posterior_df = make_df(
-        samples, 
-        samples_log_prob, 
-        parameter_strings=dataset.parameter_strings
-    )
-
-    np.savez(
-        os.path.join(results_dir, "posterior.npz"), 
-        alpha=dataset.alpha,
-        samples=samples,
-        samples_log_prob=samples_log_prob,
-        datavector=datavector,
-        summary=x_
-    )
-
-    c = ChainConsumer()
-    c.add_chain(
-        Chain.from_covariance(
-            dataset.alpha,
-            dataset.Finv,
-            columns=dataset.parameter_strings,
-            name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[tails]"),
-            color="k",
-            linestyle=":",
-            shade_alpha=0.
+    try:
+        state = jr.multivariate_normal(
+            key_state, x_, dataset.Finv, (2 * config.n_walkers,)
         )
-    )
-    c.add_chain(
-        Chain.from_covariance(
-            dataset.alpha,
-            datasets["bulk"].data.Finv,
-            columns=dataset.parameter_strings,
-            name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[bulk]"),
-            color="b",
-            linestyle=":",
-            shade_alpha=0.
+        # state = parameter_prior.sample(seed=key_state, sample_shape=(2 * config.n_walkers,))
+
+        samples, weights = affine_sample(
+            key_sample, 
+            log_prob=log_prob_fn,
+            n_walkers=config.n_walkers, 
+            n_steps=config.n_steps + config.burn, 
+            burn=config.burn, 
+            current_state=state,
+            description="Sampling",
+            show_tqdm=args.use_tqdm
         )
-    )
-    c.add_chain(
-        Chain.from_covariance(
-            dataset.alpha,
-            datasets["bulk_pdf"].data.Finv,
-            columns=dataset.parameter_strings,
-            name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]"),
-            color="g",
-            linestyle=":",
-            shade_alpha=0.
+
+        alpha_log_prob = log_prob_fn(dataset.alpha)
+        samples_log_prob = jax.vmap(log_prob_fn)(samples)
+        samples_log_prob = finite_samples_log_prob(samples_log_prob) 
+
+        print("samples:", samples.min(), samples.max())
+        print("probs:", samples_log_prob.min(), samples_log_prob.max())
+
+        posterior_df = make_df(
+            samples, 
+            samples_log_prob, 
+            parameter_strings=dataset.parameter_strings
         )
-    )
-    c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
-    c.add_marker(
-        location=marker(x_, parameter_strings=dataset.parameter_strings),
-        name=r"$\hat{x}$", 
-        color="b"
-    )
-    c.add_marker(
-        location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
-        name=r"$\alpha$", 
-        color="k"
-    )
-    fig = c.plotter.plot()
-    fig.suptitle(
-        (
-            r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
-            + " z={}".format(config.redshift) + "\n"
-            + (" linearised" if config.linearised else " Quijote") + ("[bulk]" if args.bulk_or_tails == "bulk" else "[tails]") + "\n"
-            + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
-            + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
-            + r"$k_n$ = [{}]".format(
-                ", ".join([["var.", "skew.", "kurt."][_] for _ in config.order_idx])
+
+        np.savez(
+            os.path.join(results_dir, "posterior.npz"), 
+            alpha=dataset.alpha,
+            samples=samples,
+            samples_log_prob=samples_log_prob,
+            datavector=datavector,
+            summary=x_
+        )
+
+        c = ChainConsumer()
+        c.add_chain(
+            Chain.from_covariance(
+                dataset.alpha,
+                datasets["tails"].data.Finv,
+                columns=dataset.parameter_strings,
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[tails]"),
+                color="k",
+                linestyle=":",
+                shade_alpha=0.
             )
-        ),
-        multialignment='center'
-    )
-    plt.savefig(os.path.join(results_dir, "posterior_affine.pdf"))
-    plt.savefig(os.path.join(posteriors_dir, "posterior_affine.pdf"))
-    plt.close()
-
-if 1:
-    samples, samples_log_prob = nuts_sample(
-        key_sample, log_prob_fn, prior=parameter_prior
-    )
-    samples = samples.squeeze()
-    samples_log_prob = samples_log_prob.squeeze()
-    samples_log_prob = finite_samples_log_prob(samples_log_prob)
-
-    posterior_df = make_df(
-        samples, 
-        samples_log_prob, 
-        parameter_strings=dataset.parameter_strings
-    )
-
-    np.savez(
-        os.path.join(results_dir, "posterior_blackjax.npz"), 
-        alpha=dataset.alpha,
-        samples=samples,
-        samples_log_prob=samples_log_prob,
-        datavector=datavector,
-        summary=x_
-    )
-
-    c = ChainConsumer()
-    c.add_chain(
-        Chain.from_covariance(
-            dataset.alpha,
-            dataset.Finv,
-            columns=dataset.parameter_strings,
-            name=r"$F_{\Sigma^{-1}}$" + " {}".format(
-                "$S_n$[tails]" if config.reduced_cumulants else "$k_n$[tails]"
+        )
+        c.add_chain(
+            Chain.from_covariance(
+                dataset.alpha,
+                datasets["bulk"].data.Finv,
+                columns=dataset.parameter_strings,
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[bulk]"),
+                color="b",
+                linestyle=":",
+                shade_alpha=0.
+            )
+        )
+        c.add_chain(
+            Chain.from_covariance(
+                dataset.alpha,
+                datasets["bulk_pdf"].data.Finv,
+                columns=dataset.parameter_strings,
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]"),
+                color="g",
+                linestyle=":",
+                shade_alpha=0.
+            )
+        )
+        c.add_chain(
+            Chain(
+                samples=posterior_df, 
+                name="SBI[{}]".format(args.bulk_or_tails), 
+                color="r"
+            )
+        )
+        c.add_marker(
+            location=marker(x_, parameter_strings=dataset.parameter_strings),
+            name=r"$\hat{x}$", 
+            color="b"
+        )
+        c.add_marker(
+            location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
+            name=r"$\alpha$", 
+            color="k"
+        )
+        fig = c.plotter.plot()
+        fig.suptitle(
+            (
+                r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
+                + " z={}".format(config.redshift) + "\n"
+                + (" linearised" if config.linearised else " Quijote") + ("[bulk]" if args.bulk_or_tails == "bulk" else "[tails]") + "\n"
+                + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
+                + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
+                + r"$k_n$ = [{}]".format(
+                    ", ".join([["var.", "skew.", "kurt."][_] for _ in config.order_idx])
+                )
             ),
-            color="k",
-            linestyle=":",
-            shade_alpha=0.
+            multialignment='center'
         )
-    )
-    c.add_chain(
-        Chain.from_covariance(
-            dataset.alpha,
-            datasets["bulk"].data.Finv,
-            columns=dataset.parameter_strings,
-            name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[bulk]"),
-            color="b",
-            linestyle=":",
-            shade_alpha=0.
+        plt.savefig(os.path.join(results_dir, "posterior_affine.pdf"))
+        plt.savefig(os.path.join(posteriors_dir, "posterior_affine.pdf"))
+        plt.close()
+    except Exception as e:
+        print("~" * 50)
+        print(f"Exception:\n\t{e}")
+        print("~" * 50)
+
+if 0:
+    try:
+        nuts_prior = tfd.MultivariateNormalFullCovariance(
+            loc=dataset.alpha, covariance_matrix=dataset.Finv
         )
-    )
-    c.add_chain(
-        Chain.from_covariance(
-            dataset.alpha,
-            datasets["bulk_pdf"].data.Finv,
-            columns=dataset.parameter_strings,
-            name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]"),
-            color="g",
-            linestyle=":",
-            shade_alpha=0.
+        samples, samples_log_prob = nuts_sample(
+            key_sample, 
+            log_prob_fn, 
+            initial_state=dataset.alpha[jnp.newaxis, :], 
+            prior=nuts_prior, #parameter_prior
+            # n_chains=1000,
+            # n_samples=2000
         )
-    )
-    c.add_chain(Chain(samples=posterior_df, name="SBI", color="r"))
-    c.add_marker(
-        location=marker(x_, parameter_strings=dataset.parameter_strings),
-        name=r"$\hat{x}$", 
-        color="b"
-    )
-    c.add_marker(
-        location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
-        name=r"$\alpha$", 
-        color="#7600bc"
-    )
-    fig = c.plotter.plot()
-    fig.suptitle(
-        (
-            r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
-            + " z={}".format(config.redshift) + "\n"
-            + (" linearised" if config.linearised else " Quijote") + ("[bulk]" if args.bulk_or_tails == "bulk" else "[tails]") + "\n"
-            + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
-            + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
-            + r"$k_n$ = [{}]".format(
-                ", ".join([["var.", "skew.", "kurt."][_] for _ in config.order_idx])
+        samples = jnp.squeeze(samples) # NOTE: if n_chains != 1 ...
+        samples_log_prob = jnp.squeeze(samples_log_prob)
+        # samples = jnp.concatenate(samples,) 
+        # samples_log_prob = jnp.squeeze(samples_log_prob)
+        samples_log_prob = finite_samples_log_prob(samples_log_prob) # all 
+
+        print("samples:", samples.min(), samples.max())
+        print("probs:", samples_log_prob.min(), samples_log_prob.max())
+
+        posterior_df = make_df(
+            samples, 
+            samples_log_prob, 
+            parameter_strings=dataset.parameter_strings
+        )
+
+        np.savez(
+            os.path.join(results_dir, "posterior_blackjax.npz"), 
+            alpha=dataset.alpha,
+            samples=samples,
+            samples_log_prob=samples_log_prob,
+            datavector=datavector,
+            summary=x_
+        )
+
+        c = ChainConsumer()
+        c.add_chain(
+            Chain.from_covariance(
+                dataset.alpha,
+                dataset.Finv,
+                columns=dataset.parameter_strings,
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format(
+                    "$S_n$[tails]" if config.reduced_cumulants else "$k_n$[tails]"
+                ),
+                color="k",
+                linestyle=":",
+                shade_alpha=0.
             )
-        ),
-        multialignment='center'
-    )
-    plt.savefig(os.path.join(results_dir, "posterior_blackjax.pdf"))
-    plt.close()
+        )
+        c.add_chain(
+            Chain.from_covariance(
+                dataset.alpha,
+                datasets["bulk"].data.Finv,
+                columns=dataset.parameter_strings,
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[bulk]"),
+                color="b",
+                linestyle=":",
+                shade_alpha=0.
+            )
+        )
+        c.add_chain(
+            Chain.from_covariance(
+                dataset.alpha,
+                datasets["bulk_pdf"].data.Finv,
+                columns=dataset.parameter_strings,
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]"),
+                color="g",
+                linestyle=":",
+                shade_alpha=0.
+            )
+        )
+        c.add_chain(Chain(samples=posterior_df, name="SBI[{}]".format(args.bulk_or_tails), color="r"))
+        c.add_marker(
+            location=marker(x_, parameter_strings=dataset.parameter_strings),
+            name=r"$\hat{x}$", 
+            color="b"
+        )
+        c.add_marker(
+            location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
+            name=r"$\alpha$", 
+            color="#7600bc"
+        )
+        fig = c.plotter.plot()
+        fig.suptitle(
+            (
+                r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
+                + " z={}".format(config.redshift) + "\n"
+                + (" linearised" if config.linearised else " Quijote") + ("[bulk]" if args.bulk_or_tails == "bulk" else "[tails]") + "\n"
+                + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
+                + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
+                + r"$k_n$ = [{}]".format(
+                    ", ".join([["var.", "skew.", "kurt."][_] for _ in config.order_idx])
+                )
+            ),
+            multialignment='center'
+        )
+        plt.savefig(os.path.join(results_dir, "posterior_blackjax.pdf"))
+        plt.savefig(os.path.join(posteriors_dir, "posterior_blackjax.pdf"))
+        plt.close()
+    except Exception as e:
+        print("~" * 50)
+        print(f"Exception:\n\t{e}")
+        print("~" * 50)
 
 print("Time={:.1} mins.".format((time.time() - t0) / 60.))
 

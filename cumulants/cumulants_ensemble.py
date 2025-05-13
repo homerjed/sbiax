@@ -93,8 +93,10 @@ class Ensemble(eqx.Module):
             *,
             key: Optional[PRNGKeyArray] = None
         ) -> Scalar:
-            # Add log-likelihoods of datavectors together 
-            # > Assumptions about datavector shape and batch axis...
+            """ 
+                Add log-likelihoods of datavectors together 
+                > Assumptions about datavector shape and batch axis...
+            """
 
             # Log-prob function with fixed parameters
             fn = lambda data, key: nde.log_prob(x=data, y=theta, key=key)
@@ -115,6 +117,7 @@ class Ensemble(eqx.Module):
         def _joint_log_prob_fn(
             theta: Float[Array, "p"], key: Optional[PRNGKeyArray] = None
         ) -> Scalar:
+            """ Joint log-probability function for ensemble of NDEs """
 
             L = jnp.zeros(())
             for n, (nde, weight) in enumerate(
@@ -208,13 +211,26 @@ class MultiEnsemble(eqx.Module):
         if isinstance(datavectors, jax.Array):
             datavectors = [datavectors]
 
+        assert len(self.ensembles) == len(datavectors), (
+            "Ensembles={}, datavectors={}".format(len(self.ensembles), len(datavectors))
+        )
+
+        assert all([len(_datavectors) for _datavectors in datavectors]), (
+            "Non-equal shapes between datavectors {}".format(
+                [len(_datavectors) for _datavectors in datavectors]
+            )
+        )
+
+        @typecheck
         def _multi_ensemble_log_prob_fn(theta: Float[Array, "p"]) -> Scalar:
             # Loop over matched ensembles / datavectors NOTE: vmap over datavectors (when have multiple per redshift)?
             L = jnp.zeros(())
 
             # Don't need this loop? tree map or something? jax.tree.map(lambda f, x: jax.vmap(f)(x), f, x, is_leaf=lambda l: isinstance(l, ...)) x is stack of datavectors, f is ensemble nde
             for ensemble, _datavectors in zip(self.ensembles, datavectors):
+
                 ensemble_log_L = ensemble.ensemble_likelihood(_datavectors)(theta) # No use of prior
+
                 L = L + ensemble_log_L
 
             if self.sbi_type == "nle":
@@ -222,7 +238,7 @@ class MultiEnsemble(eqx.Module):
 
             return L 
 
-        return _multi_ensemble_log_prob_fn
+        return eqx.filter_jit(_multi_ensemble_log_prob_fn)
 
     def load_ensembles(self, paths: list[str], ensembles: list[Ensemble]) -> None:
         # Load sub-ensembles

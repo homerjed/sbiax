@@ -195,14 +195,19 @@ def get_prior(config: ConfigDict, dataset: Dataset) -> tfd.Distribution:
 
     if config.linearised:
         print("Using flat prior")
-        lower = jnp.ones((dataset.alpha.size,)) * -1e-4
-        upper = jnp.ones((dataset.alpha.size,)) * 1e-4
+        flat_limit = 1e4
+        lower = jnp.ones((dataset.alpha.size,)) * -flat_limit
+        upper = jnp.ones((dataset.alpha.size,)) * flat_limit
     else:
         print("Using Quijote uniform prior")
         lower = jnp.asarray(dataset.lower) # Avoid tfp warning
         upper = jnp.asarray(dataset.upper)
 
     assert jnp.all((upper - lower) > 0.)
+
+    # print("FORCING FLAT PRIOR")
+    # lower = jnp.ones((dataset.alpha.size,)) * -1e-4
+    # upper = jnp.ones((dataset.alpha.size,)) * 1e-4
 
     prior = tfd.Blockwise(
         [tfd.Uniform(l, u) for l, u in zip(lower, upper)]
@@ -290,7 +295,8 @@ def get_linearised_data(
             config.n_linear_sims, 
             dataset.alpha, 
             dataset.lower, 
-            dataset.upper
+            dataset.upper, 
+            hypercube=True
         )
     else:
         Y = dataset.parameters
@@ -328,7 +334,10 @@ def get_datavector(
 
     # Choose a linearised model datavector or simply one of the Quijote realisations
     # which corresponds to a non-linearised datavector with Gaussian noise
-    if (not config.use_expectation) or (not use_expectation):
+    if config.use_expectation or use_expectation:
+        print("Using expectation (noiseless datavector)")
+        datavector = jnp.mean(dataset.fiducial_data, axis=0, keepdims=True)
+    else:
         if config.linearised:
             print("Using linearised datavector")
             mu = jnp.mean(dataset.fiducial_data, axis=0)
@@ -337,14 +346,11 @@ def get_datavector(
         else:
             print("Using non-linearised datavector")
             datavector = jr.choice(key, dataset.fiducial_data, shape=(n,))
-    else:
-        print("Using expectation (noiseless datavector)")
-        datavector = jnp.mean(dataset.fiducial_data, axis=0, keepdims=True)
 
     if not (n > 1):
-        datavector = jnp.squeeze(datavector, axis=0) 
+        datavector = jnp.squeeze(datavector, axis=0) # Remove batch axis by default
 
-    return datavector # Remove batch axis by default
+    return datavector 
 
 
 """
@@ -484,7 +490,10 @@ def get_compression_fn(key, config, dataset, *, results_dir):
     if config.compression == "nn" or config.compression == "nn-lbfgs":
 
         net, preprocess_fn = get_nn_compressor(
-            key, dataset, lbfgs=config.compression == "nn-lbfgs", results_dir=results_dir
+            key, 
+            dataset, 
+            lbfgs=config.compression == "nn-lbfgs", 
+            results_dir=results_dir
         )
 
         compressor = lambda d, p: net(preprocess_fn(d)) # Ignore parameter kwarg!

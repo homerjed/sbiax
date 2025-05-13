@@ -1,14 +1,14 @@
 #!/bin/bash
 
-RUN_LINEARISED=false # Linearised is glitching for now...
+RUN_LINEARISED=true # Linearised is glitching for now...
 RUN_FROZEN=false
 ONLY_RUN_FIGURES=false # Only run figure_one.py jobs
-N_SEEDS=5
-N_PARALLEL=5
+N_SEEDS=2
+N_PARALLEL=2
 N_LINEAR_SIMS=10000
 N_GB=8
 N_CPU=8
-FIXED_SEED=0
+FIXED_SEED=0 # Repeat this for linearised... 
 
 TIMESTAMP=$(date +'%m%d_%H%M')
 OUT_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/cumulants_sbi/$TIMESTAMP"
@@ -145,7 +145,7 @@ END
 
                         multi_z_deps=$(
                             IFS=":"
-                            echo "${sbi_job_ids[*]}"
+                            echo "${multi_z_job_ids[*]}"
                         )
 
                         echo "$final_script" | sbatch

@@ -127,11 +127,19 @@ for bulk_or_tails in ["bulk", "tails"]:
         # Load posterior for seed and experiment
         posterior_save_dir = get_multi_z_posterior_dir(config, args)
         posterior_filename = os.path.join(
-            posterior_save_dir, "posterior_{}{}.npz".format(
+            posterior_save_dir, 
+            "multi_z_posterior_{}{}.npz".format(
                 args.seed, 
-                ("_" + str(s)) if global_seed is not None else ""
+                ("_" + str(s)) if global_seed is not None else "" # Check this loads posterior from independent datavector with fixed NDE training seed
             ) 
         )
+        # posterior_filename = os.path.join(
+        #     posterior_save_dir, 
+        #     "multi_z_posterior_{}{}.npz".format( # NOTE: was just 'posterior_...' before
+        #         args.seed, 
+        #         ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else ""
+        #     ) 
+        # )
         posterior = np.load(posterior_filename)
 
         posterior_widths[bulk_or_tails][s] = np.var(posterior["samples"], axis=0)

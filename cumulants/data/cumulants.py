@@ -111,6 +111,8 @@ def get_R_and_z_moments(
     n_redshifts = len(z_idx)
     n_cumulants = len(order_idx)
 
+    assert n_redshifts == 1
+
     if verbose:
         print("z_idx:", z_idx)
         print("R_idx:", R_idx)
@@ -329,64 +331,6 @@ def get_cumulant_data(
     if config.use_pca:
         dataset = pca_dataset(dataset)
 
-    if verbose:
-        corr_matrix = np.corrcoef(fiducial_moments_z_R, rowvar=False) + 1e-6 # Log colouring
-
-        print("Covariance condition number: {:.3E}".format(jnp.linalg.cond(C)))
-        print("Dtype of moments", fiducial_moments_z_R.dtype)
-
-        plt.figure()
-        norm = mcolors.LogNorm(vmin=np.min(corr_matrix[corr_matrix > 0]), vmax=np.max(corr_matrix)) 
-        plt.imshow(corr_matrix, norm=norm, cmap="bwr")
-        plt.colorbar()
-        plt.axis("off")
-        plt.savefig("moments_corr_matrix_log.png", bbox_inches="tight")
-        plt.close()
-
-        plt.figure()
-        plt.imshow(corr_matrix, cmap="bwr", vmin=-1., vmax=1.)
-        plt.colorbar()
-        plt.axis("off")
-        plt.savefig(
-            os.path.join(
-                results_dir if results_dir is not None else "", "moments_corr_matrix.png"
-            ), 
-            bbox_inches="tight"
-        )
-        plt.close()
-
-        # Plot Fisher forecast
-        c = ChainConsumer()
-        c.add_chain(
-            Chain.from_covariance(
-                dataset.alpha,
-                dataset.Finv,
-                columns=dataset.parameter_strings,
-                name=r"$F_{\Sigma^{-1}}$",
-                color="k",
-                linestyle=":",
-                shade_alpha=0.
-            )
-        )
-        c.add_marker(
-            location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
-            name=r"$\alpha$", 
-            color="#7600bc"
-        )
-        fig = c.plotter.plot()
-        plt.savefig(
-            os.path.join(
-                results_dir if results_dir is not None else "fisher_forecasts/", 
-                "fisher_forecast_{}_z={}_R={}_m={}.png".format(
-                    config.linearised, 
-                    config.redshift, 
-                    "".join(map(str, config.order_idx)),
-                    "".join(map(str, config.scales))
-                )
-            ), 
-        )
-        plt.close()
-
     return dataset
 
 
@@ -405,6 +349,7 @@ def get_data(config: ConfigDict, *, verbose: bool = False, results_dir: Optional
     if hasattr(config, "linearised"):
         if config.linearised:
             print("Using linearised model, Gaussian noise.")
+
             D, Y = get_linearised_data(config, dataset) 
 
             dataset = replace(dataset, data=D, parameters=Y)
@@ -698,3 +643,69 @@ class CumulantsDataset:
     #     #     are_derivatives=True
     #     # )
     # """
+
+
+
+
+
+
+
+
+    # if verbose:
+    #     corr_matrix = np.corrcoef(fiducial_moments_z_R, rowvar=False) + 1e-6 # Log colouring
+
+    #     print("Covariance condition number: {:.3E}".format(jnp.linalg.cond(C)))
+    #     print("Dtype of moments", fiducial_moments_z_R.dtype)
+
+    #     plt.figure()
+    #     norm = mcolors.LogNorm(vmin=np.min(corr_matrix[corr_matrix > 0]), vmax=np.max(corr_matrix)) 
+    #     plt.imshow(corr_matrix, norm=norm, cmap="bwr")
+    #     plt.colorbar()
+    #     plt.axis("off")
+    #     plt.savefig("moments_corr_matrix_log.png", bbox_inches="tight")
+    #     plt.close()
+
+    #     plt.figure()
+    #     plt.imshow(corr_matrix, cmap="bwr", vmin=-1., vmax=1.)
+    #     plt.colorbar()
+    #     plt.axis("off")
+    #     plt.savefig(
+    #         os.path.join(
+    #             results_dir if results_dir is not None else "", "moments_corr_matrix.png"
+    #         ), 
+    #         bbox_inches="tight"
+    #     )
+    #     plt.close()
+
+    #     # Plot Fisher forecast
+    #     c = ChainConsumer()
+    #     c.add_chain(
+    #         Chain.from_covariance(
+    #             dataset.alpha,
+    #             dataset.Finv,
+    #             columns=dataset.parameter_strings,
+    #             name=r"$F_{\Sigma^{-1}}$",
+    #             color="k",
+    #             linestyle=":",
+    #             shade_alpha=0.
+    #         )
+    #     )
+    #     c.add_marker(
+    #         location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
+    #         name=r"$\alpha$", 
+    #         color="#7600bc"
+    #     )
+    #     fig = c.plotter.plot()
+    #     plt.savefig(
+    #         os.path.join(
+    #             results_dir if results_dir is not None else "fisher_forecasts/", 
+    #             "fisher_forecast_{}_z={}_R={}_m={}.png".format(
+    #                 config.linearised, 
+    #                 config.redshift, 
+    #                 "".join(map(str, config.order_idx)),
+    #                 "".join(map(str, config.scales))
+    #             )
+    #         ), 
+    #     )
+    #     plt.close()
+

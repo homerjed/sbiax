@@ -5,6 +5,9 @@ from jaxtyping import Float, Array, jaxtyped
 from beartype import beartype as typechecker
 
 
+EPS = 1e-12
+
+
 def stop_grad(a):
     return jax.lax.stop_gradient(a)
 
@@ -66,7 +69,7 @@ class Scaler(eqx.Module):
         if X is not None:
             self.x_dim = X.shape[-1]
             self.mu_x = X.mean(axis=0)
-            self.std_x = X.std(axis=0)
+            self.std_x = X.std(axis=0) 
         if x_mu_std is not None:
             self.mu_x, self.std_x = x_mu_std
             self.x_dim = self.mu_x.size
@@ -99,8 +102,8 @@ class Scaler(eqx.Module):
             (`Tuple[Array, Array]`): Scaled data and parameters.
         """
         if self.use_scaling:
-            x = (x - stop_grad(self.mu_x)) / stop_grad(self.std_x)
-            q = (q - stop_grad(self.mu_q)) / stop_grad(self.std_q)
+            x = (x - stop_grad(self.mu_x)) / stop_grad(self.std_x + EPS)
+            q = (q - stop_grad(self.mu_q)) / stop_grad(self.std_q + EPS)
         return x, q
 
     @jaxtyped(typechecker=typechecker)

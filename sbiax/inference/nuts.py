@@ -177,12 +177,7 @@ def nuts_sample(
             states, infos = jax.vmap(step_fn)(keys, states, **tuned_params)
             return states, (states, infos)
 
-        _, (states, infos) = jax.lax.scan(
-            # scan_tqdm(one_step, desc="Sampling"), 
-            one_step,
-            initial_states, 
-            jnp.arange(n_samples)
-        )
+        _, (states, infos) = jax.lax.scan(one_step, initial_states, jnp.arange(n_samples))
         return states, infos
 
     states, infos = inference_loop_multiple_chains(

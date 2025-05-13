@@ -430,7 +430,7 @@ if __name__ == "__main__":
                 (
                     ensemble, 
                     x_z, # MLE[datavectors] at this redshift
-                    datavector, 
+                    datavector, # list[Array["n d"]]
                     prior, # Same prior for each z, only needed / used once
                     alpha, # Datavectors generated at these parameters for each redshift
                     bulk_Finv_z,
@@ -604,7 +604,8 @@ if __name__ == "__main__":
         
         # NOTE: Additional seed added if provided
         posterior_filename = os.path.join(
-            posterior_save_dir, "posterior_{}{}.npz".format(
+            posterior_save_dir, 
+            "multi_z_posterior_{}{}.npz".format( # NOTE: was just 'posterior_...' before
                 args.seed, 
                 ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else ""
             ) 
@@ -644,7 +645,7 @@ if __name__ == "__main__":
                     bulk_Finv_all_z,
                     columns=parameter_strings,
                     name=r"$F_{\Sigma^{-1}}$ (all z) $k_n$[bulk]",
-                    color="g",
+                    color="b",
                     shade_alpha=0.
                 )
             )
@@ -706,7 +707,11 @@ if __name__ == "__main__":
             plt.savefig(
                 os.path.join(
                     figs_dir, 
-                    "multi_ensemble_posterior_cumulants_{}_{}_{}.pdf".format(args.seed, linear_str, n_posterior))
+                    "multi_ensemble_posterior_cumulants_{}_{}_{}_{}{}.pdf".format(
+                        args.seed, linear_str, pretrain_str, n_posterior,
+                        ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else ""
+                    )
+                )
             )
             plt.close()
 
@@ -736,7 +741,7 @@ if __name__ == "__main__":
                 bulk_Finv_all_z[ix, :][:, ix],
                 columns=parameter_names_,
                 name=r"$F_{\Sigma^{-1}}$ (all z) $k_n$[bulk]",
-                color="g",
+                color="b",
                 shade_alpha=0.
             )
         )
@@ -795,8 +800,9 @@ if __name__ == "__main__":
         )
         posterior_plot_filename = os.path.join(
             figs_dir, 
-            "multi_ensemble_posterior_marginalised_cumulants_{}_{}_{}_{}.pdf".format(
-                args.seed, linear_str, pretrain_str, n_posterior
+            "multi_ensemble_posterior_marginalised_cumulants_{}_{}_{}_{}{}.pdf".format(
+                args.seed, linear_str, pretrain_str, n_posterior,
+                ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else ""
             )
         )
         plt.savefig(posterior_plot_filename)

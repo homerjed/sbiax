@@ -229,7 +229,7 @@ for bulk_or_tails in ["bulk", "tails"]:
 
 # Plot the posteriors for SBI on the bulk and tails, bulk PDF Fisher 
 
-PLOT_SUMMARIES = False
+PLOT_SUMMARIES = True
 
 target_idx = get_target_idx()
 
@@ -373,7 +373,12 @@ for marginalised in [True, False]:
         os.makedirs(sub_figs_dir, exist_ok=True)
 
     filename = os.path.join(
-        sub_figs_dir, "figure_one_{}{}.pdf".format(args.seed, "_marginalised" if marginalised else "")
+        sub_figs_dir, 
+        "figure_one_{}{}{}.pdf".format(
+            args.seed, 
+            "_marginalised" if marginalised else "",
+            ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else ""
+        )
     )
 
     plt.savefig(filename)

@@ -24,10 +24,10 @@ def finite_samples_log_prob(samples_log_prob):
         jnp.logical_or(
             jnp.isnan(samples_log_prob), jnp.isneginf(samples_log_prob)
         ),
+        # jnp.isnan(samples_log_prob), 
         -1e32,
         samples_log_prob
     )
-    # samples_log_prob = jnp.where(jnp.isneginf(samples_log_prob), -1e100, samples_log_prob)
     return samples_log_prob
 
 
@@ -73,8 +73,8 @@ def get_datasets(args: argparse.Namespace) -> tuple[Dataset, dict[str, Dataset]]
             linearised=args.linearised, 
             compression=args.compression,
             order_idx=args.order_idx,
-            n_linear_sims=args.n_linear_sims,
             freeze_parameters=args.freeze_parameters,
+            n_linear_sims=args.n_linear_sims,
             pre_train=args.pre_train
         )
 
@@ -132,7 +132,7 @@ def plot_cumulants(args, config, cumulants, results_dir):
             ax.hist(
                 _cumulants, 
                 color="firebrick" if args.bulk_or_tails == "tails" else "royalblue",
-                bins=16,
+                bins=32,
                 density=True
             )
             x = np.linspace(-7., 7., 2000)

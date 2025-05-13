@@ -53,7 +53,7 @@ DEFAULT_OPT = dict(
     start_step     = 0,
     n_epochs       = 10_000,
     n_batch        = 100,
-    patience       = 200,
+    patience       = 20, #200,
     lr             = 1e-3,
     opt            = "adam",
     opt_kwargs     = {}
@@ -71,10 +71,14 @@ HP_OPT_OPT = dict(
 
 # Set the default training and architectures
 DEFAULT_CNF_ARCH = DEFAULT_CNF_ARCH
-DEFAULT_MAF_ARCH = DEFAULT_MAF_ARCH # HP_OPT_MAF_ARCH
-DEFAULT_OPT = DEFAULT_OPT # HP_OPT_OPT 
+DEFAULT_MAF_ARCH = HP_OPT_MAF_ARCH # DEFAULT_MAF_ARCH 
+DEFAULT_OPT = HP_OPT_OPT # DEFAULT_OPT 
 
 N_NDES = 1
+
+
+def get_default_nde(cnf, maf):
+    return maf
 
 
 def _config_defaults(
@@ -202,7 +206,7 @@ def cumulants_config(
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf] * N_NDES #, cnf, cnf]  
+        config.ndes          = [get_default_nde(cnf, maf)] * N_NDES
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
@@ -236,7 +240,7 @@ def cumulants_config(
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf] * N_NDES #cnf]#, cnf, cnf] 
+        config.ndes          = [get_default_nde(cnf, maf)] * N_NDES
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
@@ -333,7 +337,7 @@ def arch_search_cumulants_config( # Copy of the above config for architecture se
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf]  
+        config.ndes          = [get_default_nde(cnf, maf)] * N_NDES
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
@@ -367,7 +371,7 @@ def arch_search_cumulants_config( # Copy of the above config for architecture se
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf] #, cnf, cnf]  
+        config.ndes          = [get_default_nde(cnf, maf)] * N_NDES
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
@@ -427,9 +431,10 @@ def bulk_cumulants_config(
     config.valid_fraction     = 0.1
     config.freeze_parameters  = freeze_parameters
 
-    config.use_bulk_means     = True # Calculate central moments of the bulk or not
+    config.use_bulk_means     = False # Calculate central moments of the bulk or not
     config.stack_bulk_means   = True # Stack means of bulk of the PDF at each scale with the other cumulants
     config.stack_bulk_norms   = True # Stack norms of bulk of the PDF at each scale with the other cumulants
+    config.fiducial_based_normalisation = config.p_value_max - config.p_value_min
 
     # Miscallaneous
     config.use_scalers        = USE_SCALERS # Input scalers for (xi, pi) in NDEs (NOTE: checked that scalings aren't optimised!)
@@ -470,7 +475,7 @@ def bulk_cumulants_config(
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [cnf] * N_NDES #, cnf, cnf]  
+        config.ndes          = [get_default_nde(cnf, maf)] * N_NDES
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)
@@ -504,7 +509,7 @@ def bulk_cumulants_config(
         maf.activation       = DEFAULT_MAF_ARCH["activation"]
         maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
-        config.ndes          = [maf] * N_NDES #, cnf, cnf]  
+        config.ndes          = [get_default_nde(cnf, maf)] * N_NDES
         config.n_ndes        = len(config.ndes)
 
         # Optimisation hyperparameters (same for all NDEs...)

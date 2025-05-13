@@ -204,7 +204,7 @@ class MAF(eqx.Module):
         log_prob = self.flow.log_prob(sample, y)
         return sample, log_prob
 
-    @jaxtyped(typechecker=typechecker)
+    # @jaxtyped(typechecker=typechecker)
     def sample_and_log_prob_n(
         self, 
         key: Key[jnp.ndarray, ""], 
