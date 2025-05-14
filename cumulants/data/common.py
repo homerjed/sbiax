@@ -137,7 +137,10 @@ def freeze_out_parameters_dataset(dataset: Dataset) -> Dataset:
         """ 
 
         @typecheck
-        def _freeze_parameters(pdf_or_cumulant: Float[Array, "d"], p: Float[Array, "p"]) -> Float[Array, "d"]:
+        def _freeze_parameters(
+            pdf_or_cumulant: Float[Array, "d"], 
+            p: Float[Array, "p"]
+        ) -> Float[Array, "d"]:
             # Freeze the nuisance parameters of the latin hypercube realisations
 
             # Om, s8 and nuisances at fiducial values
@@ -206,8 +209,8 @@ def get_prior(config: ConfigDict, dataset: Dataset) -> tfd.Distribution:
     assert jnp.all((upper - lower) > 0.)
 
     # print("FORCING FLAT PRIOR")
-    # lower = jnp.ones((dataset.alpha.size,)) * -1e-4
-    # upper = jnp.ones((dataset.alpha.size,)) * 1e-4
+    # lower = jnp.ones((dataset.alpha.size,)) * -1e4
+    # upper = jnp.ones((dataset.alpha.size,)) * 1e4
 
     prior = tfd.Blockwise(
         [tfd.Uniform(l, u) for l, u in zip(lower, upper)]
@@ -335,16 +338,17 @@ def get_datavector(
     # Choose a linearised model datavector or simply one of the Quijote realisations
     # which corresponds to a non-linearised datavector with Gaussian noise
     if config.use_expectation or use_expectation:
-        print("Using expectation (noiseless datavector)")
+        print("Using expectation (noiseless datavector)...")
         datavector = jnp.mean(dataset.fiducial_data, axis=0, keepdims=True)
     else:
         if config.linearised:
-            print("Using linearised datavector")
+            print("Using linearised datavector...")
+
             mu = jnp.mean(dataset.fiducial_data, axis=0)
 
             datavector = jr.multivariate_normal(key, mean=mu, cov=dataset.C, shape=(n,))
         else:
-            print("Using non-linearised datavector")
+            print("Using non-linearised datavector...")
             datavector = jr.choice(key, dataset.fiducial_data, shape=(n,))
 
     if not (n > 1):
@@ -391,7 +395,7 @@ def get_linear_compressor(
                 precision (`Array`): The precision matrix - defined as the inverse of the data covariance matrix.
 
             Returns:
-                `Array`: the MLE.
+                `Array`: the MLE statistic.
         """
         return pi + jnp.linalg.multi_dot([Finv, dmu, precision, d - mu])
 

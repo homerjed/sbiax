@@ -389,8 +389,6 @@ print("compressed datavector {} \n {} {}".format(x_.shape, x_, dataset.alpha))
 
 log_prob_fn = ensemble.ensemble_log_prob_fn(data_preprocess_fn(x_), parameter_prior)
 
-print(log_prob_fn(dataset.alpha)) # Scaler works how here?
-
 if 1:
     try:
         state = jr.multivariate_normal(

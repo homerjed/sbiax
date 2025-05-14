@@ -3,19 +3,19 @@
 RUN_LINEARISED=true # Linearised is glitching for now...
 RUN_FROZEN=false
 ONLY_RUN_FIGURES=false # Only run figure_one.py jobs
-N_SEEDS=2
-N_PARALLEL=2
+N_SEEDS=100
+N_PARALLEL=10
 N_LINEAR_SIMS=10000
 N_GB=8
 N_CPU=8
-FIXED_SEED=0 # Repeat this for linearised... 
+FIXED_SEED=0 # Repeat this for linearised...  NOTE: add this to formatting for job names!
 
 TIMESTAMP=$(date +'%m%d_%H%M')
 OUT_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/cumulants_sbi/$TIMESTAMP"
 mkdir -p "$OUT_DIR"
 
 order_idxs=(
-    # "0"
+    "0"
     "0 1 2"
 )
 
@@ -79,7 +79,7 @@ $FREEZE_FLAG"
                         job_script=$(
                             cat <<END
 #!/bin/bash
-#SBATCH --job-name=c_sbi_${bt_flag}_${l_flag}_${f_flag}_z${z}
+#SBATCH --job-name=sbi_${bt_flag}_${l_flag}_${f_flag}_z${z}
 #SBATCH --output=$OUT_DIR/sbi_${bt_flag}_${l_flag}_${f_flag}_z${z}_fixed.out
 #SBATCH --error=$OUT_DIR/sbi_${bt_flag}_${l_flag}_${f_flag}_z${z}_fixed.err
 #SBATCH --partition=cluster
@@ -118,6 +118,8 @@ $PRETRAIN_FLAG \
 --bulk_or_tails $bt \
 $FREEZE_FLAG"
 
+                        # Run multi-z posterior sampling after all redshift SBI experiments are run 
+                        # (separately for bulk and tails)
                         final_script=$(
                             cat <<END
 #!/bin/bash
@@ -140,7 +142,7 @@ echo "Running final multi-z script"
 $cmd2
 END
                         )
-                        multi_z_job_id=$(echo "$job_script" | sbatch | awk '{print $4}')
+                        multi_z_job_id=$(echo "$final_script" | sbatch | awk '{print $4}') # FINAL SCRIPT not JOB SCRIPT (sbi)
                         multi_z_job_ids+=("$multi_z_job_id")
 
                         multi_z_deps=$(

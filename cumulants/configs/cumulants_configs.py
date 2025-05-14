@@ -77,6 +77,14 @@ DEFAULT_OPT = HP_OPT_OPT # DEFAULT_OPT
 N_NDES = 1
 
 
+def default_posterior_sampling(config):
+    # Posterior sampling
+    config.n_steps            = 200
+    config.n_walkers          = 1000
+    config.burn               = int(0.1 * config.n_steps)
+    return config
+
+
 def get_default_nde(cnf, maf):
     return maf
 
@@ -180,9 +188,7 @@ def cumulants_config(
     config.exp_name           = "z={}_m={}".format(config.redshift, "".join(map(str, config.order_idx)))
 
     # Posterior sampling
-    config.n_steps            = 200
-    config.n_walkers          = 1000
-    config.burn               = int(0.1 * config.n_steps)
+    config = default_posterior_sampling(config)
 
     if config.linearised:
         # NDEs
@@ -311,9 +317,7 @@ def arch_search_cumulants_config( # Copy of the above config for architecture se
     config.exp_name           = "z={}_m={}".format(config.redshift, "".join(map(str, config.order_idx)))
 
     # Posterior sampling
-    config.n_steps            = 200
-    config.n_walkers          = 1000
-    config.burn               = int(0.1 * config.n_steps)
+    config = default_posterior_sampling(config)
 
     if config.linearised:
         # NDEs
@@ -449,9 +453,7 @@ def bulk_cumulants_config(
     config.exp_name           = "z={}_m={}".format(config.redshift, "".join(map(str, config.order_idx)))
 
     # Posterior sampling
-    config.n_steps            = 200
-    config.n_walkers          = 1000
-    config.burn               = int(0.1 * config.n_steps)
+    config = default_posterior_sampling(config)
 
     if config.linearised:
         # NDEs

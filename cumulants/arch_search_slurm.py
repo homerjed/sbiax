@@ -548,8 +548,8 @@ def objective(
         scores.append(stats[0]["all_valid_loss"]) # Assuming one NDE
 
     # Delete results directories of useless trials
-    if trial.state != optuna.trial.TrialState.COMPLETE:
-        rmtree(results_dir, ignore_errors=True)
+    # if trial.state != optuna.trial.TrialState.COMPLETE:
+    #     rmtree(results_dir, ignore_errors=True)
 
     return np.mean(scores) # Assuming one NDE
 

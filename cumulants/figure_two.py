@@ -63,10 +63,10 @@ data_dir, _, _ = get_save_and_load_dirs()
     _, _, _, alpha, lower, upper, parameter_strings, *_
 ) = get_quijote_parameters()
 
-global_seed = 0 # Set to None to load different ensembles for each seed
+global_seed = 0 # Set to None to load different ensembles for each seed (NOTE: iterate over this if testing linearised!)
 n_seeds = 5000 # NOTE: decide if seeds are for experiments or datavectors 
 
-# Load all posteriors from multi-z, calculating widths
+# Load all posteriors from multi-z, calculating widths, for bulk and tails (over all redshifts)
 posterior_widths = dict(
     bulk=np.zeros((n_seeds, alpha.size)), 
     tails=np.zeros((n_seeds, alpha.size))
@@ -201,10 +201,10 @@ for i in range(alpha.size):
     # Bulk Fisher information line
     ax.axvline(
         vertical_lines[i], 
-        color="black", 
+        color="green", 
         linestyle="--", 
         linewidth=2, 
-        label=r"$F^{{-1}}[{}]$".format(parameter_strings[i][1:-1])
+        label=r"$F^{{-1}}[{}]$ (PDF)".format(parameter_strings[i][1:-1])
     )
 
     ax.set_xlabel(r"$\sigma^2[{}]$".format(parameter_strings[i][1:-1])) # Trim '$' from parameter strings
