@@ -1,21 +1,21 @@
 #!/bin/bash
 
 RUN_LINEARISED=true # Linearised is glitching for now...
-RUN_FROZEN=false
+RUN_FROZEN=true
 ONLY_RUN_FIGURES=false # Only run figure_one.py jobs
-N_SEEDS=100
-N_PARALLEL=10
+N_SEEDS=50
+N_PARALLEL=50
 N_LINEAR_SIMS=10000
 N_GB=8
 N_CPU=8
-FIXED_SEED=0 # Repeat this for linearised...  NOTE: add this to formatting for job names!
+FIXED_SEED=0 # Repeat this for linearised...  NOTE: add this to formatting for sbatch job names!
 
 TIMESTAMP=$(date +'%m%d_%H%M')
 OUT_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/cumulants_sbi/$TIMESTAMP"
 mkdir -p "$OUT_DIR"
 
 order_idxs=(
-    "0"
+    # "0"
     "0 1 2"
 )
 
@@ -23,10 +23,12 @@ for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
     for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
         for PRETRAIN_FLAG in "--pre-train" "--no-pre-train"; do
 
+            # Skip linearisation/pre-train experiments
             if [[ "$LINEARISED_FLAG" == "--linearised" && "$PRETRAIN_FLAG" == "--pre-train" ]]; then
                 continue
             fi
 
+            # Skip linearisation if not requested
             if [[ "$RUN_LINEARISED" == false && "$LINEARISED_FLAG" == "--linearised" ]]; then
                 continue
             fi
@@ -38,19 +40,19 @@ for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
 
             for bt in "bulk" "tails"; do
 
-                if [ "$bt" == "bulk" ]; then
+                if [ "$bt" == "bulk" ]; then # Label runs
                     bt_flag="b"
                 else
                     bt_flag="t"
                 fi
 
-                if [ "$LINEARISED_FLAG" == "--linearised" ]; then
+                if [ "$LINEARISED_FLAG" == "--linearised" ]; then # Label runs
                     l_flag="l"
                 else
                     l_flag="nl"
                 fi
 
-                if [ "$FREEZE_FLAG" == "--freeze-parameters" ]; then
+                if [ "$FREEZE_FLAG" == "--freeze-parameters" ]; then # Label runs
                     f_flag="f"
                 else
                     f_flag="nf"
@@ -87,7 +89,7 @@ $FREEZE_FLAG"
 #SBATCH --mem=${N_GB}GB
 #SBATCH --cpus-per-task=$N_CPU
 #SBATCH --mail-user=jed.homer@physik.lmu.de
-#SBATCH --mail-type=begin,end,fail
+#SBATCH --mail-type=end,fail
 
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate

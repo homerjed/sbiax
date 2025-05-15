@@ -287,6 +287,8 @@ def get_linearised_data(
             Finv=dataset.Finv
         )
     """
+    
+    print("Linearising data...")
 
     key = jr.key(config.seed)
 
@@ -319,7 +321,7 @@ def get_linearised_data(
     keys = jr.split(key_simulations, len(Y))
     D = jax.vmap(_simulator)(keys, Y) 
 
-    print("Get linearised data", D.shape, Y.shape)
+    print("... linearised data", D.shape, Y.shape)
 
     return D, Y 
 

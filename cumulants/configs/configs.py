@@ -45,7 +45,7 @@ def make_dirs(results_dir: str) -> None:
 
 
 def dump_args_and_config(args: argparse.Namespace, config: ConfigDict, results_dir: str) -> None:
-    # Save command line arguments and config together
+    """ Save command line arguments and config together """
     with open(os.path.join(results_dir, "config.yml"), "w") as f:
         yaml.dump({">ARGS": ""}, f, default_flow_style=False)
         yaml.dump(vars(args), f, default_flow_style=False)
@@ -70,7 +70,8 @@ def get_config_subdir(
         "linearised" if config.linearised else "nonlinearised",
         config.compression,
         "pretrain" if config.pre_train else "nopretrain",
-        config.exp_name if include_exp and config.exp_name else None,
+        config.exp_name if include_exp and config.exp_name else None, # NOTE: This is ignored for multi_z!
+        "".join(map(str, args.order_idx)) if multi_z else None, # NOTE: Multi-z posteriors marked by cumulants in datavector, not redshift!
         str(config.seed),
         "multi_z" if multi_z else None
     ]
@@ -83,6 +84,7 @@ def get_results_dir(
     *, 
     arch_search: bool = False
 ) -> str:
+    """ General results directory format for individual SBI experiments """
     results_dir = os.path.join(
         get_base_results_dir(), 
         get_config_subdir(config, args, arch_search=arch_search)
@@ -100,6 +102,7 @@ def get_posteriors_dir(
     *, 
     arch_search: bool = False
 ) -> str:
+    """ General results directory format for posteriors from individual SBI experiments """
     posteriors_dir = os.path.join(
         get_base_posteriors_dir(), 
         get_config_subdir(config, args, arch_search=arch_search)
@@ -114,6 +117,7 @@ def get_multi_z_posterior_dir(
     config: ConfigDict, 
     args: argparse.Namespace
 ) -> str:
+    """ General results directory format for posteriors from bulk or tails multi-redshift SBI sampling """
     multi_z_dir = os.path.join(
         get_base_posteriors_dir(), 
         get_config_subdir(config, args, include_exp=False, multi_z=True) # NOTE: possible bug with include_exp....?

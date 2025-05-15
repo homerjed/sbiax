@@ -60,7 +60,14 @@ jax.clear_caches()
 data_dir, _, _ = get_save_and_load_dirs()
 
 (
-    _, _, _, alpha, lower, upper, parameter_strings, *_
+    _, 
+    _, 
+    _, 
+    alpha, 
+    lower, 
+    upper, 
+    parameter_strings, 
+    *_
 ) = get_quijote_parameters()
 
 global_seed = 0 # Set to None to load different ensembles for each seed (NOTE: iterate over this if testing linearised!)

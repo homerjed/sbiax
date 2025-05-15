@@ -136,7 +136,14 @@ ARGS = parser.parse_args()
 data_dir, _, _ = get_save_and_load_dirs()
 
 (
-    _, _, _, alpha, lower, upper, parameter_strings, *_
+    _, 
+    _, 
+    _, 
+    alpha, 
+    lower, 
+    upper, 
+    parameter_strings, 
+    *_
 ) = get_quijote_parameters()
 
 figs_dir = os.path.join(get_base_results_dir(), "figure_one/")
@@ -215,7 +222,7 @@ for bulk_or_tails in ["bulk", "tails"]:
     posterior_save_dir = get_multi_z_posterior_dir(config, args)
     posterior_filename = os.path.join(
         posterior_save_dir, 
-        "posterior_{}{}.npz".format(
+        "multi_z_posterior_{}{}.npz".format(
             args.seed, 
             ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else ""
         ) 
