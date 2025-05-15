@@ -619,7 +619,7 @@ if __name__ == "__main__":
             summary=x_ # Is this correct one to save?
         )
 
-        print("POSTERIOR FILENAME:\n", posterior_filename)
+        print("MULTI-Z POSTERIOR FILENAME:\n", posterior_filename)
 
         """
             Full posterior

@@ -106,8 +106,8 @@ for exp_dict in exp_dicts:
 
     # Load all posteriors from multi-z, calculating widths, for bulk and tails (over all redshifts)
     posterior_widths = dict(
-        bulk=np.zeros((n_seeds, n_p)), 
-        tails=np.zeros((n_seeds, n_p))
+        bulk=np.zeros((n_seeds, n_p)) if not exp_dict["linearised"] else np.zeros((n_seeds, 10, n_p)), 
+        tails=np.zeros((n_seeds, n_p)) if not exp_dict["linearised"] else np.zeros((n_seeds, 10, n_p)), # Extra seed
     )
     for bulk_or_tails in ["bulk", "tails"]:
 
@@ -141,49 +141,55 @@ for exp_dict in exp_dicts:
                         Finv_bulk_pdfs_all_z
                     )
 
-            # Multi-z inference concerning the bulk or bulk + tails
-            if args.bulk_or_tails == "tails":
-                ensembles_config = ensembles_cumulants_config
-            if args.bulk_or_tails == "bulk" or args.bulk_or_tails == "bulk_pdf":
-                ensembles_config = ensembles_bulk_cumulants_config
+            def get_widths(run_seed, datavector_seed):
 
-            config = ensembles_config(
-                seed=args.seed, # Defaults if run without argparse args
-                sbi_type=args.sbi_type, 
-                linearised=args.linearised,
-                n_linear_sims=args.n_linear_sims,
-                compression=args.compression,
-                reduced_cumulants=args.reduced_cumulants,
-                redshifts=args.redshifts,
-                order_idx=args.order_idx,
-                pre_train=args.pre_train,
-                freeze_parameters=args.freeze_parameters
-            )
+                # Multi-z inference concerning the bulk or bulk + tails
+                if args.bulk_or_tails == "tails":
+                    ensembles_config = ensembles_cumulants_config
+                if args.bulk_or_tails == "bulk" or args.bulk_or_tails == "bulk_pdf":
+                    ensembles_config = ensembles_bulk_cumulants_config
 
-            # Load posterior for seed and experiment
-            posterior_save_dir = get_multi_z_posterior_dir(config, args)
-            posterior_filename = os.path.join(
-                posterior_save_dir, 
-                "multi_z_posterior_{}{}.npz".format(
-                    args.seed, # NOTE: when running for many linearised experiments, 
-                    ("_" + str(s)) if global_seed is not None else "" # Check this loads posterior from independent datavector with fixed NDE training seed
-                ) 
-            )
-            # posterior_filename = os.path.join(
-            #     posterior_save_dir, 
-            #     "multi_z_posterior_{}{}.npz".format( # NOTE: was just 'posterior_...' before
-            #         args.seed, 
-            #         ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else ""
-            #     ) 
-            # )
-            posterior = np.load(posterior_filename)
+                config = ensembles_config(
+                    seed=run_seed, # Defaults if run without argparse args
+                    sbi_type=args.sbi_type, 
+                    linearised=args.linearised,
+                    n_linear_sims=args.n_linear_sims,
+                    compression=args.compression,
+                    reduced_cumulants=args.reduced_cumulants,
+                    redshifts=args.redshifts,
+                    order_idx=args.order_idx,
+                    pre_train=args.pre_train,
+                    freeze_parameters=args.freeze_parameters
+                )
 
-            widths = np.var(posterior["samples"], axis=0)
+                # Load posterior for seed and experiment
+                posterior_save_dir = get_multi_z_posterior_dir(config, args)
+                posterior_filename = os.path.join(
+                    posterior_save_dir, 
+                    "multi_z_posterior_{}{}.npz".format(
+                        run_seed, # NOTE: when running for many linearised experiments, 
+                        ("_" + str(datavector_seed)) if global_seed is not None else "" # Check this loads posterior from independent datavector with fixed NDE training seed
+                    ) 
+                )
 
-            if scale_by_fisher:
-                widths = widths / np.diag(Finv_bulk_pdfs_all_z) - 1.
+                posterior = np.load(posterior_filename)
 
-            posterior_widths[bulk_or_tails][s] = widths
+                widths = np.var(posterior["samples"], axis=0)
+
+                if scale_by_fisher:
+                    widths = widths / np.diag(Finv_bulk_pdfs_all_z) - 1.
+
+                return widths
+
+            if exp_dict["linearised"]:
+                # Multiple run-seeds for linearised experiments
+                for _run_seed in range(10):
+                    widths = get_widths(run_seed=_run_seed, datavector_seed=s)
+                    posterior_widths[bulk_or_tails][_run_seed, s] = widths
+            else:
+                # One fixed run-seed for non-linearised experiments
+                widths = get_widths(run_seed=args.seed, datavector_seed=s)
+                posterior_widths[bulk_or_tails][s] = widths
 
     # Plot histogram of posterior widths across all seeds for all multi-z posteriors
     landscape = False
@@ -219,37 +225,71 @@ for exp_dict in exp_dicts:
 
         ax = axes.ravel()[i]
 
-        _ = ax.hist(
-            posterior_widths["bulk"][:, i], 
-            bins=bins, 
-            color=plotting_dict["bulk"]["color"], 
-            edgecolor="none", 
-            alpha=0.7, 
-            label="SBI[bulk]"
-        )
-        _ = ax.hist(
-            posterior_widths["bulk"][:, i], 
-            bins=bins, 
-            color='k', 
-            histtype="step", 
-            alpha=0.7
-        )
+        if args.linearised:
+            for _run_seed in range(10):
+                _ = ax.hist(
+                    posterior_widths["bulk"][:, _run_seed, i], 
+                    bins=bins, 
+                    color=plotting_dict["bulk"]["color"], 
+                    edgecolor="none", 
+                    alpha=0.4, 
+                    label="SBI[bulk]" if _run_seed == 0 else ""
+                )
+                _ = ax.hist(
+                    posterior_widths["bulk"][:, _run_seed, i], 
+                    bins=bins, 
+                    color='k', 
+                    histtype="step", 
+                    alpha=0.4
+                )
 
-        _ = ax.hist(
-            posterior_widths["tails"][:, i], 
-            bins=bins, 
-            color=plotting_dict["tails"]["color"], 
-            edgecolor="none", 
-            alpha=0.7, 
-            label="SBI[tails]"
-        )
-        _ = ax.hist(
-            posterior_widths["tails"][:, i], 
-            bins=bins, 
-            color='k', 
-            histtype="step", 
-            alpha=0.7
-        )
+                _ = ax.hist(
+                    posterior_widths["tails"][:, _run_seed, i], 
+                    bins=bins, 
+                    color=plotting_dict["tails"]["color"], 
+                    edgecolor="none", 
+                    alpha=0.4, 
+                    label="SBI[tails]" if _run_seed == 0 else ""
+                )
+                _ = ax.hist(
+                    posterior_widths["tails"][:, _run_seed, i], 
+                    bins=bins, 
+                    color='k', 
+                    histtype="step", 
+                    alpha=0.4
+                )
+        else:
+            _ = ax.hist(
+                posterior_widths["bulk"][:, i], 
+                bins=bins, 
+                color=plotting_dict["bulk"]["color"], 
+                edgecolor="none", 
+                alpha=0.7, 
+                label="SBI[bulk]"
+            )
+            _ = ax.hist(
+                posterior_widths["bulk"][:, i], 
+                bins=bins, 
+                color='k', 
+                histtype="step", 
+                alpha=0.7
+            )
+
+            _ = ax.hist(
+                posterior_widths["tails"][:, i], 
+                bins=bins, 
+                color=plotting_dict["tails"]["color"], 
+                edgecolor="none", 
+                alpha=0.7, 
+                label="SBI[tails]"
+            )
+            _ = ax.hist(
+                posterior_widths["tails"][:, i], 
+                bins=bins, 
+                color='k', 
+                histtype="step", 
+                alpha=0.7
+            )
 
         # Bulk Fisher information line
         ax.axvline(
