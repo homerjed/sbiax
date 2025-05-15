@@ -118,7 +118,10 @@ def get_z_config_and_datavector(
 ]:
     """ 
         Get config and datavector associated with a redshift z to load the experiment 
-        for use in an ensemble of SBI likelihoods at different redshifts
+        for use in an ensemble of SBI likelihoods at different redshifts, for the bulk
+        or tails datasets.
+        - get config at redshift
+        - load datasets, compression function and  
     """
 
     key_datavector, key_model = jr.split(key)
@@ -130,7 +133,7 @@ def get_z_config_and_datavector(
     _dataset, _config = get_dataset_and_config(bulk_or_tails) 
 
     # Get config and change redshift to load each ensemble and datavector
-    config_z = cumulants_config(
+    config_z = _config(
         seed=seed, 
         redshift=redshift, 
         reduced_cumulants=reduced_cumulants,
@@ -164,7 +167,7 @@ def get_z_config_and_datavector(
     config_z.exp_name = exp_name_format.format(redshift, "".join(map(str, config.order_idx)))
 
     # Cumulants bulk and tails datasets
-    cumulants_dataset = CumulantsDataset(
+    cumulants_dataset = _dataset(
         config_z, results_dir=None, verbose=verbose
     )
     dataset: Dataset = cumulants_dataset.data
@@ -399,7 +402,7 @@ if __name__ == "__main__":
     if not os.path.exists(figs_dir):
         os.makedirs(figs_dir, exist_ok=True)
 
-    print("FIGS_DIR:\n\t", figs_dir)
+    print("MULTI-Z FIGS_DIR:\n\t", figs_dir)
 
     # Sample multiple posteriors across multiple redshifts
     for n_posterior in range(args.n_posteriors_sample):
