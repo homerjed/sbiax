@@ -80,6 +80,9 @@ n_seeds = 50 # NOTE: decide if seeds are for experiments or datavectors
 scale_by_fisher = True # Scale parameter constraints by bulk-PDF Fisher widths
 use_consistent_binning = False # Same bins for bulk / tails posterior widths
 
+n_bins = 10
+n_linear_seeds = 10
+
 keys = ["linearised", "freeze_parameters", "pretrain"]
 exp_dicts = [
     dict(zip(keys, values)) 
@@ -106,8 +109,8 @@ for exp_dict in exp_dicts:
 
     # Load all posteriors from multi-z, calculating widths, for bulk and tails (over all redshifts)
     posterior_widths = dict(
-        bulk=np.zeros((n_seeds, n_p)) if not exp_dict["linearised"] else np.zeros((n_seeds, 10, n_p)), 
-        tails=np.zeros((n_seeds, n_p)) if not exp_dict["linearised"] else np.zeros((n_seeds, 10, n_p)), # Extra seed
+        bulk=np.zeros((n_seeds, n_p)) if not exp_dict["linearised"] else np.zeros((n_seeds, n_linear_seeds, n_p)), 
+        tails=np.zeros((n_seeds, n_p)) if not exp_dict["linearised"] else np.zeros((n_seeds, n_linear_seeds, n_p)), # Extra seed
     )
     for bulk_or_tails in ["bulk", "tails"]:
 
@@ -183,9 +186,9 @@ for exp_dict in exp_dicts:
 
             if exp_dict["linearised"]:
                 # Multiple run-seeds for linearised experiments
-                for _run_seed in range(10):
+                for _run_seed in range(n_linear_seeds):
                     widths = get_widths(run_seed=_run_seed, datavector_seed=s)
-                    posterior_widths[bulk_or_tails][_run_seed, s] = widths
+                    posterior_widths[bulk_or_tails][s, _run_seed] = widths
             else:
                 # One fixed run-seed for non-linearised experiments
                 widths = get_widths(run_seed=args.seed, datavector_seed=s)
@@ -200,8 +203,6 @@ for exp_dict in exp_dicts:
         bulk=dict(color="b"),
         tails=dict(color="r")
     )
-
-    n_bins = 10
 
     if use_consistent_binning:
         bins = np.histogram_bin_edges(
@@ -226,7 +227,7 @@ for exp_dict in exp_dicts:
         ax = axes.ravel()[i]
 
         if args.linearised:
-            for _run_seed in range(10):
+            for _run_seed in range(n_linear_seeds):
                 _ = ax.hist(
                     posterior_widths["bulk"][:, _run_seed, i], 
                     bins=bins, 
