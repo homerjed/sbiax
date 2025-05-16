@@ -3,11 +3,15 @@
 RUN_LINEARISED=true # Linearised is glitching for now...
 RUN_FROZEN=true
 ONLY_RUN_FIGURES=false # Only run figure_one.py jobs
-N_SEEDS=1000
+
+N_SEEDS=100
+START_SEED=100
+END_SEED=$(( $START_SEED + $N_SEEDS ))
 N_PARALLEL=50
-N_LINEAR_SIMS=10000
 N_GB=8
 N_CPU=8
+
+N_LINEAR_SIMS=10000
 FIXED_SEED=0 # Repeat this for linearised...  NOTE: add this to formatting for sbatch job names!
 
 TIMESTAMP=$(date +'%m%d_%H%M')
@@ -128,7 +132,7 @@ $FREEZE_FLAG"
 #SBATCH --job-name=m_z_${bt_flag}_${l_flag}_${f_flag}
 #SBATCH --output=$OUT_DIR/multi_z_${bt_flag}_${l_flag}_${f_flag}_%a.out
 #SBATCH --error=$OUT_DIR/multi_z_${bt_flag}_${l_flag}_${f_flag}_%a.err
-#SBATCH --array=0-$N_SEEDS%$N_PARALLEL
+#SBATCH --array=$START_SEED-$END_SEED%$N_PARALLEL
 #SBATCH --partition=cluster
 #SBATCH --time=08:00:00
 #SBATCH --mem=${N_GB}GB
@@ -172,7 +176,7 @@ $FREEZE_FLAG"
 #SBATCH --job-name=figure_one
 #SBATCH --output=$OUT_DIR/figure_one_${l_flag}_${f_flag}_%a.out
 #SBATCH --error=$OUT_DIR/figure_one_${l_flag}_${f_flag}_%a.err
-#SBATCH --array=0-$N_SEEDS%$N_PARALLEL
+#SBATCH --array=$START_SEED-$END_SEED%$N_PARALLEL
 #SBATCH --partition=cluster
 #SBATCH --time=02:00:00
 #SBATCH --mem=${N_GB}GB

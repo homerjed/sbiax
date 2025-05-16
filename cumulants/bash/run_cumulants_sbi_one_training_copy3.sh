@@ -3,7 +3,7 @@
 RUN_LINEARISED=true # Linearised is glitching for now...
 RUN_FROZEN=true
 ONLY_RUN_FIGURES=false # Only run figure_one.py jobs
-N_SEEDS=1000
+N_SEEDS=100
 N_PARALLEL=50
 N_LINEAR_SIMS=10000
 N_GB=8

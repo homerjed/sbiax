@@ -436,7 +436,7 @@ if 1:
                 datasets["tails"].data.Finv,
                 columns=dataset.parameter_strings,
                 name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[tails]"),
-                color="k",
+                color="r",
                 linestyle=":",
                 shade_alpha=0.
             )
@@ -467,7 +467,7 @@ if 1:
             Chain(
                 samples=posterior_df, 
                 name="SBI[{}]".format(args.bulk_or_tails), 
-                color="r"
+                color="r" if args.bulk_or_tails == "tails" else "b"
             )
         )
         c.add_marker(

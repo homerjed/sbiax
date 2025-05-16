@@ -7,7 +7,7 @@
 
 # --- Config ---
 STUDY_NAME="arch_para"
-N_JOBS=20
+N_JOBS=10
 FREEZE_FLAG="--no-freeze-parameters"
 N_GB=8
 N_CPU=8
@@ -32,10 +32,10 @@ if [[ "$LINEARISED_FLAG" == "--linearised" && "$PRETRAIN_FLAG" == "--pre-train" 
     continue
 fi
 
-# # Skip linearised training
-# if [[ "$LINEARISED_FLAG" == "--linearised" && "$PRETRAIN_FLAG" == "--pre-train" ]]; then
-#     continue
-# fi
+# Skip linearised training (assume non-linear hyperparameters do well here too)
+if [[ "$LINEARISED_FLAG" == "--linearised" && "$PRETRAIN_FLAG" == "--pre-train" ]]; then
+    continue
+fi
 
 # Set flag job names based on args
 if [[ "$PRETRAIN_FLAG" == "--pre-train" ]]; then

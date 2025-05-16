@@ -80,8 +80,15 @@ n_seeds = 50 # NOTE: decide if seeds are for experiments or datavectors
 scale_by_fisher = True # Scale parameter constraints by bulk-PDF Fisher widths
 use_consistent_binning = False # Same bins for bulk / tails posterior widths
 
+landscape = False
 n_bins = 10
 n_linear_seeds = 10
+marginalise = True # Marginalise except for target_idx
+
+plotting_dict = dict(
+    bulk=dict(color="b"),
+    tails=dict(color="r")
+)
 
 keys = ["linearised", "freeze_parameters", "pretrain"]
 exp_dicts = [
@@ -105,12 +112,13 @@ for exp_dict in exp_dicts:
     for key in exp_dict:
         setattr(args, key, exp_dict[key])
 
-    n_p = target_idx.size if args.freeze_parameters else alpha.size
+    n_p = target_idx.size if (args.freeze_parameters or marginalise) else alpha.size
 
     # Load all posteriors from multi-z, calculating widths, for bulk and tails (over all redshifts)
+    widths_shape = (n_seeds, n_linear_seeds, n_p) if exp_dict["linearised"] else (n_seeds, n_p)
     posterior_widths = dict(
-        bulk=np.zeros((n_seeds, n_p)) if not exp_dict["linearised"] else np.zeros((n_seeds, n_linear_seeds, n_p)), 
-        tails=np.zeros((n_seeds, n_p)) if not exp_dict["linearised"] else np.zeros((n_seeds, n_linear_seeds, n_p)), # Extra seed
+        bulk=np.zeros(widths_shape),
+        tails=np.zeros(widths_shape)
     )
     for bulk_or_tails in ["bulk", "tails"]:
 
@@ -143,6 +151,11 @@ for exp_dict in exp_dicts:
                         ),
                         Finv_bulk_pdfs_all_z
                     )
+
+            bulk_pdf_fisher_widths = jnp.diag(Finv_bulk_pdfs_all_z) # Variances (widths) for Bulk PDF Gaussian posterior
+
+            if marginalise:
+                bulk_pdf_fisher_widths = bulk_pdf_fisher_widths[target_idx]
 
             def get_widths(run_seed, datavector_seed):
 
@@ -179,8 +192,11 @@ for exp_dict in exp_dicts:
 
                 widths = np.var(posterior["samples"], axis=0)
 
+                if marginalise:
+                    widths = widths[target_idx]
+
                 if scale_by_fisher:
-                    widths = widths / np.diag(Finv_bulk_pdfs_all_z) - 1.
+                    widths = widths / bulk_pdf_fisher_widths - 1.
 
                 return widths
 
@@ -195,16 +211,9 @@ for exp_dict in exp_dicts:
                 posterior_widths[bulk_or_tails][s] = widths
 
     # Plot histogram of posterior widths across all seeds for all multi-z posteriors
-    landscape = False
-
-    vertical_lines = jnp.diag(Finv_bulk_pdfs_all_z) # Variances (widths) for Bulk PDF Gaussian posterior
-
-    plotting_dict = dict(
-        bulk=dict(color="b"),
-        tails=dict(color="r")
-    )
-
+    
     if use_consistent_binning:
+        # NOTE: fix for linearised repeated experiments
         bins = np.histogram_bin_edges(
             np.concatenate([posterior_widths["bulk"], posterior_widths["tails"]]), bins=n_bins
         )
@@ -213,13 +222,9 @@ for exp_dict in exp_dicts:
 
     fig_dim = (16. / 5.) * n_p
     if landscape:
-        fig, axes = plt.subplots(
-            1, n_p, figsize=(fig_dim, 4.), sharey=True
-        )
+        fig, axes = plt.subplots(1, n_p, figsize=(fig_dim, 4.), sharey=True)
     else:
-        fig, axes = plt.subplots(
-            n_p, 1, figsize=(5., fig_dim), sharex=False
-        )
+        fig, axes = plt.subplots(n_p, 1, figsize=(5., fig_dim), sharex=False)
     axes = np.atleast_1d(axes)
 
     for i in range(n_p):
@@ -241,7 +246,7 @@ for exp_dict in exp_dicts:
                     bins=bins, 
                     color='k', 
                     histtype="step", 
-                    alpha=0.4
+                    # alpha=0.4
                 )
 
                 _ = ax.hist(
@@ -257,7 +262,7 @@ for exp_dict in exp_dicts:
                     bins=bins, 
                     color='k', 
                     histtype="step", 
-                    alpha=0.4
+                    # alpha=0.4
                 )
         else:
             _ = ax.hist(
@@ -273,7 +278,7 @@ for exp_dict in exp_dicts:
                 bins=bins, 
                 color='k', 
                 histtype="step", 
-                alpha=0.7
+                # alpha=0.7
             )
 
             _ = ax.hist(
@@ -289,12 +294,12 @@ for exp_dict in exp_dicts:
                 bins=bins, 
                 color='k', 
                 histtype="step", 
-                alpha=0.7
+                # alpha=0.7
             )
 
         # Bulk Fisher information line
         ax.axvline(
-            vertical_lines[i], 
+            bulk_pdf_fisher_widths[i], 
             color="green", 
             linestyle="--", 
             linewidth=2, 
@@ -303,15 +308,15 @@ for exp_dict in exp_dicts:
 
         if scale_by_fisher:
             fisher_width_str = r"/F^{{-1}}_{{PDF[bulk]}}[{}] - 1".format(
-                parameter_strings[i][1:-1] # Trim '$' from parameter strings
+                parameter_strings[i].replace("$", "") # Trim '$' from parameter strings
             )
         else:
             fisher_width_str = ""
 
         ax.set_xlabel(
             r"$\sigma^2[{}]{}$".format(
-                parameter_strings[i][1:-1], 
-                fisher_width_str # Trim '$' from parameter strings
+                parameter_strings[i].replace("$", ""), # Trim '$' from parameter strings
+                fisher_width_str 
             )
         ) 
 
@@ -332,7 +337,8 @@ for exp_dict in exp_dicts:
         "pretrain" if config.pre_train else "nopretrain",
         # config.exp_name if include_exp and config.exp_name else None, # NOTE: This is ignored for multi_z!
         "".join(map(str, args.order_idx)),
-        str(config.seed)
+        # s if exp_dict["linearised"] else None
+        str(config.seed) # NOTE: args.seed?
     ]
     identifier_str = "_".join(filter(None, parts))
 

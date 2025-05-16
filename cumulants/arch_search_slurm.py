@@ -166,10 +166,21 @@ def objective(
     if n_repeats is None:
         n_repeats = 1
 
+    def train_validation_split(X, Y):
+        """ 
+            Different train/validation split for repeated cross-validation run 
+            - shuffle dataset which implies different split
+            - just give a different training seed? simplest...
+        """
+        X
+
     # Container for cross-validation scores 
     scores = []
     for i_repeat in range(n_repeats):
         jax.clear_caches()
+
+        # Keys passed to pre-train and train functions (implies different dataset splits / training)
+        keys_train = jr.split(jr.fold_in(key, i_repeat))
 
         """
             Compression
@@ -218,7 +229,7 @@ def objective(
         if ((not config.linearised) and config.pre_train and (config.n_linear_sims is not None)):
             print("Linearised pre-training...")
 
-            pre_train_key, summaries_key = jr.split(key)
+            pre_train_key, summaries_key = jr.split(keys_train[0])
 
             # Pre-train data = linearised simulations
             D_l, Y_l = cumulants_dataset.get_linearised_data()
@@ -382,7 +393,7 @@ def objective(
             )
 
         ensemble, stats = train_ensemble(
-            train_key, 
+            keys_train[1], 
             ensemble,
             train_mode=config.sbi_type,
             train_data=(data_preprocess_fn(X), dataset.parameters), 
@@ -752,14 +763,21 @@ if __name__ == "__main__":
     #     engine_kwargs={"connect_args": {"timeout": 10}},  # Prevents DB lock issues
     # )
 
+    # Optuna's default pruner is the MedianPruner(), don't prune if cross validating...
+    if (search_args.n_repeats == 0) or (search_args.n_repeats is None):
+        pruner = optuna.pruners.NopPruner()  
+    else:
+        pruner = optuna.pruners.MedianPruner()
+
     # Minimise negative log-likelihood
     study = optuna.create_study(
         study_name=study_name,
         direction="minimize", 
         storage=storage,
         sampler=optuna.samplers.TPESampler(
-            n_startup_trials=search_args.n_startup_trials, multivariate=False
+            n_startup_trials=search_args.n_startup_trials, multivariate=True
         ),
+        pruner=pruner,
         load_if_exists=True
     ) 
 

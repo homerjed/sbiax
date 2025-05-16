@@ -75,7 +75,7 @@ data_dir, _, _ = get_save_and_load_dirs()
 target_idx = get_target_idx()
 
 global_seed = 0 # Set to None to load different ensembles for each seed (NOTE: iterate over this if testing linearised!)
-n_seeds = 50 # NOTE: decide if seeds are for experiments or datavectors 
+n_seeds = 100 # NOTE: decide if seeds are for experiments or datavectors 
 
 scale_by_fisher = True # Scale parameter constraints by bulk-PDF Fisher widths
 use_consistent_binning = False # Same bins for bulk / tails posterior widths

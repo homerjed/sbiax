@@ -212,13 +212,6 @@ def get_z_config_and_datavector(
     # Ensemble of NDEs
     ensemble = Ensemble(ndes, sbi_type=config_z.sbi_type)
 
-    # Precision of weights bug
-    # ensemble = eqx.tree_at(
-    #     lambda e: e.weights, 
-    #     ensemble, 
-    #     ensemble.weights.squeeze().astype(jnp.int32)
-    # )
-
     # Load ensemble
     ensemble_path = os.path.join(get_results_dir(config_z, args=args), "ensemble.eqx")
     ensemble = eqx.tree_deserialise_leaves(ensemble_path, ensemble)
@@ -811,4 +804,11 @@ if __name__ == "__main__":
         plt.savefig(posterior_plot_filename)
         plt.close()
 
-        print("POSTERIOR PLOT FILENAME:\n", posterior_plot_filename)
+        print("MULTI-Z POSTERIOR PLOT FILENAME:\n", posterior_plot_filename)
+
+# Precision of weights bug
+# ensemble = eqx.tree_at(
+#     lambda e: e.weights, 
+#     ensemble, 
+#     ensemble.weights.squeeze().astype(jnp.int32)
+# )
