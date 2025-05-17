@@ -254,9 +254,9 @@ def get_arch_search_args(using_notebook: bool = False):
         n_processes = 10
         multiprocess = True
         n_trials = 1000
-        n_startup_trials = 100
-        random_seeds = True # Different seeds (based on trial number) for each experiment
-        n_repeats = 4 # Cross-validation repeats (number of repeated experiments, given seed, with shuffled train/validation split)
+        n_startup_trials = 100 
+        random_seeds = True    # Different seeds (based on trial number) for each experiment
+        n_repeats = 4          # Cross-validation repeats (number of repeated experiments, given seed, with shuffled train/validation split)
 
     args = Args()
 

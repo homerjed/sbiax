@@ -52,7 +52,7 @@ else
 fi
 
 # --- Submit SLURM jobs ---
-# MULTI_SLURM environment variable ensures shard journal storage for search across slurm jobs
+# MULTI_SLURM environment variable ensures shared journal storage for search across slurm jobs
 for i in $(seq 1 $N_JOBS); do
     sbatch <<EOF
 #!/bin/bash

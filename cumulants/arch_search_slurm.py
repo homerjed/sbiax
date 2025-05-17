@@ -166,13 +166,13 @@ def objective(
     if n_repeats is None:
         n_repeats = 1
 
-    def train_validation_split(X, Y):
-        """ 
-            Different train/validation split for repeated cross-validation run 
-            - shuffle dataset which implies different split
-            - just give a different training seed? simplest...
-        """
-        X
+    # def train_validation_split(X, Y):
+    #     """ 
+    #         Different train/validation split for repeated cross-validation run 
+    #         - shuffle dataset which implies different split
+    #         - just give a different training seed? simplest...
+    #     """
+    #     X
 
     # Container for cross-validation scores 
     scores = []
@@ -261,7 +261,7 @@ def objective(
                 valid_fraction=config.valid_fraction,
                 tqdm_description="Training (pre-train)",
                 show_tqdm=args.use_tqdm,
-                trial=trial,
+                trial=None, # Pretraining! #trial if n_repeats > 1 else None, # Don't allow trial to report within inner repetition of objective 
                 results_dir=results_dir
             )
 
@@ -405,7 +405,8 @@ def objective(
             n_epochs=config.train.n_epochs,
             valid_fraction=config.valid_fraction,
             tqdm_description="Training (data)",
-            trial=trial,
+            # trial=trial,
+            trial=trial if n_repeats > 1 else None, # Don't allow trial to report within inner repetition of objective 
             show_tqdm=args.use_tqdm,
             # results_dir=results_dir
         )
@@ -493,7 +494,6 @@ def objective(
                 ),
             multialignment='center'
         )
-        # plt.show()
         plt.savefig(os.path.join(results_dir, "posterior_affine.pdf"))
         plt.savefig(os.path.join(posteriors_dir, "posterior_affine.pdf"))
         plt.close()
@@ -546,13 +546,12 @@ def objective(
                 ),
             multialignment='center'
         )
-        # plt.show()
         plt.savefig(os.path.join(results_dir, "posterior_affine_Oms8.pdf"))
         plt.savefig(os.path.join(posteriors_dir, "posterior_affine_Oms8.pdf"))
         plt.close()
 
         # Free memory
-        del ensemble, X, dataset
+        # del ensemble, X, dataset
         gc.collect()
         jax.clear_caches()
 
@@ -562,7 +561,13 @@ def objective(
     # if trial.state != optuna.trial.TrialState.COMPLETE:
     #     rmtree(results_dir, ignore_errors=True)
 
-    return np.mean(scores) # Assuming one NDE
+    mean_score = np.mean(scores)
+
+    # Trial reports this metric if repeating the training, not the individual validation losses from training 
+    if n_repeats > 1:
+        trial.report(mean_score, epoch)
+
+    return mean_score # Assuming one NDE!
 
 
 def callback(
@@ -592,7 +597,7 @@ def callback(
         best_filtered = min(filtered_trials, key=lambda t: t.value)
         print("Best trial after trimming outliers:\n", best_filtered.params)
 
-        trial_dict = best_filtered # study.best_trial.__dict__
+        trial_dict = best_filtered.__dict__ # study.best_trial.__dict__
         filtered = {k: v for k, v in trial_dict.items() if k != "intermediate_values"} # Remove long list of losses
 
         print("@" * 80 + datetime.today().strftime('%Y-%m-%d %H:%M:%S'))

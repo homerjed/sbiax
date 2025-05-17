@@ -23,6 +23,9 @@ order_idxs=(
     "0 1 2"
 )
 
+JOB_ARRAY_STR="0-100,200-500"
+# JOB_ARRAY_STR="$START_SEED-$END_SEED%$N_PARALLEL"
+
 for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
     for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
         for PRETRAIN_FLAG in "--pre-train" "--no-pre-train"; do
@@ -132,7 +135,7 @@ $FREEZE_FLAG"
 #SBATCH --job-name=m_z_${bt_flag}_${l_flag}_${f_flag}
 #SBATCH --output=$OUT_DIR/multi_z_${bt_flag}_${l_flag}_${f_flag}_%a.out
 #SBATCH --error=$OUT_DIR/multi_z_${bt_flag}_${l_flag}_${f_flag}_%a.err
-#SBATCH --array=$START_SEED-$END_SEED%$N_PARALLEL
+#SBATCH --array=$JOB_ARRAY_STR
 #SBATCH --partition=cluster
 #SBATCH --time=08:00:00
 #SBATCH --mem=${N_GB}GB
@@ -176,7 +179,7 @@ $FREEZE_FLAG"
 #SBATCH --job-name=figure_one
 #SBATCH --output=$OUT_DIR/figure_one_${l_flag}_${f_flag}_%a.out
 #SBATCH --error=$OUT_DIR/figure_one_${l_flag}_${f_flag}_%a.err
-#SBATCH --array=$START_SEED-$END_SEED%$N_PARALLEL
+#SBATCH --array=$JOB_ARRAY_STR
 #SBATCH --partition=cluster
 #SBATCH --time=02:00:00
 #SBATCH --mem=${N_GB}GB
