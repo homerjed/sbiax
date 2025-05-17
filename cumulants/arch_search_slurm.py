@@ -406,7 +406,7 @@ def objective(
             valid_fraction=config.valid_fraction,
             tqdm_description="Training (data)",
             # trial=trial,
-            trial=trial if n_repeats > 1 else None, # Don't allow trial to report within inner repetition of objective 
+            trial=None if n_repeats > 1 else trial, # Don't allow trial to report within inner repetition of objective 
             show_tqdm=args.use_tqdm,
             # results_dir=results_dir
         )
@@ -770,9 +770,9 @@ if __name__ == "__main__":
 
     # Optuna's default pruner is the MedianPruner(), don't prune if cross validating...
     if (search_args.n_repeats == 0) or (search_args.n_repeats is None):
-        pruner = optuna.pruners.NopPruner()  
-    else:
         pruner = optuna.pruners.MedianPruner()
+    else:
+        pruner = optuna.pruners.NopPruner()  
 
     # Minimise negative log-likelihood
     study = optuna.create_study(
