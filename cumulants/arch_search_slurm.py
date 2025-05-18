@@ -175,7 +175,7 @@ def objective(
     #     X
 
     # Container for cross-validation scores 
-    scores = []
+    scores, losses_lengths = [], []
     for i_repeat in range(n_repeats):
         jax.clear_caches()
 
@@ -556,6 +556,7 @@ def objective(
         jax.clear_caches()
 
         scores.append(stats[0]["all_valid_loss"]) # Assuming one NDE
+        losses_lengths.append(len(stats[0]["valid_losses"]))
 
     # Delete results directories of useless trials
     # if trial.state != optuna.trial.TrialState.COMPLETE:
@@ -565,7 +566,7 @@ def objective(
 
     # Trial reports this metric if repeating the training, not the individual validation losses from training 
     if n_repeats > 1:
-        trial.report(mean_score, epoch)
+        trial.report(mean_score, int(np.mean(losses_lengths))) # Mean score and average length of trainings
 
     return mean_score # Assuming one NDE!
 
