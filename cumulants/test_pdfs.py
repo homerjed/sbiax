@@ -28,10 +28,11 @@ cumulant_strings = [
     r"$\langle\delta^3\rangle_c$",
     r"$\langle\delta^4\rangle_c$"
 ]
+
 """
     Calculate bulk cumulants for each redshift
 """
-if 1:
+if 0:
     print("CALCULATED BULK\n")
 
     # Bulk calculated cumulants
@@ -108,7 +109,7 @@ if 1:
 """ 
     Calculate full shape cumulants from quijote pdfs, compare to pdf measured in quijote
 """
-if 1:
+if 0:
     use_mean = False
 
     full_shape_config = cumulants_config()
@@ -888,4 +889,242 @@ if 0:
     )
     fig = c.plotter.plot()
     plt.savefig(os.path.join("scratch/", "posterior_affine_test.pdf"))
+    plt.close()
+
+
+
+""" 
+    Plot for calculated bulk and quijote cumulants dataset
+    - standardise to show shapes of PDFs
+"""
+if 1:
+    from scipy.stats import gaussian_kde
+
+    use_mean = False
+
+    scales = [5.0, 10.0]
+
+    # Bulk calculated cumulants
+    bulk_config = bulk_cumulants_config()
+    bulk_config.use_bulk_means = True # NOTE: bulk calculated; use mean in conversion of moments to cumulants
+    bulk_config.stack_bulk_means = False # NOTE: if this is false, cumulants of shape (..., 3) as long as norms not used
+    bulk_config.stack_bulk_norms = False # NOTE: if this is false, cumulants are normalised (can be compared to Quijote)
+    bulk_config.scales = scales
+
+    # Bulk cumulants by my calculations
+    bulk_cumulants_dataset = BulkCumulantsDataset(
+        bulk_config, 
+        pdfs=False, 
+        check_cumulants_against_quijote=False, 
+        verbose=verbose
+    )
+
+    print("QUIJOTE FULL-SHAPE\n")
+    
+    # Quijote cumulants for full shape of PDF
+    full_shape_config = cumulants_config()
+    full_shape_config.scales = scales
+
+    cumulants_dataset = CumulantsDataset(full_shape_config, verbose=verbose)
+
+    # Histogram of cumulants I calculate against those measured in Quijote
+    for cumulants, name in zip(
+        [
+            cumulants_dataset.data.fiducial_data,
+            bulk_cumulants_dataset.data.fiducial_data
+        ],
+        ["MY CALCULATION", "QUIJOTE", "MY CALCULATION BULK"]
+    ):
+        print("{} {} {:.3E} {:.3E}".format(name, cumulants.shape, cumulants.min(), cumulants.max()))
+
+    print("\nMEAN CUMULANTS QUIJOTE: {} \n".format(cumulants_dataset.data.fiducial_data.shape))
+    for r, R in enumerate(bulk_config.scales):
+        print(R, cumulants_dataset.data.fiducial_data.mean(axis=0)[r * 3: (r + 1) * 3])
+    print("\nMEAN CUMULANTS CALCULATED (BULK): {} \n".format(bulk_cumulants_dataset.data.fiducial_data.shape))
+    for r, R in enumerate(bulk_config.scales):
+        print(R, bulk_cumulants_dataset.data.fiducial_data.mean(axis=0)[r * 3: (r + 1) * 3])
+
+
+    def corner_plot(data_list, labels=None, bins=30, contour_levels=4, figsize=8, colors=None):
+        """
+        Parameters:
+            data_list : list of np.ndarray, each shape (n_samples, n_dimensions)
+            labels : list of str, length = n_dimensions
+            bins : int, number of histogram bins
+            contour_levels : int, number of contour levels
+            figsize : float or tuple, figure size
+            colors : list of color specs, one per dataset
+        """
+        if isinstance(data_list, np.ndarray):
+            data_list = [data_list]
+
+        d = data_list[0].shape[1]
+        for data in data_list:
+            assert data.shape[1] == d, "All datasets must have the same dimensionality."
+
+        if labels is None:
+            labels = [f"x{i}" for i in range(d)]
+        assert len(labels) == d, "Labels must match number of dimensions."
+
+        if colors is None:
+            colors = plt.cm.tab10.colors[:len(data_list)]
+
+        fig, axes = plt.subplots(d, d, figsize=(figsize, figsize))
+        plt.subplots_adjust(hspace=0.05, wspace=0.05)
+
+        # Compute shared histogram bins
+        for i in range(d):
+            for j in range(d):
+                ax = axes[i, j]
+                if i < j:
+                    ax.axis("off")
+                    continue
+
+                if i == j:
+                    # Diagonal: 1D histograms or overlaid 1D KDEs
+                    x_min = min(data[:, i].min() for data in data_list)
+                    x_max = max(data[:, i].max() for data in data_list)
+                    x_vals = np.linspace(x_min, x_max, 300)
+
+                    max_y = 0
+                    for data, color in zip(data_list, colors):
+                        # Plot Gaussian samples with KDE smooth PDF
+                        if color != "k":
+                            counts, bin_edges = np.histogram(data[:, i], bins=bins, density=True)
+                            ax.hist(
+                                data[:, i], 
+                                bins=bin_edges, 
+                                histtype="step", 
+                                color=color, 
+                                density=True
+                            )
+                        else:
+                            max_y = max(max_y, counts.max())
+                            try:
+                                kde = gaussian_kde(data[:, i])
+                                y_vals = kde(x_vals)
+                                ax.plot(x_vals, y_vals, color=color, lw=2)
+                                max_y = max(max_y, y_vals.max())
+                            except np.linalg.LinAlgError:
+                                counts, bin_edges = np.histogram(data[:, i], bins=bins, density=True)
+                                ax.hist(
+                                    data[:, i], 
+                                    bins=bin_edges, 
+                                    histtype="step", 
+                                    color=color, 
+                                    density=True
+                                )
+
+                    ax.set_ylim(bottom=0, top=max_y * 1.1)
+                    ax.set_xticks([]); ax.set_yticks([])
+                else:
+                    # Off-diagonal: 2D KDE contours
+                    for data, color in zip(data_list, colors):
+                        x = data[:, j]
+                        y = data[:, i]
+                        try:
+                            xy = np.vstack([x, y])
+                            kde = gaussian_kde(xy)
+                            xi, yi = np.mgrid[x.min():x.max():100j, y.min():y.max():100j]
+                            zi = kde(np.vstack([xi.ravel(), yi.ravel()]))
+                            ax.contour(
+                                xi, yi, zi.reshape(xi.shape),
+                                levels=contour_levels,
+                                colors=[color], 
+                                linewidths=1
+                            )
+
+                            # xp = np.percentile(x, [0.05, 99.5])
+                            # ax.set_xlim(xp[0], xp[1])
+                            # yp = np.percentile(y, [0.05, 99.5])
+                            # ax.set_ylim(yp[0], yp[1])
+
+                            ax.set_xlim(-2., 2.); ax.set_ylim(-2., 2.) # If standardised
+                            ax.set_xticks([]); ax.set_yticks([])
+                        except np.linalg.LinAlgError:
+                            ax.plot(x, y, '.', color=color, alpha=0.3)
+
+                # Axis labeling
+                if i == d - 1:
+                    ax.set_xlabel(labels[j])
+                else:
+                    ax.set_xticks([])
+                if j == 0:
+                    ax.set_ylabel(labels[i])
+                else:
+                    ax.set_yticks([])
+
+        return fig, axes
+
+    # Only plotting var, skew & kurtosis
+    cumulant_strings = [
+        # r"$\langle\delta^0_{}\rangle$", 
+        # r"$\langle\delta_{}\rangle$", 
+        r"$\langle\delta^2_{{{}}}\rangle$",
+        r"$\langle\delta^3_{{{}}}\rangle_c$",
+        r"$\langle\delta^4_{{{}}}\rangle_c$"
+    ]
+    cumulant_strings_R = [
+        [
+            cumulant_strings[i].format(
+                "R={}".format(
+                    str(scales[r]) + " Mpc/h"
+                )
+                # "R_{}".format(r) # R_1, ...
+            ) 
+            for i in range(len(cumulant_strings))
+        ]
+        for r, R in enumerate(scales)
+    ]
+    cumulant_strings_R = [item for sublist in cumulant_strings_R for item in sublist]
+    print(cumulant_strings_R)
+
+    gaussian_bulk_cumulants = np.random.multivariate_normal(
+        np.mean(bulk_cumulants_dataset.data.fiducial_data, axis=0),
+        bulk_cumulants_dataset.data.C,
+        size=(100_000,)
+    )
+
+    print(len(cumulant_strings_R))
+
+    def standardise(data):
+        return (data - np.mean(data, axis=0)) / np.std(data, axis=0)
+
+    colors=[
+        "k", 
+        "b", 
+        "r"
+    ]
+    legend_labels = [
+        "Gaussian", 
+        "Bulk $k_n$[Quijote]",
+        "Tails $k_n$[Quijote]",
+    ]
+    datasets = [
+        gaussian_bulk_cumulants, 
+        bulk_cumulants_dataset.data.fiducial_data, 
+        cumulants_dataset.data.fiducial_data
+    ]
+    datasets = [standardise(data) for data in datasets]
+
+    fig, axes = corner_plot(
+        datasets,
+        labels=cumulant_strings_R, 
+        colors=colors,        
+        contour_levels=2,
+    )
+
+    from matplotlib.lines import Line2D
+    legend_handles = [Line2D([0], [0], color=c, lw=2.) for c in colors]
+    fig.legend(
+        handles=legend_handles, 
+        labels=legend_labels,
+        loc='upper right', 
+        bbox_to_anchor=(0.90, 0.90), 
+        frameon=False
+    )
+
+    filename = "scratch/corner_quijote_bulk_cumulants.pdf"
+    print("Saved corner plot at:\n", filename)
+    plt.savefig(filename, bbox_inches="tight")
     plt.close()

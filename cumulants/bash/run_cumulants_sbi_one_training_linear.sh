@@ -5,14 +5,14 @@ RUN_FROZEN=true
 ONLY_RUN_FIGURES=false # Only run figure_one.py jobs
 
 N_SEEDS=100
+N_SEEDS_GLOBAL=10
 START_SEED=100
 END_SEED=$(( $START_SEED + $N_SEEDS ))
 N_PARALLEL=50
 N_GB=8
 N_CPU=8
 
-N_LINEAR_SIMS=10000
-FIXED_SEED=0 # Repeat this for linearised...  NOTE: add this to formatting for sbatch job names!
+N_LINEAR_SIMS=2000
 
 TIMESTAMP=$(date +'%m%d_%H%M')
 OUT_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/sbatch_outs/cumulants_sbi/$TIMESTAMP"
@@ -23,21 +23,24 @@ order_idxs=(
     "0 1 2"
 )
 
+# Repeat training / posterior sampling for 10 seeds with linearised experiemnts
+
 # JOB_ARRAY_STR="0-100,200-500"
-JOB_ARRAY_STR="500-1000"
+JOB_ARRAY_STR="0-200"
 # JOB_ARRAY_STR="$START_SEED-$END_SEED%$N_PARALLEL"
 
+for global_seed in $(seq 0 $N_SEEDS_GLOBAL); do
 for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
     for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
         for PRETRAIN_FLAG in "--pre-train" "--no-pre-train"; do
 
-            # Skip linearisation/pre-train experiments
-            if [[ "$LINEARISED_FLAG" == "--linearised" && "$PRETRAIN_FLAG" == "--pre-train" ]]; then
+            # Skip pre-train experiments
+            if [[ "$PRETRAIN_FLAG" == "--pre-train" ]]; then
                 continue
             fi
 
-            # Skip linearisation if not requested
-            if [[ "$RUN_LINEARISED" == false && "$LINEARISED_FLAG" == "--linearised" ]]; then
+            # Skip non-linearised if not requested
+            if [[ "$LINEARISED_FLAG" == "--no-linearised" ]]; then
                 continue
             fi
 
@@ -74,7 +77,7 @@ for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
                     sbi_job_ids=()
                     for z in 0.0 0.5 1.0; do
                         cmd1="python cumulants_sbi.py \
---seed $FIXED_SEED \
+--seed $global_seed \
 --sbi_type nle \
 --compression linear \
 $LINEARISED_FLAG \
@@ -102,7 +105,7 @@ $FREEZE_FLAG"
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
 
-echo "Running sbi.py with seed $FIXED_SEED and redshift $z"
+echo "Running sbi.py with seed $global_seed and redshift $z"
 $cmd1
 END
                         )
@@ -117,7 +120,7 @@ END
 
                     if [[ "$ONLY_RUN_FIGURES" == false ]]; then
                         cmd2="python cumulants_multi_z.py \
---seed $FIXED_SEED \
+--seed $global_seed \
 --seed_datavector \$SLURM_ARRAY_TASK_ID \
 --sbi_type nle \
 --compression linear \
@@ -164,7 +167,7 @@ END
                     fi
 
                     figure_cmd="python figure_one.py \
---seed $FIXED_SEED \
+--seed $global_seed \
 --seed_datavector \$SLURM_ARRAY_TASK_ID \
 --sbi_type nle \
 --compression linear \
@@ -202,4 +205,5 @@ END
             done
         done
     done
+done
 done

@@ -166,14 +166,6 @@ def objective(
     if n_repeats is None:
         n_repeats = 1
 
-    # def train_validation_split(X, Y):
-    #     """ 
-    #         Different train/validation split for repeated cross-validation run 
-    #         - shuffle dataset which implies different split
-    #         - just give a different training seed? simplest...
-    #     """
-    #     X
-
     # Container for cross-validation scores 
     scores, losses_lengths = [], []
     for i_repeat in range(n_repeats):
@@ -190,18 +182,9 @@ def objective(
 
         X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
 
-        # Plot summaries
-        # plot_summaries(X, dataset.parameters, dataset, results_dir=results_dir)
-
-        # plot_moments(dataset.fiducial_data, config, results_dir=results_dir)
-
-        # plot_latin_moments(dataset.data, config, results_dir=results_dir)
-
         """
             Build NDEs
         """
-        # cov_sqrt_inv = fractional_matrix_power(cov_X, -0.5)
-        # X_whitened = (X - mean_X) @ cov_sqrt_inv
 
         scaler = Scaler(
             X, dataset.parameters, use_scaling=config.use_scalers
@@ -405,8 +388,7 @@ def objective(
             n_epochs=config.train.n_epochs,
             valid_fraction=config.valid_fraction,
             tqdm_description="Training (data)",
-            # trial=trial,
-            trial=None if n_repeats > 1 else trial, # Don't allow trial to report within inner repetition of objective 
+            trial=None if n_repeats > 1 else trial, # Don't allow trial to report within inner repetition of objective cross-validation
             show_tqdm=args.use_tqdm,
             # results_dir=results_dir
         )
@@ -580,6 +562,7 @@ def callback(
 ) -> None:
 
     def json_best_trial():
+
         def json_serial(obj):
             """ JSON serializer for objects not serializable by default json """
             if isinstance(obj, (datetime)):
@@ -590,44 +573,49 @@ def callback(
                 return list(obj)
             return str(obj)
 
-        # Filter for outliers
-        trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
-        values = np.array([t.value for t in trials]) # Compute validation losses
-        low, high = np.percentile(values, [5, 95])
-        filtered_trials = [t for t in trials if low <= t.value <= high]
-        best_filtered = min(filtered_trials, key=lambda t: t.value)
-        print("Best trial after trimming outliers:\n", best_filtered.params)
+        try:
+            # Filter for outliers
+            trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+            values = np.array([t.value for t in trials]) # Compute validation losses
+            low, high = np.percentile(values, [5, 95])
+            filtered_trials = [t for t in trials if low <= t.value <= high]
+            best_filtered = min(filtered_trials, key=lambda t: t.value)
+            print("Best trial after trimming outliers:\n", best_filtered.params)
 
-        trial_dict = best_filtered.__dict__ # study.best_trial.__dict__
-        filtered = {k: v for k, v in trial_dict.items() if k != "intermediate_values"} # Remove long list of losses
+            trial_dict = best_filtered.__dict__ # study.best_trial.__dict__
+            filtered = {k: v for k, v in trial_dict.items() if k != "intermediate_values"} # Remove long list of losses
 
-        print("@" * 80 + datetime.today().strftime('%Y-%m-%d %H:%M:%S'))
-        print("Best values so far:\n\t{}\n\t{}".format(study.best_trial.params, study.best_trial.value))
-        print("Best trial so far:\n\t{}".format(filtered))
-        print("Optuna figures saved at:\n\t{}".format(figs_dir))
-        print("@" * 80 + "n_trials=" + str(len(study.trials)))
+            print("@" * 80 + datetime.today().strftime('%Y-%m-%d %H:%M:%S'))
+            print("Best values so far:\n\t{}\n\t{}".format(study.best_trial.params, study.best_trial.value))
+            print("Best trial so far:\n\t{}".format(filtered))
+            print("Optuna figures saved at:\n\t{}".format(figs_dir))
+            print("@" * 80 + "n_trials=" + str(len(study.trials)))
 
-        # Write best trial to json
-        trial_json_path = os.path.join(figs_dir, "best_trial.json")
-        # with open(trial_json_path, "w") as f:
-        #     json.dump(filtered, f, indent=2, default=json_serial)
+            # Write best trial to json
+            trial_json_path = os.path.join(figs_dir, "best_trial.json")
+            # with open(trial_json_path, "w") as f:
+            #     json.dump(filtered, f, indent=2, default=json_serial)
 
-        # Append new entry to json file (load previous json and append to it)
-        if os.path.exists(trial_json_path):
-            with open(trial_json_path, "r") as f:
-                try:
-                    data = json.load(f)
-                    if not isinstance(data, list): # Corrupted or wrong format
+            # Append new entry to json file (load previous json and append to it)
+            if os.path.exists(trial_json_path):
+                with open(trial_json_path, "r") as f:
+                    try:
+                        data = json.load(f)
+                        if not isinstance(data, list): # Corrupted or wrong format
+                            data = []
+                    except json.JSONDecodeError:
                         data = []
-                except json.JSONDecodeError:
-                    data = []
-        else:
-            data = []
+            else:
+                data = []
 
-        data.append(filtered)
+            data.append(filtered)
 
-        with open(trial_json_path, "w") as f:
-            json.dump(data, f, indent=2, default=json_serial)
+            with open(trial_json_path, "w") as f:
+                json.dump(data, f, indent=2, default=json_serial)
+        except Exception as e:
+            print("@" * 50 + "\n")
+            print("Exception:\n{}".format(e))
+            print("@" * 50 + "\n")
 
     json_best_trial()
 
