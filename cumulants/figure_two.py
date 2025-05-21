@@ -77,8 +77,9 @@ target_idx = get_target_idx()
 global_seed = 0 # Set to None to load different ensembles for each seed (NOTE: iterate over this if testing linearised!)
 n_seeds = 500 # NOTE: decide if seeds are for experiments or datavectors 
 
-scale_by_fisher = True # Scale parameter constraints by bulk-PDF Fisher widths
+scale_by_fisher = False # Scale parameter constraints by bulk-PDF Fisher widths
 use_consistent_binning = False # Same bins for bulk / tails posterior widths
+y_axis_off = True # Turn off y-axis for histograms, "density" label
 
 keys = ["linearised", "freeze_parameters", "pretrain"]
 exp_dicts = [
@@ -109,6 +110,7 @@ for exp_dict in exp_dicts:
         bulk=np.zeros((n_seeds, n_p)), 
         tails=np.zeros((n_seeds, n_p))
     )
+    Finvs = dict(bulk=None, tails=None)
     for bulk_or_tails in ["bulk", "tails"]:
 
         # Loop over datavector seeds?
@@ -185,6 +187,11 @@ for exp_dict in exp_dicts:
 
             posterior_widths[bulk_or_tails][s] = widths
 
+            if exp_dict["freeze_parameters"]:
+                Finvs[bulk_or_tails]["frozen"] = posterior["Finv"]
+            else:
+                Finvs[bulk_or_tails]["nonfrozen"] = posterior["Finv"]
+
     # Plot histogram of posterior widths across all seeds for all multi-z posteriors
     landscape = False
 
@@ -225,14 +232,16 @@ for exp_dict in exp_dicts:
             color=plotting_dict["bulk"]["color"], 
             edgecolor="none", 
             alpha=0.7, 
-            label="SBI[bulk]"
+            label="SBI[bulk]",
+            density=True
         )
         _ = ax.hist(
             posterior_widths["bulk"][:, i], 
             bins=bins, 
             color='k', 
             histtype="step", 
-            alpha=0.7
+            alpha=0.7,
+            density=True
         )
 
         _ = ax.hist(
@@ -241,14 +250,16 @@ for exp_dict in exp_dicts:
             color=plotting_dict["tails"]["color"], 
             edgecolor="none", 
             alpha=0.7, 
-            label="SBI[tails]"
+            label="SBI[tails]",
+            density=True
         )
         _ = ax.hist(
             posterior_widths["tails"][:, i], 
             bins=bins, 
             color='k', 
             histtype="step", 
-            alpha=0.7
+            alpha=0.7,
+            density=True
         )
 
         # Bulk Fisher information line
@@ -258,6 +269,20 @@ for exp_dict in exp_dicts:
             linestyle="--", 
             linewidth=2, 
             label=r"$F^{{-1}}[{}]$ (PDF[bulk])".format(parameter_strings[i][1:-1])
+        )
+        ax.axvline(
+            np.diag(Finvs["bulk"]["frozen"] if exp_dict["freeze_parameters"] else Finvs["bulk"]["nonfrozen"])[i], 
+            color="blue", 
+            linestyle="--", 
+            linewidth=2, 
+            label=r"$F^{{-1}}[{}]$ ($k_n$[bulk])".format(parameter_strings[i][1:-1])
+        )
+        ax.axvline(
+            np.diag(Finvs["tails"]["frozen"] if exp_dict["freeze_parameters"] else Finvs["tails"]["nonfrozen"])[i], 
+            color="red", 
+            linestyle="--", 
+            linewidth=2, 
+            label=r"$F^{{-1}}[{}]$ ($k_n$[tails])".format(parameter_strings[i][1:-1])
         )
 
         if scale_by_fisher:
@@ -275,6 +300,10 @@ for exp_dict in exp_dicts:
         ) 
 
         ax.legend(frameon=False)
+
+        if y_axis_off:
+            ax.set_yticks([]) # Density=True for histograms, they have arbitrary units
+            ax.set_ylabel("Density")
 
     fig.tight_layout()
 
@@ -302,19 +331,151 @@ for exp_dict in exp_dicts:
     plt.savefig(filename, bbox_inches="tight")
     plt.close()
 
+    """ 
+        Marginalised posterior widths (non-linearised & non-frozen only)
+    """
+
+    # Plot marginalised posterior widths for the target parameters
+    if not exp_dict["linearised"] and not exp_dict["freeze_parameters"]: # NOTE: FIX THIS 
+        n_p = target_idx.size 
+
+        fig_dim = (16. / 5.) * n_p
+
+        if landscape:
+            fig, axes = plt.subplots(1, n_p, figsize=(fig_dim, 4.), sharey=True)
+        else:
+            fig, axes = plt.subplots(n_p, 1, figsize=(5., fig_dim), sharex=False)
+        axes = np.atleast_1d(axes)
+
+        for _i, i in enumerate(target_idx):
+
+            ax = axes.ravel()[_i]
+
+            _ = ax.hist(
+                posterior_widths["bulk"][:, i], 
+                bins=bins, 
+                color=plotting_dict["bulk"]["color"], 
+                edgecolor="none", 
+                alpha=0.7, 
+                label="SBI[bulk]",
+                density=True
+            )
+            _ = ax.hist(
+                posterior_widths["bulk"][:, i], 
+                bins=bins, 
+                color='k', 
+                histtype="step", 
+                alpha=0.7,
+                density=True
+            )
+
+            _ = ax.hist(
+                posterior_widths["tails"][:, i], 
+                bins=bins, 
+                color=plotting_dict["tails"]["color"], 
+                edgecolor="none", 
+                alpha=0.7, 
+                label="SBI[tails]",
+                density=True
+            )
+            _ = ax.hist(
+                posterior_widths["tails"][:, i], 
+                bins=bins, 
+                color='k', 
+                histtype="step", 
+                alpha=0.7,
+                density=True
+            )
+
+            # Bulk Fisher information line
+            ax.axvline(
+                vertical_lines[i], 
+                color="green", 
+                linestyle="--", 
+                linewidth=2, 
+                label=r"$F^{{-1}}[{}]$ (PDF[bulk])".format(parameter_strings[i][1:-1])
+            )
+            ax.axvline(
+                np.diag(Finvs["bulk"]["frozen"] if exp_dict["freeze_parameters"] else Finvs["bulk"]["nonfrozen"])[i], 
+                color="blue", 
+                color="blue", 
+                linestyle="--", 
+                linewidth=2, 
+                label=r"$F^{{-1}}[{}]$ ($k_n$[bulk])".format(parameter_strings[i][1:-1])
+            )
+            ax.axvline(
+                np.diag(Finvs["tails"]["frozen"] if exp_dict["freeze_parameters"] else Finvs["tails"]["nonfrozen"])[i], 
+                color="red", 
+                linestyle="--", 
+                linewidth=2, 
+                label=r"$F^{{-1}}[{}]$ ($k_n$[tails])".format(parameter_strings[i][1:-1])
+            )
+
+            if scale_by_fisher:
+                fisher_width_str = r"/F^{{-1}}_{{PDF[bulk]}}[{}] - 1".format(
+                    parameter_strings[i][1:-1] # Trim '$' from parameter strings
+                )
+            else:
+                fisher_width_str = ""
+
+            ax.set_xlabel(
+                r"$\sigma^2[{}]{}$".format(
+                    parameter_strings[i][1:-1], 
+                    fisher_width_str # Trim '$' from parameter strings
+                )
+            ) 
+
+            ax.legend(frameon=False)
+
+            if y_axis_off:
+                ax.set_yticks([]) # Density=True for histograms, they have arbitrary units
+                ax.set_ylabel("Density")
+
+        fig.tight_layout()
+
+        figs_dir = os.path.join(get_base_results_dir(), "figure_two/")
+        if not os.path.exists(figs_dir):
+            os.makedirs(figs_dir, exist_ok=True)
+
+        parts = [
+            "frozen" if config.freeze_parameters else "nonfrozen",
+            # "reduced_cumulants" if config.reduced_cumulants else "cumulants",
+            # config.sbi_type,
+            "linearised" if config.linearised else "nonlinearised",
+            config.compression,
+            "pretrain" if config.pre_train else "nopretrain",
+            # config.exp_name if include_exp and config.exp_name else None, # NOTE: This is ignored for multi_z!
+            "".join(map(str, args.order_idx)),
+            str(config.seed),
+            "marginalised"
+        ]
+        identifier_str = "_".join(filter(None, parts))
+
+        filename = os.path.join(figs_dir, "figure_two_{}.pdf".format(identifier_str))
+
+        print("Figure two (marginalised) saved at:\n\t", filename)
+
+        plt.savefig(filename, bbox_inches="tight")
+        plt.close()
+
+
 
 
 """
-    Figure two for global-seed repeated linearised experiments
+    Figure two for global-seed repeated LINEARISED experiments
 """
+
+n_seeds = 200 # NOTE: decide if seeds are for experiments or datavectors 
+n_global_seeds = 10 # Number of global seeds to repeat for linearised experiments
+
 print("LINEARISED EXPERIMENTS PLOT")
 for exp_dict in exp_dicts:
 
     # Ignore this setup!
     if exp_dict["linearised"] and exp_dict["pretrain"]:
         continue
-    # Ignore nonlinearised experiments for this plot
-    if exp_dict["nonlinearised"]:
+    # Ignore nonlinearised experiments for plots of linearised repeats
+    if not exp_dict["linearised"]:
         continue
 
     print("EXP_DICT:\n", exp_dict)
@@ -332,6 +493,10 @@ for exp_dict in exp_dicts:
     posterior_widths = dict(
         bulk=np.zeros((n_seeds, n_global_seeds, n_p)), 
         tails=np.zeros((n_seeds, n_global_seeds, n_p))
+    )
+    Finvs = dict(
+        bulk=dict(frozen=None, nonfrozen=None),
+        tails=dict(frozen=None, nonfrozen=None)
     )
     for bulk_or_tails in ["bulk", "tails"]:
 
@@ -392,7 +557,7 @@ for exp_dict in exp_dicts:
                     posterior_save_dir, 
                     "multi_z_posterior_{}{}.npz".format(
                         # args.seed, # NOTE: when running for many linearised experiments, 
-                        _global_seed
+                        _global_seed,
                         ("_" + str(s)) if global_seed is not None else "" # Check this loads posterior from independent datavector with fixed NDE training seed
                     ) 
                 )
@@ -412,6 +577,11 @@ for exp_dict in exp_dicts:
 
                 posterior_widths[bulk_or_tails][s, _global_seed, :] = widths
 
+                if exp_dict["freeze_parameters"]:
+                    Finvs[bulk_or_tails]["frozen"] = posterior["Finv"]
+                else:
+                    Finvs[bulk_or_tails]["nonfrozen"] = posterior["Finv"]
+
     # Plot histogram of posterior widths across all seeds for all multi-z posteriors
     landscape = False
 
@@ -424,49 +594,48 @@ for exp_dict in exp_dicts:
 
     n_bins = 10
 
-    for _global_seed in range(n_global_seeds):
-        if use_consistent_binning:
-            bins = np.histogram_bin_edges(
-                np.concatenate(
-                    [
-                        posterior_widths["bulk"][:, _global_seed, :], 
-                        posterior_widths["tails"][:, _global_seed, :]
-                    ]
-                ), 
-                bins=n_bins
-            )
-        else:
-            bins = n_bins
+    if use_consistent_binning:
+        bins = np.histogram_bin_edges(
+            np.concatenate(
+                [
+                    posterior_widths["bulk"][:, _global_seed, :], 
+                    posterior_widths["tails"][:, _global_seed, :]
+                ]
+            ), 
+            bins=n_bins
+        )
+    else:
+        bins = n_bins
 
-        fig_dim = (16. / 5.) * n_p
-        if landscape:
-            fig, axes = plt.subplots(
-                1, n_p, figsize=(fig_dim, 4.), sharey=True
-            )
-        else:
-            fig, axes = plt.subplots(
-                n_p, 1, figsize=(5., fig_dim), sharex=False
-            )
-        axes = np.atleast_1d(axes)
+    fig_dim = (16. / 5.) * n_p
+    if landscape:
+        fig, axes = plt.subplots(1, n_p, figsize=(fig_dim, 4.), sharey=True)
+    else:
+        fig, axes = plt.subplots(n_p, 1, figsize=(5., fig_dim), sharex=False)
+    axes = np.atleast_1d(axes)
 
-        for i in range(n_p):
+    for i in range(n_p):
 
-            ax = axes.ravel()[i]
+        ax = axes.ravel()[i]
+
+        for _global_seed in range(n_global_seeds):
 
             _ = ax.hist(
                 posterior_widths["bulk"][:, _global_seed, i], 
                 bins=bins, 
                 color=plotting_dict["bulk"]["color"], 
                 edgecolor="none", 
-                alpha=0.7, 
-                label="SBI[bulk]"
+                alpha=0.3, 
+                label="SBI[bulk]" if _global_seed == 0 else None,
+                density=True
             )
             _ = ax.hist(
                 posterior_widths["bulk"][:, _global_seed, i], 
                 bins=bins, 
                 color='k', 
                 histtype="step", 
-                alpha=0.7
+                alpha=0.7, 
+                density=True
             )
 
             _ = ax.hist(
@@ -474,16 +643,146 @@ for exp_dict in exp_dicts:
                 bins=bins, 
                 color=plotting_dict["tails"]["color"], 
                 edgecolor="none", 
-                alpha=0.7, 
-                label="SBI[tails]"
+                alpha=0.3, 
+                label="SBI[tails]" if _global_seed == 0 else None, 
+                density=True
             )
             _ = ax.hist(
                 posterior_widths["tails"][:, _global_seed, i], 
                 bins=bins, 
                 color='k', 
                 histtype="step", 
-                alpha=0.7
+                alpha=0.7,
+                density=True
             )
+
+        # Bulk Fisher information line
+        ax.axvline(
+            vertical_lines[i], 
+            color="green", 
+            linestyle="--", 
+            linewidth=2, 
+            label=r"$F^{{-1}}[{}]$ (PDF[bulk])".format(parameter_strings[i][1:-1])
+        )
+        ax.axvline(
+            np.diag(Finvs["bulk"]["frozen"] if exp_dict["freeze_parameters"] else Finvs["bulk"]["nonfrozen"])[i], 
+            color="blue", 
+            linestyle="--", 
+            linewidth=2, 
+            label=r"$F^{{-1}}[{}]$ ($k_n$[bulk])".format(parameter_strings[i][1:-1])
+        )
+        ax.axvline(
+            np.diag(Finvs["tails"]["frozen"] if exp_dict["freeze_parameters"] else Finvs["tails"]["nonfrozen"])[i], 
+            color="red", 
+            linestyle="--", 
+            linewidth=2, 
+            label=r"$F^{{-1}}[{}]$ ($k_n$[tails])".format(parameter_strings[i][1:-1])
+        )
+
+        if scale_by_fisher:
+            fisher_width_str = r"/F^{{-1}}_{{PDF[bulk]}}[{}] - 1".format(
+                parameter_strings[i][1:-1] # Trim '$' from parameter strings
+            )
+        else:
+            fisher_width_str = ""
+
+        ax.set_xlabel(
+            r"$\sigma^2[{}]{}$".format(
+                parameter_strings[i][1:-1], 
+                fisher_width_str # Trim '$' from parameter strings
+            )
+        ) 
+
+        ax.legend(frameon=False)
+
+        if y_axis_off:
+            ax.set_yticks([]) # Density=True for histograms, they have arbitrary units
+            ax.set_ylabel("Density")
+
+    fig.tight_layout()
+
+    figs_dir = os.path.join(get_base_results_dir(), "figure_two/")
+    if not os.path.exists(figs_dir):
+        os.makedirs(figs_dir, exist_ok=True)
+
+    parts = [
+        "frozen" if config.freeze_parameters else "nonfrozen",
+        # "reduced_cumulants" if config.reduced_cumulants else "cumulants",
+        # config.sbi_type,
+        "linearised" if config.linearised else "nonlinearised",
+        config.compression,
+        "pretrain" if config.pre_train else "nopretrain",
+        # config.exp_name if include_exp and config.exp_name else None, # NOTE: This is ignored for multi_z!
+        "".join(map(str, args.order_idx)),
+        # str(config.seed)
+    ]
+    identifier_str = "_".join(filter(None, parts))
+
+    filename = os.path.join(figs_dir, "figure_two_repeated_{}.pdf".format(identifier_str))
+
+    print("Figure two saved at:\n\t", filename)
+
+    plt.savefig(filename, bbox_inches="tight")
+    plt.close() 
+
+    """ 
+        Linearised marginalised posterior widths (non-frozen only)
+    """
+
+    # Plot marginalised posterior widths for the target parameters
+    if not exp_dict["freeze_parameters"]: 
+
+        n_p = target_idx.size 
+
+        fig_dim = (16. / 5.) * n_p
+
+        if landscape:
+            fig, axes = plt.subplots(1, n_p, figsize=(fig_dim, 4.), sharey=True)
+        else:
+            fig, axes = plt.subplots(n_p, 1, figsize=(5., fig_dim), sharex=False)
+        axes = np.atleast_1d(axes)
+
+        for _i, i in enumerate(target_idx):
+
+            ax = axes.ravel()[_i]
+
+            for _global_seed in range(n_global_seeds):
+
+                _ = ax.hist(
+                    posterior_widths["bulk"][:, _global_seed, i], 
+                    bins=bins, 
+                    color=plotting_dict["bulk"]["color"], 
+                    edgecolor="none", 
+                    alpha=0.3, 
+                    label="SBI[bulk]" if _global_seed == 0 else None,
+                    density=True
+                )
+                _ = ax.hist(
+                    posterior_widths["bulk"][:, _global_seed, i], 
+                    bins=bins, 
+                    color='k', 
+                    histtype="step", 
+                    alpha=0.7,
+                    density=True
+                )
+
+                _ = ax.hist(
+                    posterior_widths["tails"][:, _global_seed, i], 
+                    bins=bins, 
+                    color=plotting_dict["tails"]["color"], 
+                    edgecolor="none", 
+                    alpha=0.3, 
+                    label="SBI[tails]" if _global_seed == 0 else None,
+                    density=True
+                )
+                _ = ax.hist(
+                    posterior_widths["tails"][:, _global_seed, i], 
+                    bins=bins, 
+                    color='k', 
+                    histtype="step", 
+                    alpha=0.7,
+                    density=True
+                )
 
             # Bulk Fisher information line
             ax.axvline(
@@ -492,6 +791,20 @@ for exp_dict in exp_dicts:
                 linestyle="--", 
                 linewidth=2, 
                 label=r"$F^{{-1}}[{}]$ (PDF[bulk])".format(parameter_strings[i][1:-1])
+            )
+            ax.axvline(
+                np.diag(Finvs["bulk"]["frozen"] if exp_dict["freeze_parameters"] else Finvs["bulk"]["nonfrozen"])[i], 
+                color="blue", 
+                linestyle="--", 
+                linewidth=2, 
+                label=r"$F^{{-1}}[{}]$ ($k_n$[bulk])".format(parameter_strings[i][1:-1])
+            )
+            ax.axvline(
+                np.diag(Finvs["tails"]["frozen"] if exp_dict["freeze_parameters"] else Finvs["tails"]["nonfrozen"])[i], 
+                color="red", 
+                linestyle="--", 
+                linewidth=2, 
+                label=r"$F^{{-1}}[{}]$ ($k_n$[tails])".format(parameter_strings[i][1:-1])
             )
 
             if scale_by_fisher:
@@ -510,28 +823,33 @@ for exp_dict in exp_dicts:
 
             ax.legend(frameon=False)
 
-    fig.tight_layout()
+            if y_axis_off:
+                ax.set_yticks([]) # Density=True for histograms, they have arbitrary units
+                ax.set_ylabel("Density")
 
-    figs_dir = os.path.join(get_base_results_dir(), "figure_two/")
-    if not os.path.exists(figs_dir):
-        os.makedirs(figs_dir, exist_ok=True)
+        fig.tight_layout()
 
-    parts = [
-        "frozen" if config.freeze_parameters else "nonfrozen",
-        # "reduced_cumulants" if config.reduced_cumulants else "cumulants",
-        # config.sbi_type,
-        "linearised" if config.linearised else "nonlinearised",
-        config.compression,
-        "pretrain" if config.pre_train else "nopretrain",
-        # config.exp_name if include_exp and config.exp_name else None, # NOTE: This is ignored for multi_z!
-        "".join(map(str, args.order_idx)),
-        str(config.seed)
-    ]
-    identifier_str = "_".join(filter(None, parts))
+        figs_dir = os.path.join(get_base_results_dir(), "figure_two/")
+        if not os.path.exists(figs_dir):
+            os.makedirs(figs_dir, exist_ok=True)
 
-    filename = os.path.join(figs_dir, "figure_two_repeated_{}.pdf".format(identifier_str))
+        parts = [
+            "frozen" if config.freeze_parameters else "nonfrozen",
+            # "reduced_cumulants" if config.reduced_cumulants else "cumulants",
+            # config.sbi_type,
+            "linearised" if config.linearised else "nonlinearised",
+            config.compression,
+            "pretrain" if config.pre_train else "nopretrain",
+            # config.exp_name if include_exp and config.exp_name else None, # NOTE: This is ignored for multi_z!
+            "".join(map(str, args.order_idx)),
+            # str(config.seed),
+            "marginalised"
+        ]
+        identifier_str = "_".join(filter(None, parts))
 
-    print("Figure two saved at:\n\t", filename)
+        filename = os.path.join(figs_dir, "figure_two_repeated_{}.pdf".format(identifier_str))
 
-    plt.savefig(filename, bbox_inches="tight")
-    plt.close() 
+        print("Figure two (marginalised) saved at:\n\t", filename)
+
+        plt.savefig(filename, bbox_inches="tight")
+        plt.close()

@@ -26,7 +26,7 @@ order_idxs=(
 # Repeat training / posterior sampling for 10 seeds with linearised experiemnts
 
 # JOB_ARRAY_STR="0-100,200-500"
-JOB_ARRAY_STR="0-200"
+JOB_ARRAY_STR="0-200" # 200 posteriors sampled for each of the 10 seeds
 # JOB_ARRAY_STR="$START_SEED-$END_SEED%$N_PARALLEL"
 
 for global_seed in $(seq 0 $N_SEEDS_GLOBAL); do
@@ -92,7 +92,7 @@ $FREEZE_FLAG"
                         job_script=$(
                             cat <<END
 #!/bin/bash
-#SBATCH --job-name=sbi_${bt_flag}_${l_flag}_${f_flag}_z${z}
+#SBATCH --job-name=sbi_${global_seed}_${bt_flag}_${l_flag}_${f_flag}_z${z}
 #SBATCH --output=$OUT_DIR/sbi_${bt_flag}_${l_flag}_${f_flag}_z${z}_fixed.out
 #SBATCH --error=$OUT_DIR/sbi_${bt_flag}_${l_flag}_${f_flag}_z${z}_fixed.err
 #SBATCH --partition=cluster
@@ -136,7 +136,7 @@ $FREEZE_FLAG"
                         final_script=$(
                             cat <<END
 #!/bin/bash
-#SBATCH --job-name=m_z_${bt_flag}_${l_flag}_${f_flag}
+#SBATCH --job-name=m_z_${global_seed}_${bt_flag}_${l_flag}_${f_flag}
 #SBATCH --output=$OUT_DIR/multi_z_${bt_flag}_${l_flag}_${f_flag}_%a.out
 #SBATCH --error=$OUT_DIR/multi_z_${bt_flag}_${l_flag}_${f_flag}_%a.err
 #SBATCH --array=$JOB_ARRAY_STR
@@ -181,8 +181,8 @@ $FREEZE_FLAG"
                         cat <<END
 #!/bin/bash
 #SBATCH --job-name=figure_one
-#SBATCH --output=$OUT_DIR/figure_one_${l_flag}_${f_flag}_%a.out
-#SBATCH --error=$OUT_DIR/figure_one_${l_flag}_${f_flag}_%a.err
+#SBATCH --output=$OUT_DIR/figure_one_${global_seed}_${l_flag}_${f_flag}_%a.out
+#SBATCH --error=$OUT_DIR/figure_one_${global_seed}_${l_flag}_${f_flag}_%a.err
 #SBATCH --array=$JOB_ARRAY_STR
 #SBATCH --partition=cluster
 #SBATCH --time=02:00:00

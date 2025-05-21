@@ -368,6 +368,29 @@ for marginalised in [True, False]:
         multialignment='center'
     )
 
+    # Assuming `fig` is your existing figure object
+    for ax in fig.get_axes():
+        # Change spine linewidth
+        for spine in ax.spines.values():
+            spine.set_linewidth(2.0) # Change this to your desired width
+
+        # Change axis labels font size
+        ax.set_xlabel(ax.get_xlabel(), fontsize=14)
+        ax.set_ylabel(ax.get_ylabel(), fontsize=14)
+
+        # Change tick label font size
+        ax.tick_params(axis='both', labelsize=12)
+
+        # Hacky change of contour line widths
+        for coll in ax.collections:
+            coll.set_linewidth(2.0) 
+
+    # Change legend font size
+    leg = fig.legend()
+    if leg is not None:
+        for text in leg.get_texts():
+            text.set_fontsize(12)  
+
     # Naming convention for figure one
     sub_figs_dir = os.path.join(
         figs_dir, 
