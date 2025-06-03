@@ -6,6 +6,8 @@ import equinox as eqx
 from jaxtyping import Key, Array, Float
 from tensorflow_probability.substrates.jax.distributions import Distribution
 
+from .vmim import VMIM
+
 
 def default_weights(weights, ndes):
     return weights if weights is not None else jnp.ones((len(ndes))) / len(ndes)
@@ -94,6 +96,10 @@ class Ensemble(eqx.Module):
         self.sbi_type = sbi_type
         self.weights = default_weights(weights, ndes)
 
+        assert not (any([isinstance(nde, VMIM) for nde in ndes]) and sbi_type == "nle"), (
+            "Note: VMIM NDEs cannot be used with Neural Likelihood Estimation."
+        )
+
     def nde_log_prob_fn(
         self, 
         nde: eqx.Module, 
@@ -118,10 +124,13 @@ class Ensemble(eqx.Module):
         _nle = self.sbi_type == "nle"
 
         def _nde_log_prob_fn(theta, **kwargs): 
-            nde_likelihood = nde.log_prob(x=data, y=theta, **kwargs) 
             if _nle:
+                x, y = data, theta
+                nde_likelihood = nde.log_prob(x=x, y=y, **kwargs) 
                 nde_posterior = nde_likelihood + prior.log_prob(theta)
             else:
+                x, y = theta, data
+                nde_likelihood = nde.log_prob(x=x, y=y, **kwargs) 
                 nde_posterior = nde_likelihood 
             return nde_posterior
         return _nde_log_prob_fn
