@@ -6,11 +6,18 @@
 #   so that 
 
 # --- Config ---
+RESULTS_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/results_17_06_maf/" # Base save directory for all results
+
 STUDY_NAME="arch_para"
 N_JOBS=10
 FREEZE_FLAG="--no-freeze-parameters"
 N_GB=8
 N_CPU=8
+N_LINEAR_SIMS=20_000 
+PARTITION="inter"
+LINEAR_ONLY=true
+
+NDE_TYPE="CNF"
 
 TIMESTAMP=$(date +'%m%d_%H%M')
 
@@ -39,6 +46,10 @@ fi
 if [[ "$LINEARISED_FLAG" == "--linearised" && "$PRETRAIN_FLAG" == "--pre-train" ]]; then
     continue
 fi
+# Skip non-linearised training, using huge independent test set
+if [[ "$LINEARISED_FLAG" == "--no-linearised" ]]; then
+    continue
+fi
 
 # Set flag job names based on args
 if [[ "$PRETRAIN_FLAG" == "--pre-train" ]]; then
@@ -63,6 +74,7 @@ for i in $(seq 1 $N_JOBS); do
 #SBATCH --output=$OUT_DIR/$TIMESTAMP/workers/optuna_worker_%j.out
 #SBATCH --error=$OUT_DIR/$TIMESTAMP/workers/optuna_worker_%j.err
 #SBATCH --time=24:00:00
+#SBATCH --partition=$PARTITION
 #SBATCH --mem=${N_GB}G
 #SBATCH --cpus-per-task=${N_CPU}
 
@@ -78,10 +90,11 @@ source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
 
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 
-MULTI_SLURM=1 python arch_search_slurm.py \
+MULTI_SLURM=1 RESULTS_DIR=$RESULTS_DIR DEFAULT_NDE_TYPE=$NDE_TYPE python arch_search_slurm.py \
 --seed 0 \
 --redshift 0.0 \
 --order_idx 0 1 2 \
+--n_linear_sims $N_LINEAR_SIMS \
 $LINEARISED_FLAG \
 $FREEZE_FLAG \
 $PRETRAIN_FLAG

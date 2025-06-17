@@ -1,7 +1,8 @@
 import os
-from typing import Literal, Optional
+from typing import Optional
 import argparse
 import yaml
+import jax.numpy as jnp
 import jax.random as jr 
 from equinox import Module
 from jaxtyping import PRNGKeyArray, jaxtyped
@@ -9,9 +10,14 @@ from beartype import beartype as typechecker
 from ml_collections import ConfigDict
 
 from data.constants import get_base_results_dir, get_base_posteriors_dir
-from sbiax.ndes import CNF, MAF
+from data.common import Dataset
+from data.cumulants import CumulantsDataset
+from data.pdfs import BulkCumulantsDataset, TailsCumulantsDataset, BulkPDFsDataset
+from sbiax.ndes import CNF, MAF, Scaler
 
 typecheck = jaxtyped(typechecker=typechecker)
+
+DatasetClass = BulkCumulantsDataset | TailsCumulantsDataset | BulkPDFsDataset | CumulantsDataset
 
 
 def exists(v):
@@ -54,75 +60,83 @@ def dump_args_and_config(args: argparse.Namespace, config: ConfigDict, results_d
 
 
 def get_config_subdir(
-    config: ConfigDict, 
     args: argparse.Namespace, 
     *, 
     arch_search: bool = False, 
-    include_exp: bool = True, 
     multi_z: bool = False
 ) -> str:
     parts = [
         "arch_search" if arch_search else None,
-        "frozen" if config.freeze_parameters else "nonfrozen",
+        "frozen" if args.freeze_parameters else "nonfrozen",
         args.bulk_or_tails,
-        "reduced_cumulants" if config.reduced_cumulants else "cumulants",
-        config.sbi_type,
-        "linearised" if config.linearised else "nonlinearised",
-        config.compression,
-        "pretrain" if config.pre_train else "nopretrain",
-        config.exp_name if include_exp and config.exp_name else None, # NOTE: This is ignored for multi_z!
+        args.sbi_type,
+        "linearised" if args.linearised else "nonlinearised",
+        args.compression,
+        "pretrain" if args.pre_train else "nopretrain",
+        "z={}".format(
+            "".join(map(str, args.redshifts)) if multi_z else args.redshift
+        ),
         "".join(map(str, args.order_idx)) if multi_z else None, # NOTE: Multi-z posteriors marked by cumulants in datavector, not redshift!
-        str(config.seed),
+        # "".join(map(str, args.scales)) if multi_z else None, # NOTE: Multi-z posteriors marked by cumulants in datavector, not redshift!
+        str(args.seed),
         "multi_z" if multi_z else None
     ]
     return "/".join(filter(None, parts)) + "/"
 
 
 def get_results_dir(
-    config: ConfigDict, 
+    config: ConfigDict,
     args: argparse.Namespace, 
     *, 
     arch_search: bool = False
 ) -> str:
     """ General results directory format for individual SBI experiments """
+
     results_dir = os.path.join(
         get_base_results_dir(), 
-        get_config_subdir(config, args, arch_search=arch_search)
+        get_config_subdir(args, arch_search=arch_search)
     )
+
     if not os.path.exists(results_dir):
         os.makedirs(results_dir, exist_ok=True)
+
     dump_args_and_config(args, config, results_dir=results_dir) # Save conifg and args in run dir
+
     print("RESULTS_DIR:\n", results_dir)
+
     return results_dir
 
 
 def get_posteriors_dir(
-    config: ConfigDict, 
     args: argparse.Namespace, 
     *, 
     arch_search: bool = False
 ) -> str:
     """ General results directory format for posteriors from individual SBI experiments """
+
     posteriors_dir = os.path.join(
         get_base_posteriors_dir(), 
-        get_config_subdir(config, args, arch_search=arch_search)
+        get_config_subdir(args, arch_search=arch_search)
     )
+
     if not os.path.exists(posteriors_dir):
         os.makedirs(posteriors_dir, exist_ok=True)
+
     print("POSTERIORS_DIR:\n", posteriors_dir)
+    
     return posteriors_dir
 
 
-def get_multi_z_posterior_dir(
-    config: ConfigDict, 
-    args: argparse.Namespace
-) -> str:
+def get_multi_z_posterior_dir(args: argparse.Namespace) -> str:
     """ General results directory format for posteriors from bulk or tails multi-redshift SBI sampling """
+
     multi_z_dir = os.path.join(
         get_base_posteriors_dir(), 
-        get_config_subdir(config, args, include_exp=False, multi_z=True) # NOTE: possible bug with include_exp....?
+        get_config_subdir(args, multi_z=True) 
     )
+
     print("Multi-z posterior dir:\n", multi_z_dir)
+
     return multi_z_dir
 
 
@@ -134,23 +148,29 @@ def get_multi_z_posterior_dir(
 @typecheck
 def get_ndes_from_config(
     config: ConfigDict, 
+    dataset: DatasetClass,
     event_dim: int, 
     context_dim: Optional[int] = None, 
-    scalers: Optional[list[Module] | Module] = None, 
     *, 
     use_scalers: bool = False,
     key: PRNGKeyArray 
 ) -> list[Module]:
 
+    fisher_mu_std = (dataset.data.alpha, jnp.sqrt(jnp.diag(dataset.data.Finv)))
+    # X = jax.vmap(dataset.compression_fn)(dataset.data, dataset.parameters)
+
+    # Pack the single scaler for each NDE
+    scaler = Scaler(
+        # X, dataset.parameters,
+        x_mu_std=fisher_mu_std,
+        q_mu_std=fisher_mu_std,
+        use_scaling=use_scalers
+    )
+
     keys = jr.split(key, len(config.ndes))
 
-    # Scaler for each nde...
-    if not isinstance(scalers, list):
-        # Pack the single scaler for each NDE
-        scalers = [scalers] * len(config.ndes)
-
     ndes = []
-    for nde, scaler, key in zip(config.ndes, scalers, keys):
+    for nde, key in zip(config.ndes, keys):
 
         assert nde.model_type in ["maf", "cnf"], (
             "Invalid NDE model type (={})".format(nde.model_type)

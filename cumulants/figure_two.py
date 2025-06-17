@@ -1,60 +1,25 @@
 import os
-import argparse
-from typing import Tuple
-from collections import namedtuple
 from itertools import product
 
 import jax
 import jax.numpy as jnp
-import jax.random as jr
-import equinox as eqx
-
 import numpy as np
-from ml_collections import ConfigDict
-from scipy.linalg import block_diag
 import matplotlib.pyplot as plt
-from chainconsumer import ChainConsumer, Chain, Truth
 from tqdm.auto import trange
-from tensorflow_probability.substrates.jax.distributions import Distribution
 
-from sbiax.ndes import CNF, MAF, Scaler
-from sbiax.inference import nuts_sample
-from sbiax.utils import make_df, marker
-
-from configs import (
-    cumulants_config, 
-    bulk_cumulants_config, 
-    get_posteriors_dir
-)
-from configs.args import (
-    get_cumulants_sbi_args, get_cumulants_multi_z_args
-)
+from configs.args import get_cumulants_multi_z_args
 from configs.configs import (
-    get_base_results_dir, 
-    get_results_dir, 
-    get_multi_z_posterior_dir, 
-    get_ndes_from_config
+    get_base_results_dir, get_multi_z_posterior_dir, 
 )
 from configs.ensembles_configs import (
     ensembles_cumulants_config, ensembles_bulk_cumulants_config 
 )
 from data.constants import (
     get_quijote_parameters, 
-    get_base_posteriors_dir,
     get_save_and_load_dirs,
     get_target_idx
 )
-from data.cumulants import (
-    Dataset, 
-    get_data, 
-    get_linear_compressor, 
-    get_datavector, 
-    get_prior, 
-    get_parameter_strings
-)
-from data.pdfs import get_multi_z_bulk_pdf_fisher_forecast
-from cumulants_ensemble import Ensemble, MultiEnsemble
-from affine import affine_sample
+from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
 
 jax.clear_caches()
 
@@ -110,7 +75,11 @@ for exp_dict in exp_dicts:
         bulk=np.zeros((n_seeds, n_p)), 
         tails=np.zeros((n_seeds, n_p))
     )
-    Finvs = dict(bulk=None, tails=None)
+    # Finvs = dict(bulk=None, tails=None)
+    Finvs = dict(
+        bulk=dict(frozen=np.zeros((n_p, n_p)), nonfrozen=np.zeros((n_p, n_p))), 
+        tails=dict(frozen=np.zeros((n_p, n_p)), nonfrozen=np.zeros((n_p, n_p))), 
+    )
     for bulk_or_tails in ["bulk", "tails"]:
 
         # Loop over datavector seeds?
@@ -118,30 +87,6 @@ for exp_dict in exp_dicts:
 
             args.seed = global_seed if global_seed is not None else s # Fixed ensemble, diffferent datavectors
             args.bulk_or_tails = bulk_or_tails
-
-            # Load Bulk PDF Fisher matrix just once
-            if s == 0:
-                try:
-                    Finv_bulk_pdfs_all_z = np.load(
-                        os.path.join(
-                            data_dir, 
-                            "Finv_bulk_pdfs_all_z_{}.npy".format(
-                                "f" if args.freeze_parameters else "nf"
-                            )
-                        )
-                    )
-                except:
-                    Finv_bulk_pdfs_all_z = get_multi_z_bulk_pdf_fisher_forecast(args)
-
-                    np.save(
-                        os.path.join(
-                            data_dir, 
-                            "Finv_bulk_pdfs_all_z_{}.npy".format(
-                                "f" if args.freeze_parameters else "nf"
-                            )
-                        ),
-                        Finv_bulk_pdfs_all_z
-                    )
 
             # Multi-z inference concerning the bulk or bulk + tails
             if args.bulk_or_tails == "tails":
@@ -155,15 +100,18 @@ for exp_dict in exp_dicts:
                 linearised=args.linearised,
                 n_linear_sims=args.n_linear_sims,
                 compression=args.compression,
-                reduced_cumulants=args.reduced_cumulants,
                 redshifts=args.redshifts,
                 order_idx=args.order_idx,
                 pre_train=args.pre_train,
                 freeze_parameters=args.freeze_parameters
             )
 
+            # Load Bulk PDF Fisher matrix just once
+            if s == 0:
+                Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, args)
+
             # Load posterior for seed and experiment
-            posterior_save_dir = get_multi_z_posterior_dir(config, args)
+            posterior_save_dir = get_multi_z_posterior_dir(args)
             posterior_filename = os.path.join(
                 posterior_save_dir, 
                 "multi_z_posterior_{}{}.npz".format(
@@ -181,6 +129,10 @@ for exp_dict in exp_dicts:
             posterior = np.load(posterior_filename)
 
             widths = np.var(posterior["samples"], axis=0)
+
+            # NOTE: Scale PDF Fisher information by number of datavectors!
+            n_datavectors, _ = posterior["summary"].shape
+            Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z / n_datavectors 
 
             if scale_by_fisher:
                 widths = widths / np.diag(Finv_bulk_pdfs_all_z) - 1.
@@ -285,6 +237,16 @@ for exp_dict in exp_dicts:
             label=r"$F^{{-1}}[{}]$ ($k_n$[tails])".format(parameter_strings[i][1:-1])
         )
 
+        # # Set xlims for this marginalised plot only, for given parameter i 
+        # if i == 0:
+        #     ax.set_xlim(
+        #         0.0005 * vertical_lines[i], 1.05e-4
+        #     )
+        # if i == 4:
+        #     ax.set_xlim(
+        #         0.0005 * vertical_lines[i], 4.2e-6
+        #     )
+
         if scale_by_fisher:
             fisher_width_str = r"/F^{{-1}}_{{PDF[bulk]}}[{}] - 1".format(
                 parameter_strings[i][1:-1] # Trim '$' from parameter strings
@@ -313,12 +275,10 @@ for exp_dict in exp_dicts:
 
     parts = [
         "frozen" if config.freeze_parameters else "nonfrozen",
-        # "reduced_cumulants" if config.reduced_cumulants else "cumulants",
         # config.sbi_type,
         "linearised" if config.linearised else "nonlinearised",
         config.compression,
         "pretrain" if config.pre_train else "nopretrain",
-        # config.exp_name if include_exp and config.exp_name else None, # NOTE: This is ignored for multi_z!
         "".join(map(str, args.order_idx)),
         str(config.seed)
     ]
@@ -398,7 +358,6 @@ for exp_dict in exp_dicts:
             ax.axvline(
                 np.diag(Finvs["bulk"]["frozen"] if exp_dict["freeze_parameters"] else Finvs["bulk"]["nonfrozen"])[i], 
                 color="blue", 
-                color="blue", 
                 linestyle="--", 
                 linewidth=2, 
                 label=r"$F^{{-1}}[{}]$ ($k_n$[bulk])".format(parameter_strings[i][1:-1])
@@ -410,6 +369,16 @@ for exp_dict in exp_dicts:
                 linewidth=2, 
                 label=r"$F^{{-1}}[{}]$ ($k_n$[tails])".format(parameter_strings[i][1:-1])
             )
+
+            # Set xlims for this marginalised plot only, for given parameter i 
+            if _i == 0:
+                ax.set_xlim(
+                    vertical_lines[i] - 0.05 * (1.05e-4 - vertical_lines[i]), 1.05e-4
+                )
+            if _i == 1:
+                ax.set_xlim(
+                    vertical_lines[i] - 0.05 * (4.2e-6 - vertical_lines[i]), 4.2e-6
+                )
 
             if scale_by_fisher:
                 fisher_width_str = r"/F^{{-1}}_{{PDF[bulk]}}[{}] - 1".format(
@@ -439,12 +408,10 @@ for exp_dict in exp_dicts:
 
         parts = [
             "frozen" if config.freeze_parameters else "nonfrozen",
-            # "reduced_cumulants" if config.reduced_cumulants else "cumulants",
             # config.sbi_type,
             "linearised" if config.linearised else "nonlinearised",
             config.compression,
             "pretrain" if config.pre_train else "nopretrain",
-            # config.exp_name if include_exp and config.exp_name else None, # NOTE: This is ignored for multi_z!
             "".join(map(str, args.order_idx)),
             str(config.seed),
             "marginalised"
@@ -507,30 +474,6 @@ for exp_dict in exp_dicts:
                 args.seed = global_seed if global_seed is not None else s # Fixed ensemble, diffferent datavectors
                 args.bulk_or_tails = bulk_or_tails
 
-                # Load Bulk PDF Fisher matrix just once
-                if s == 0:
-                    try:
-                        Finv_bulk_pdfs_all_z = np.load(
-                            os.path.join(
-                                data_dir, 
-                                "Finv_bulk_pdfs_all_z_{}.npy".format(
-                                    "f" if args.freeze_parameters else "nf"
-                                )
-                            )
-                        )
-                    except:
-                        Finv_bulk_pdfs_all_z = get_multi_z_bulk_pdf_fisher_forecast(args)
-
-                        np.save(
-                            os.path.join(
-                                data_dir, 
-                                "Finv_bulk_pdfs_all_z_{}.npy".format(
-                                    "f" if args.freeze_parameters else "nf"
-                                )
-                            ),
-                            Finv_bulk_pdfs_all_z
-                        )
-
                 # Multi-z inference concerning the bulk or bulk + tails
                 if args.bulk_or_tails == "tails":
                     ensembles_config = ensembles_cumulants_config
@@ -544,15 +487,18 @@ for exp_dict in exp_dicts:
                     linearised=args.linearised,
                     n_linear_sims=args.n_linear_sims,
                     compression=args.compression,
-                    reduced_cumulants=args.reduced_cumulants,
                     redshifts=args.redshifts,
                     order_idx=args.order_idx,
                     pre_train=args.pre_train,
                     freeze_parameters=args.freeze_parameters
                 )
 
+                # Load Bulk PDF Fisher matrix just once NOTE: replace this with PDFs dataset
+                if s == 0:
+                    Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, args)
+
                 # Load posterior for seed and experiment
-                posterior_save_dir = get_multi_z_posterior_dir(config, args)
+                posterior_save_dir = get_multi_z_posterior_dir(args)
                 posterior_filename = os.path.join(
                     posterior_save_dir, 
                     "multi_z_posterior_{}{}.npz".format(
@@ -571,6 +517,10 @@ for exp_dict in exp_dicts:
                 posterior = np.load(posterior_filename)
 
                 widths = np.var(posterior["samples"], axis=0)
+
+                # NOTE: Scale PDF Fisher information by number of datavectors!
+                n_datavectors, _ = posterior["summary"].shape
+                Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z / n_datavectors 
 
                 if scale_by_fisher:
                     widths = widths / np.diag(Finv_bulk_pdfs_all_z) - 1.
@@ -626,7 +576,7 @@ for exp_dict in exp_dicts:
                 color=plotting_dict["bulk"]["color"], 
                 edgecolor="none", 
                 alpha=0.3, 
-                label="SBI[bulk]" if _global_seed == 0 else None,
+                label="SBI[bulk] (linearised)" if _global_seed == 0 else None,
                 density=True
             )
             _ = ax.hist(
@@ -644,7 +594,7 @@ for exp_dict in exp_dicts:
                 color=plotting_dict["tails"]["color"], 
                 edgecolor="none", 
                 alpha=0.3, 
-                label="SBI[tails]" if _global_seed == 0 else None, 
+                label="SBI[tails] (linearised)" if _global_seed == 0 else None, 
                 density=True
             )
             _ = ax.hist(
@@ -679,6 +629,16 @@ for exp_dict in exp_dicts:
             label=r"$F^{{-1}}[{}]$ ($k_n$[tails])".format(parameter_strings[i][1:-1])
         )
 
+        # Set xlims for this marginalised plot only, for given parameter i 
+        # if i == 0:
+        #     ax.set_xlim(
+        #         0.0005 * vertical_lines[i], 1.05e-4
+        #     )
+        # if i == 4:
+        #     ax.set_xlim(
+        #         0.0005 * vertical_lines[i], 4.2e-6
+        #     )
+
         if scale_by_fisher:
             fisher_width_str = r"/F^{{-1}}_{{PDF[bulk]}}[{}] - 1".format(
                 parameter_strings[i][1:-1] # Trim '$' from parameter strings
@@ -707,12 +667,10 @@ for exp_dict in exp_dicts:
 
     parts = [
         "frozen" if config.freeze_parameters else "nonfrozen",
-        # "reduced_cumulants" if config.reduced_cumulants else "cumulants",
         # config.sbi_type,
         "linearised" if config.linearised else "nonlinearised",
         config.compression,
         "pretrain" if config.pre_train else "nopretrain",
-        # config.exp_name if include_exp and config.exp_name else None, # NOTE: This is ignored for multi_z!
         "".join(map(str, args.order_idx)),
         # str(config.seed)
     ]
@@ -754,7 +712,7 @@ for exp_dict in exp_dicts:
                     color=plotting_dict["bulk"]["color"], 
                     edgecolor="none", 
                     alpha=0.3, 
-                    label="SBI[bulk]" if _global_seed == 0 else None,
+                    label="SBI[bulk] (linearised)" if _global_seed == 0 else None,
                     density=True
                 )
                 _ = ax.hist(
@@ -772,7 +730,7 @@ for exp_dict in exp_dicts:
                     color=plotting_dict["tails"]["color"], 
                     edgecolor="none", 
                     alpha=0.3, 
-                    label="SBI[tails]" if _global_seed == 0 else None,
+                    label="SBI[tails] (linearised)" if _global_seed == 0 else None,
                     density=True
                 )
                 _ = ax.hist(
@@ -807,6 +765,16 @@ for exp_dict in exp_dicts:
                 label=r"$F^{{-1}}[{}]$ ($k_n$[tails])".format(parameter_strings[i][1:-1])
             )
 
+            # Set xlims for this marginalised plot only, for given parameter i 
+            if _i == 0:
+                ax.set_xlim(
+                    vertical_lines[i] - 0.05 * (1.05e-4 - vertical_lines[i]), 1.05e-4
+                )
+            if _i == 1:
+                ax.set_xlim(
+                    vertical_lines[i] - 0.05 * (4.2e-6 - vertical_lines[i]), 4.2e-6
+                )
+
             if scale_by_fisher:
                 fisher_width_str = r"/F^{{-1}}_{{PDF[bulk]}}[{}] - 1".format(
                     parameter_strings[i][1:-1] # Trim '$' from parameter strings
@@ -835,12 +803,10 @@ for exp_dict in exp_dicts:
 
         parts = [
             "frozen" if config.freeze_parameters else "nonfrozen",
-            # "reduced_cumulants" if config.reduced_cumulants else "cumulants",
             # config.sbi_type,
             "linearised" if config.linearised else "nonlinearised",
             config.compression,
             "pretrain" if config.pre_train else "nopretrain",
-            # config.exp_name if include_exp and config.exp_name else None, # NOTE: This is ignored for multi_z!
             "".join(map(str, args.order_idx)),
             # str(config.seed),
             "marginalised"

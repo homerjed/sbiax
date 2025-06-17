@@ -1,7 +1,6 @@
 import os
 from dataclasses import dataclass, replace, asdict
-from functools import partial
-from typing import Tuple, Callable, Optional
+from typing import Callable, Optional
 
 import jax
 import jax.numpy as jnp
@@ -13,7 +12,6 @@ from ml_collections import ConfigDict
 
 import numpy as np 
 import matplotlib.pyplot as plt
-from scipy.stats import qmc
 from chainconsumer import Chain, ChainConsumer, Truth
 import tensorflow_probability.substrates.jax.distributions as tfd
 from tqdm.auto import trange
@@ -28,9 +26,6 @@ from data.common import (
     get_prior,
     sample_prior,
     get_compression_fn,
-    get_nn_compressor,
-    get_linear_compressor,
-    linearised_model,
     get_linearised_data,
     get_datavector,
     freeze_out_parameters_dataset, 
@@ -39,7 +34,6 @@ from data.common import (
 )
 from sbiax.utils import make_df, marker
 from configs import bulk_cumulants_config
-from compression.nn import fit_nn, fit_nn_lbfgs
 
 typecheck = jaxtyped(typechecker=typechecker)
 
@@ -69,21 +63,21 @@ def get_raw_data(
         Load raw files from Quijote for cumulants and their derivatives
     """
 
-    fiducials = np.load(os.path.join(data_dir, "ALL_FIDUCIAL_PDFS.npy"))
+    fiducials = np.load(os.path.join(data_dir, "raw/ALL_FIDUCIAL_PDFS.npy"))
 
-    latins = np.load(os.path.join(data_dir, "ALL_LATIN_PDFS.npy"))
+    latins = np.load(os.path.join(data_dir, "raw/ALL_LATIN_PDFS.npy"))
 
-    latin_parameters = np.loadtxt(os.path.join(data_dir, "latin_hypercube_params.txt"))
+    latin_parameters = np.loadtxt(os.path.join(data_dir, "raw/latin_hypercube_params.txt"))
 
     # Load normalised derivatives (n, p, z, R, pm, d) = (500, 5, 5, 7, 2, 99)
     derivatives = np.load(
-        os.path.join(data_dir, f"pdfs_derivatives_plus_minus.npy")
+        os.path.join(data_dir, f"raw/pdfs_derivatives_plus_minus.npy")
     )
     
     if verbose:
         print("Derivatives:", derivatives.shape)
 
-    deltas = np.load(os.path.join(data_dir, "deltas.npy"))
+    deltas = np.load(os.path.join(data_dir, "raw/deltas.npy"))
 
     DELTA_BIN_EDGES = np.geomspace(1e-2, 1e2, num=100) # 1911.11158 Section 4.1, NOTE: This is in rho
     D_DELTAS = DELTA_BIN_EDGES[1:] - DELTA_BIN_EDGES[:-1] 
@@ -91,7 +85,7 @@ def get_raw_data(
     return fiducials, latins, latin_parameters, derivatives, deltas, D_DELTAS
 
 
-def get_bulk_cumulants_data(
+def get_calculated_cumulants_data(
     config: ConfigDict, 
     *, 
     pdfs: bool = False, # Use PDFs or cumulants for the bulk
@@ -99,7 +93,7 @@ def get_bulk_cumulants_data(
     use_mean: bool = False,
     use_bulk_norms: bool = True, # Stack means of bulk of the PDF at each scale with the other cumulants
     stack_bulk_means: bool = True,
-    check_cumulants_against_quijote: bool = False,
+    full_shape: bool = False,
     results_dir: Optional[str] = None
 ) -> Dataset:
     """
@@ -137,10 +131,10 @@ def get_bulk_cumulants_data(
     stack_mean                   = stack_bulk_means        # Stack bulk mean do bulk datavector For full shape <delta> is very close to zero but <rho> approximately one
     use_normalisations           = use_bulk_norms          # Stack M_0 normalisation of pdf into datavector ahead of mean M_1 
     normalise                    = False #not use_normalisations  # Divide moments by M_0, don't do this if concatenating M_0 (NOTE: in quijote vs calculation comparison this is ignored in the bulk)
-    central_moments              = False                   # Calculate central moments or not (NOTE: 4th cumulant not the same as 4th central moment, but Bernardeau formulae use non-central moments)
+    central_moments              = True                    # Calculate central moments or not (NOTE: 4th cumulant not the same as 4th central moment, but Bernardeau formulae use non-central moments)
 
     # Value of normalisation of bulk PDF (NOTE: turn this off for the comparison? Divide ALL cumulants by this? => it's off for full-shape)
-    fiducial_based_normalisation = (config.p_value_max - config.p_value_min) if not check_cumulants_against_quijote else 1.0 
+    fiducial_based_normalisation = (config.p_value_max - config.p_value_min) 
 
     n_scales           = len(config.scales)
     n_redshifts        = 1
@@ -152,6 +146,11 @@ def get_bulk_cumulants_data(
     R_idx              = [all_R_values.index(R) for R in config.scales]
     z_idx              = all_redshifts.index(config.redshift)
     n_cumulants        = 3 # [var, skew, kurt]
+
+    if full_shape:
+        bulk_or_tails = "tails"
+    else:
+        bulk_or_tails = "bulk"
 
     # Name for dataset to load / save once created
     dataset_identifier_str = "".join(
@@ -165,15 +164,20 @@ def get_bulk_cumulants_data(
             "_central" if central_moments else "",
             "_with_norms" if use_normalisations else "",
             "_with_means_stacked" if stack_mean else "",
-            "_full_shape" if check_cumulants_against_quijote else "",
+            "_full_shape" if full_shape else "",
             "_linearised" if config.linearised else "_nonlinear"
         ]
+    )
+
+    # Try loading dataset instead of deriving it again and again NOTE: careful not to load PDFs when yhou need cumulants etc
+    dataset_filename = os.path.join(
+        data_dir, "datasets/{}_cumulants_dataset{}.npz".format(bulk_or_tails, dataset_identifier_str)
     )
 
     tqdm_desc_str = config.dataset_name
     if pdfs:
         tqdm_desc_str += " pdfs"
-    if check_cumulants_against_quijote:
+    if full_shape:
         tqdm_desc_str += " full-shape"
 
     def generate_dataset() -> list[np.ndarray]:
@@ -198,6 +202,7 @@ def get_bulk_cumulants_data(
             ln_delta_min = np.log(0.01) # Isn't this rho?
             ln_delta_max = np.log(100.)
             dln_delta = (ln_delta_max - ln_delta_min) / n_bins_pdf 
+
             bin_edges = np.zeros(n_bins_pdf + 1)
             bin_widths = np.zeros(n_bins_pdf)
             mean_bins = np.zeros(n_bins_pdf)
@@ -220,8 +225,8 @@ def get_bulk_cumulants_data(
 
             # Calculate mean of fiducial PDFS across scales R for cutting with CDF
             fiducial_pdfs_stacked_mean = np.zeros((n_bins_pdf * n_scales,))
-            for R in R_idx:
-                mean_z_R = jnp.mean(fiducials[z_idx, :, R, :], axis=0)
+            for R, R_i in enumerate(R_idx):
+                mean_z_R = jnp.mean(fiducials[z_idx, :, R_i, :], axis=0)
 
                 fiducial_pdfs_stacked_mean[R * n_bins_pdf : (R + 1) * n_bins_pdf] = mean_z_R
 
@@ -240,11 +245,19 @@ def get_bulk_cumulants_data(
             )
 
             # Cut indices for each scale R
-            if check_cumulants_against_quijote:
+            if full_shape:
                 # Calculate cumulants for full shape using all PDF bins
+                # cuts = [
+                #     np.arange(n_bins_pdf) for R, _ in enumerate(config.scales) 
+                # ] 
+                print("NOTE: using p min/max for cutting full-shape")
                 cuts = [
-                    np.arange(n_bins_pdf) for R, _ in enumerate(config.scales) 
-                ] 
+                    np.where(
+                        (cdf[R * n_bins_pdf : (R + 1) * n_bins_pdf] >= p_value_min) & \
+                        (cdf[R * n_bins_pdf : (R + 1) * n_bins_pdf] <= p_value_max)
+                    )[0] 
+                    for R, _ in enumerate(config.scales)
+                ]
             else:
                 cuts = [
                     np.where(
@@ -438,11 +451,12 @@ def get_bulk_cumulants_data(
         for n in trange(n_fiducial_pdfs, desc="Fiducials [{}]".format(tqdm_desc_str)):
             
             # Using R-th chosen scale and its cut indices into mean fiducial PDF
-            for R, cut in enumerate(cuts):
+            # for R, cut in enumerate(cuts):
+            for R, (cut, R_i) in enumerate(zip(cuts, R_idx)):
 
                 _cut_dim = sum([_cut.size for _cut in cuts[:R]]) # Cut dimension up to R-th scale
 
-                pdf = fiducials[z_idx, n, R, cut] # Cut PDF p(d_i)
+                pdf = fiducials[z_idx, n, R_i, cut] # Cut PDF p(d_i) NOTE: ** this should be R_i from R_idx?!
 
                 fiducial_pdfs_z_R_cut[n, _cut_dim : _cut_dim + cut.size] = pdf
 
@@ -464,21 +478,28 @@ def get_bulk_cumulants_data(
 
                     _delta_ = np.asarray(np.sum(pdf * D_deltas[cut] * deltas[cut]))
 
-                    if check_cumulants_against_quijote:
+                    # if full_shape:
 
-                        cumulant = moments_to_cumulants(
-                            fiducial_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants], 
-                            _delta_=_delta_ if use_mean else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(()) 
-                        )
+                    #     cumulant = moments_to_cumulants(
+                    #         fiducial_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants], 
+                    #         _delta_=_delta_ if use_mean else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(()) 
+                    #     )
 
-                    else:
+                    # else:
 
-                        cumulant = _pdf_to_cumulants_bulk(
-                            pdf, 
-                            deltas=deltas[cut], 
-                            ddeltas=D_deltas[cut],
-                            cut=cut
-                        )
+                    #     cumulant = _pdf_to_cumulants_bulk(
+                    #         pdf, 
+                    #         deltas=deltas[cut], 
+                    #         ddeltas=D_deltas[cut],
+                    #         cut=cut
+                    #     )
+
+                    cumulant = _pdf_to_cumulants_bulk(
+                        pdf, 
+                        deltas=deltas[cut], 
+                        ddeltas=D_deltas[cut],
+                        cut=cut
+                    )
 
                     fiducial_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants] = cumulant               
 
@@ -498,11 +519,12 @@ def get_bulk_cumulants_data(
         latin_normalisations = np.zeros((n_latin_pdfs, n_scales))
         for n in trange(n_latin_pdfs, desc="Latins [{}]".format(tqdm_desc_str)):
 
-            for R, cut in enumerate(cuts):
+            # for R, cut in enumerate(cuts):
+            for R, (cut, R_i) in enumerate(zip(cuts, R_idx)):
 
                 _cut_dim = sum([_cut.size for _cut in cuts[:R]]) # Cut dimension up to R-th scale
 
-                pdf = latins[z_idx, n, R, cut]
+                pdf = latins[z_idx, n, R_i, cut] # NOTE: this should be R_i from R_idx??
 
                 latin_pdfs_z_R_cut[n, _cut_dim : _cut_dim + cut.size] = pdf
 
@@ -524,18 +546,24 @@ def get_bulk_cumulants_data(
 
                     _delta_ = np.asarray(np.sum(pdf * D_deltas[cut] * deltas[cut]))
 
-                    if check_cumulants_against_quijote:
-                        cumulant = moments_to_cumulants(
-                            latin_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants], 
-                            _delta_=_delta_ if use_mean else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(())
-                        )
-                    else:
-                        cumulant = _pdf_to_cumulants_bulk(
-                            pdf, 
-                            deltas=deltas[cut], 
-                            ddeltas=D_deltas[cut],
-                            cut=cut
-                        )
+                    # if full_shape:
+                    #     cumulant = moments_to_cumulants(
+                    #         latin_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants], 
+                    #         _delta_=_delta_ if use_mean else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(())
+                    #     )
+                    # else:
+                    #     cumulant = _pdf_to_cumulants_bulk(
+                    #         pdf, 
+                    #         deltas=deltas[cut], 
+                    #         ddeltas=D_deltas[cut],
+                    #         cut=cut
+                    #     )
+                    cumulant = _pdf_to_cumulants_bulk(
+                        pdf, 
+                        deltas=deltas[cut], 
+                        ddeltas=D_deltas[cut],
+                        cut=cut
+                    )
 
                     latin_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants] = cumulant
 
@@ -556,12 +584,13 @@ def get_bulk_cumulants_data(
         derivative_normalisations = np.zeros((n_derivatives, n_p, 2, n_scales)) 
         for n in trange(n_derivatives, desc="Derivatives [{}]".format(tqdm_desc_str)):
 
-            for R, cut in enumerate(cuts):
+            # for R, cut in enumerate(cuts):
+            for R, (cut, R_i) in enumerate(zip(cuts, R_idx)):
 
                 _cut_dim = sum([_cut.size for _cut in cuts[:R]]) # Cut dimension up to R-th scale
                 
                 # Including pm axis
-                pdf = derivatives[n, z_idx, :, R, :, cut] # Shape (p, cut_dim), raw shape (n_derivatives, n_redshifts, n_params, n_scales, 2, n_bins_pdf)
+                pdf = derivatives[n, z_idx, :, R_i, :, cut] # Shape (p, cut_dim), raw shape (n_derivatives, n_redshifts, n_params, n_scales, 2, n_bins_pdf)
 
                 pdf = np.transpose(pdf, (1, 2, 0)) # Indexing above transposes... shape~(p, p_or_m, n_d)
 
@@ -595,22 +624,24 @@ def get_bulk_cumulants_data(
                             _delta_ = np.asarray(np.sum(pdf[p, p_or_m] * D_deltas[cut] * deltas[cut]))
 
                             # Converting all moments to cumulants at the same time
-                            if check_cumulants_against_quijote:
-                                cumulant = moments_to_cumulants(
-                                    derivative_moments_z_R[n, p, p_or_m, R * n_cumulants : (R + 1) * n_cumulants], 
-                                    _delta_=_delta_ if use_mean else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(())
-                                )
-                            else:
-                                # Linearly interpolate bins?
-                                # delta=delta_PDF_data[j*N_bin_PDF:(j+1)*N_bin_PDF,i]
-                                # ddelta = np.interp(delta, (delta[1:] + delta[:-1]) / 2, delta[1:] - delta[:-1])
-
-                                cumulant = _pdf_to_cumulants_bulk(
-                                    pdf[p, p_or_m], 
-                                    deltas=deltas[cut], 
-                                    ddeltas=D_deltas[cut], # This is the cut from R-th scale
-                                    cut=cut
-                                )
+                            # if full_shape:
+                            #     cumulant = moments_to_cumulants(
+                            #         derivative_moments_z_R[n, p, p_or_m, R * n_cumulants : (R + 1) * n_cumulants], 
+                            #         _delta_=_delta_ if use_mean else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(())
+                            #     )
+                            # else:
+                            #     cumulant = _pdf_to_cumulants_bulk(
+                            #         pdf[p, p_or_m], 
+                            #         deltas=deltas[cut], 
+                            #         ddeltas=D_deltas[cut], # This is the cut from R-th scale
+                            #         cut=cut
+                            #     )
+                            cumulant = _pdf_to_cumulants_bulk(
+                                pdf[p, p_or_m], 
+                                deltas=deltas[cut], 
+                                ddeltas=D_deltas[cut], # This is the cut from R-th scale
+                                cut=cut
+                            )
 
                             derivative_moments_z_R[n, p, p_or_m, R * n_cumulants : (R + 1) * n_cumulants] = cumulant
 
@@ -668,7 +699,7 @@ def get_bulk_cumulants_data(
 
         # Cumulants[bulk]
         dataset = Dataset(
-            name="bulk",
+            name=bulk_or_tails,
             alpha=jnp.asarray(alpha),
             lower=jnp.asarray(lower),
             upper=jnp.asarray(upper),
@@ -703,7 +734,7 @@ def get_bulk_cumulants_data(
 
             # PDF[bulk]
             pdf_dataset = Dataset(
-                name="bulk_pdf",
+                name="{}_pdf".format(bulk_or_tails),
                 alpha=jnp.asarray(alpha),
                 lower=jnp.asarray(lower),
                 upper=jnp.asarray(upper),
@@ -729,26 +760,18 @@ def get_bulk_cumulants_data(
             return_dataset = replace(return_dataset, data=D, parameters=Y)
 
         # Save return dataset to ensure loading (not creating) next time around
-        np.savez(
-            os.path.join(data_dir, "bulk_cumulants_dataset{}.npz".format(dataset_identifier_str)), 
-            **asdict(return_dataset)
-        )
+        np.savez(dataset_filename, **asdict(return_dataset))
 
         return return_dataset
-
-    # Try loading dataset instead of deriving it again and again NOTE: careful not to load PDFs when yhou need cumulants etc
-    dataset_filename = os.path.join(
-        data_dir, "bulk_cumulants_dataset{}.npz".format(dataset_identifier_str)
-    )
 
     if not FORCE_RECOMPUTE_DATASET:
         try:
             print("Loading dataset:\n\t", dataset_filename)
 
-            dataset_dict = np.load(dataset_filename, allow_pickle=True) # dataset_dict = jax.tree.map(lambda x: jnp.asarray(x), dataset_dict, is_leaf=lambda x: isinstance(x, np.ndarray))
+            dataset_dict = np.load(dataset_filename, allow_pickle=True) 
 
             return_dataset = Dataset(
-                name="bulk_pdf" if pdfs else "bulk",
+                name="bulk_pdf" if pdfs else ("bulk" if not full_shape else "tails"),
                 alpha=jnp.asarray(dataset_dict["alpha"]),
                 lower=jnp.asarray(dataset_dict["lower"]),
                 upper=jnp.asarray(dataset_dict["upper"]),
@@ -803,18 +826,102 @@ class BulkCumulantsDataset:
         *, 
         pdfs: bool = False,
         verbose: bool = False, 
-        check_cumulants_against_quijote: bool = False,
         results_dir: Optional[str] = None
     ):
         self.config = config
 
-        self.data = get_bulk_cumulants_data(
+        self.data = get_calculated_cumulants_data(
             config, 
             pdfs=pdfs,
             use_mean=config.use_bulk_means,
             use_bulk_norms=config.stack_bulk_norms,
             stack_bulk_means=config.stack_bulk_means,
-            check_cumulants_against_quijote=check_cumulants_against_quijote, 
+            full_shape=False,
+            verbose=verbose, 
+            results_dir=results_dir
+        )
+
+        self.prior = get_prior(config, self.data) # Possibly not equal to Quijote prior
+
+        key = jr.key(config.seed)
+        self.compression_fn = get_compression_fn(
+            key, self.config, self.data, results_dir=results_dir
+        )
+
+        self.results_dir = results_dir
+
+        print("PDFS DATASET")
+        print(">DATA:\n\t", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (self.data.fiducial_data, self.data.data)])
+        print(">DATA / PARAMETERS:\n\t", [_.shape for _ in (self.data.data, self.data.parameters)])
+
+    def get_parameter_strings(self):
+        return get_parameter_strings()
+
+    def sample_prior(self, key: PRNGKeyArray, n: int, *, hypercube: bool = True) -> Float[Array, "n p"]:
+        # Sample Quijote prior which may not be the same as inference prior
+        P = sample_prior(
+            key, 
+            n, 
+            alpha=self.data.alpha, 
+            lower=self.data.lower, 
+            upper=self.data.upper, 
+            hypercube=hypercube
+        )
+        return P
+
+    def get_compression_fn(self):
+        return self.compression_fn
+
+    def get_datavector(self, key: PRNGKeyArray, n: int = 1) -> Float[Array, "... d"]:
+        d = get_datavector(key, config=self.config, dataset=self.data, n=n)
+        return d
+
+    def get_linearised_datavector(self, key: PRNGKeyArray, n: int = 1) -> Float[Array, "... d"]:
+        # Sample datavector from linearised Gaussian model
+        mu = jnp.mean(self.data.fiducial_data, axis=0) 
+        d = jr.multivariate_normal(key, mu, self.data.C, (n,))
+        if not (n > 1):
+            d = jnp.squeeze(d, axis=0) 
+        return d
+
+    def get_linearised_data(self):
+        # Get linearised data (e.g. pre-training), where config only sets how many simulations
+        return get_linearised_data(self.config, self.data)
+
+    def get_preprocess_fn(self):
+        # Get (X, P) preprocessor?
+        ...
+
+
+@dataclass
+class TailsCumulantsDataset:
+    """ 
+        Dataset for Simulation-Based Inference with cumulants of the bulk of the matter PDF 
+    """
+
+    config: ConfigDict
+    data: Dataset
+    prior: tfd.Distribution
+    compression_fn: Callable
+    results_dir: str
+
+    def __init__(
+        self, 
+        config: ConfigDict, 
+        *, 
+        pdfs: bool = False,
+        verbose: bool = False, 
+        results_dir: Optional[str] = None
+    ):
+        self.config = config
+
+        self.data = get_calculated_cumulants_data(
+            config, 
+            pdfs=pdfs,
+            use_mean=config.use_bulk_means,
+            use_bulk_norms=config.stack_bulk_norms,
+            stack_bulk_means=config.stack_bulk_means,
+            full_shape=True, # Implies full-shape calculation
             verbose=verbose, 
             results_dir=results_dir
         )
@@ -881,14 +988,12 @@ class BulkPDFsDataset(BulkCumulantsDataset):
         config: ConfigDict,
         *,
         verbose: bool = False,
-        check_cumulants_against_quijote: bool = False,
         results_dir: Optional[str] = None
     ):
         super().__init__(
             config,
             pdfs=True,
             verbose=verbose,
-            check_cumulants_against_quijote=check_cumulants_against_quijote,
             results_dir=results_dir
         )
 
@@ -899,11 +1004,11 @@ def get_bulk_dataset(args, pdfs=False):
     config = bulk_cumulants_config(
         seed=args.seed, 
         redshift=args.redshift, 
-        reduced_cumulants=args.reduced_cumulants,
         sbi_type=args.sbi_type,
         linearised=args.linearised, 
         compression=args.compression,
         order_idx=args.order_idx,
+        scales=args.scales,
         n_linear_sims=args.n_linear_sims,
         pre_train=args.pre_train,
         freeze_parameters=args.freeze_parameters
@@ -928,11 +1033,11 @@ def get_multi_z_bulk_pdf_fisher_forecast(args):
         config = bulk_cumulants_config(
             seed=args.seed, 
             redshift=redshift, # Force redshift!
-            reduced_cumulants=args.reduced_cumulants,
             sbi_type=args.sbi_type,
             linearised=args.linearised, 
             compression=args.compression,
             order_idx=args.order_idx,
+            scales=args.scales,
             n_linear_sims=args.n_linear_sims,
             pre_train=args.pre_train,
             freeze_parameters=args.freeze_parameters
@@ -948,6 +1053,35 @@ def get_multi_z_bulk_pdf_fisher_forecast(args):
     Finv = np.linalg.inv(F)
 
     return Finv
+
+
+def load_multi_z_bulk_pdf_fisher_forecast(data_dir, args):
+    """
+        Load Fisher inverse matrix of PDF dataset consistently with args
+    """
+    identifier_str = "".join(
+        [
+            "_R" + "".join(map(str, args.scales)),
+            "_f" if args.freeze_parameters else "_nf",
+            "_pdfs"
+        ]
+    )
+
+    Finv_file_path = os.path.join(
+        data_dir, "Finv_bulk_pdfs_all_z_{}.npy".format(identifier_str)
+    )
+
+    if not FORCE_RECOMPUTE_DATASET:
+        try:
+            Finv_bulk_pdfs_all_z = np.load(Finv_file_path)
+        except:
+            Finv_bulk_pdfs_all_z = get_multi_z_bulk_pdf_fisher_forecast(args)
+
+            np.save(Finv_file_path, Finv_bulk_pdfs_all_z)
+        else:
+            Finv_bulk_pdfs_all_z = get_multi_z_bulk_pdf_fisher_forecast(args)
+
+    return Finv_bulk_pdfs_all_z
 
 
 if __name__ == "__main__":
@@ -996,210 +1130,3 @@ if __name__ == "__main__":
     fig = c.plotter.plot()
     plt.savefig("pdfs_test.pdf")
     plt.close()
-
-
-
-
-
-
-
-
-    # if verbose:
-
-    #     # fig, axs = plt.subplots(1, dataset.alpha.size, figsize=(2. + 2. * dataset.alpha.size, 2.5))
-    #     # for p, ax in enumerate(axs):
-    #     #     ax.scatter(latin_parameters[:, p], X_moments[:, p], s=0.1)
-    #     #     ax.scatter(latin_parameters[:, p], X_pdfs[:, p], s=0.1)
-    #     #     ax.axline((0, 0), slope=1., color="k", linestyle="--")
-    #     #     ax.set_xlim(dataset.lower[p], dataset.upper[p])
-    #     #     ax.set_ylim(dataset.lower[p], dataset.upper[p])
-    #     #     ax.set_xlabel(dataset.parameter_strings[p])
-    #     #     ax.set_ylabel(dataset.parameter_strings[p] + "'")
-    #     # plt.savefig("/project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/scratch/summaries_pdf_moments.png")
-    #     # plt.close()
-
-    #     if 0:
-    #         c = ChainConsumer()
-    #         c.add_chain(
-    #             Chain(
-    #                 samples=make_df(X_moments, parameter_strings=parameter_strings), 
-    #                 name="X[moments]", 
-    #                 color="b", 
-    #                 plot_contour=False, 
-    #                 plot_cloud=True
-    #             )
-    #         )
-    #         c.add_chain(
-    #             Chain(
-    #                 samples=make_df(X_pdfs, parameter_strings=parameter_strings), 
-    #                 name="X[pdfs]", 
-    #                 color="g", 
-    #                 plot_contour=False, 
-    #                 plot_cloud=True
-    #             )
-    #         )
-    #         c.add_chain(
-    #             Chain.from_covariance(
-    #                 alpha,
-    #                 Finv_pdf,
-    #                 columns=parameter_strings,
-    #                 name=r"$F_{\Sigma^{-1}}$ (PDFs)",
-    #                 color="k",
-    #                 linestyle=":",
-    #                 shade_alpha=0.
-    #             )
-    #         )
-    #         c.add_chain(
-    #             Chain.from_covariance(
-    #                 alpha,
-    #                 Finv_moments,
-    #                 columns=parameter_strings,
-    #                 name=r"$F_{\Sigma^{-1}}$ (moments)",
-    #                 color="r",
-    #                 linestyle=":",
-    #                 shade_alpha=0.
-    #             )
-    #         )
-    #         # c.add_chain(
-    #         #     Chain(
-    #         #         samples=make_df(dataset.parameters, parameter_strings=dataset.parameter_strings), 
-    #         #         plot_contour=False, 
-    #         #         plot_cloud=True, 
-    #         #         name="P", 
-    #         #         color="r"
-    #         #     )
-    #         # )
-    #         c.add_marker(
-    #             location=marker(alpha, parameter_strings=parameter_strings),
-    #             name=r"$\alpha$", 
-    #             color="#7600bc"
-    #         )
-    #         fig = c.plotter.plot()
-    #         # fig.suptitle(
-    #         #     r"$k_n/k_2^{n-1}$ SBI & $F_{{\Sigma}}^{{-1}}$" + "\n" +
-    #         #     "z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
-    #         #             0., 
-    #         #             len(X), 
-    #         #             "[{}]".format(", ".join(map(str, R_values)))
-    #         #         ),
-    #         #     multialignment='center'
-    #         # )
-    #         plt.savefig(
-    #             os.path.join(
-    #                 results_dir if results_dir is not None else "fisher_forecasts/", 
-    #                 "bulk_fisher_forecast_{}_z={}_R={}_m={}.png".format(
-    #                     config.linearised, 
-    #                     config.redshift, 
-    #                     "".join(map(str, config.order_idx)),
-    #                     "".join(map(str, config.scales))
-    #                 )
-    #             ), 
-    #         )
-    #         plt.close()
-
-
-# def get_bulk_cumulants_data(
-#     config: ConfigDict, 
-#     *, 
-#     pdfs: bool = False, # Use PDFs or cumulants for the bulk
-#     verbose: bool = False, 
-#     use_mean: bool = False,
-#     use_bulk_norms: bool = True, # Stack means of bulk of the PDF at each scale with the other cumulants
-#     stack_bulk_means: bool = True,
-#     check_cumulants_against_quijote: bool = False,
-#     results_dir: Optional[str] = None
-# ) -> Dataset:
-#     """
-#         Get dataset for SBI experiments with the cumulants.
-#         - Cut the PDFs according to a p_min, p_max cut into the CDF which 
-#           indexes the bins of the PDF.
-#         - Return PDFs of cumulants of the bulk
-#     """
-
-#     print("Using bulk means..." if use_mean else "Not using bulk means...")
-
-#     data_dir, *_ = get_save_and_load_dirs()
-
-#     (
-#         all_R_values,
-#         all_redshifts,
-#         resolution,
-#         alpha,
-#         lower,
-#         upper,
-#         parameter_strings,
-#         redshift_strings,
-#         parameter_derivative_names,
-#         dparams,
-#         deltas,
-#         delta_bin_edges,
-#         D_deltas 
-#     ) = get_quijote_parameters()
-
-#     p_value_min        = config.p_value_min # Independent of choosing rho/delta for random variable of PDF
-#     p_value_max        = config.p_value_max 
-
-#     cumulants          = True             # Use cumulants over moments (NOTE: check not calculating reduced-cumulants, Quijote uses cumulants)
-#     use_mean           = use_mean         # Concatenate mean of bulk to datavector
-#     stack_mean         = stack_bulk_means # For full shape <delta> is very close to zero but <rho> approximately one
-#     use_normalisations = use_bulk_norms   # Stack M_0 normalisation of pdf into datavector ahead of mean M_1 
-#     normalise          = False            # Divide moments by M_0
-
-#     n_scales           = len(config.scales)
-#     n_redshifts        = 1
-#     n_bins_pdf         = 99
-#     n_fiducial_pdfs    = 15_000
-#     n_latin_pdfs       = 2000
-#     n_derivatives      = 500
-#     n_p                = alpha.size 
-#     R_idx              = [all_R_values.index(R) for R in config.scales]
-#     z_idx              = all_redshifts.index(config.redshift)
-#     n_cumulants        = 3 # [var, skew, kurt]
-
-#     dataset_identifier_str = "".join(
-#         [
-#             "_R" + "".join(map(str, config.scales)),
-#             "_m" + "".join(map(str, config.order_idx)),
-#             "_z" + str(config.redshift),
-#             "_f" if config.freeze_parameters else "_nf",
-#             "_pdfs" if pdfs else "", 
-#             "_with_means" if use_mean else "",
-#             "_with_norms" if use_normalisations else "",
-#             "_with_means_stacked" if stack_mean else ""
-#         ]
-#     )
-
-#     def generate_dataset():
-#         ...
-#         return return_dataset
-
-#     # Try loading dataset instead of deriving it again and again NOTE: careful not to load PDFs when yhou need cumulants etc
-#     if not FORCE_RECOMPUTE_DATASET:
-#         try:
-#             dataset_filename = os.path.join(
-#                 data_dir, "bulk_cumulants_dataset_{}.npz".format(dataset_identifier_str)
-#             )
-#             dataset_dict = np.load(dataset_filename, allow_pickle=True) # dataset_dict = jax.tree.map(lambda x: jnp.asarray(x), dataset_dict, is_leaf=lambda x: isinstance(x, np.ndarray))
-
-#             return_dataset = Dataset(
-#                 name="bulk_pdf" if pdfs else "bulk",
-#                 alpha=jnp.asarray(dataset_dict["alpha"]),
-#                 lower=jnp.asarray(dataset_dict["lower"]),
-#                 upper=jnp.asarray(dataset_dict["upper"]),
-#                 parameter_strings=list(dataset_dict["parameter_strings"]),
-#                 Finv=jnp.asarray(dataset_dict["Finv"]),
-#                 Cinv=jnp.asarray(dataset_dict["Cinv"]),
-#                 C=jnp.asarray(dataset_dict["C"]),
-#                 fiducial_data=jnp.asarray(dataset_dict["fiducial_data"]),
-#                 data=jnp.asarray(dataset_dict["data"]),
-#                 parameters=jnp.asarray(dataset_dict["parameters"]),
-#                 derivatives=jnp.asarray(dataset_dict["derivatives"]),
-#             )
-
-#             print("Loaded dataset:\n\t", dataset_filename)
-#         except FileNotFoundError:
-#             return_dataset = generate_dataset()
-#     else:
-#         return_dataset = generate_dataset()
-
-#     return return_dataset 

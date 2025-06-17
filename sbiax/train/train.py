@@ -1,6 +1,5 @@
 from typing import Tuple, Optional 
 from copy import deepcopy
-from dataclasses import replace
 import os
 
 import jax
@@ -13,7 +12,7 @@ from jaxtyping import Key, PRNGKeyArray, Array, PyTree, Float, jaxtyped
 from beartype import beartype as typechecker
 import optax
 import numpy as np
-from tqdm.auto import tqdm, trange 
+from tqdm.auto import trange 
 import matplotlib.pyplot as plt
 import optuna
 
@@ -657,6 +656,7 @@ def train_ensemble(
     stats = []
     ndes = []
     for n, nde in enumerate(ensemble.ndes):
+
         key = jr.fold_in(key, n)
 
         nde, stats_n = train_nde(

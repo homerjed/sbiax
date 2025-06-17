@@ -1,21 +1,17 @@
-import warnings
 import os
 import time
 import yaml
 import json
-import pickle
 import gc
 import argparse
 from datetime import datetime
-from typing import Callable, Optional
-import multiprocessing as mp
+from typing import Optional
 from functools import partial
 
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-import equinox as eqx
-from jaxtyping import PRNGKeyArray, Array
+from jaxtyping import Array
 import optax
 
 import numpy as np 
@@ -26,14 +22,10 @@ from tensorflow_probability.substrates.jax.distributions import Distribution
 import optuna
 
 from sbiax.utils import make_df, marker
-from sbiax.ndes import Scaler, CNF, MAF 
 from cumulants_ensemble import Ensemble
 from sbiax.train import train_ensemble
-from sbiax.inference import nuts_sample
 
 from configs import (
-    arch_search_config, 
-    cumulants_config, 
     arch_search_cumulants_config, 
     get_results_dir, 
     get_posteriors_dir, 
@@ -41,22 +33,10 @@ from configs import (
 )
 from configs.args import get_arch_search_args, get_cumulants_sbi_args
 from data.constants import get_base_results_dir
-from data.cumulants import (
-    Dataset, 
-    CumulantsDataset, 
-    get_data, 
-    get_prior, 
-    get_compression_fn, 
-    get_datavector, 
-    get_linearised_data
-)
+from data.cumulants import Dataset, get_linearised_data
 from affine import affine_sample
 from utils.utils import (
     get_datasets,
-    plot_cumulants,
-    plot_moments, 
-    plot_latin_moments, 
-    plot_summaries, 
     plot_fisher_summaries, 
     replace_scalers,
     finite_samples_log_prob
@@ -113,7 +93,9 @@ def objective(
     config: ConfigDict, # Use same config for all trials
     random_seeds: bool,
     arch_search_dir: str, 
-    n_repeats: Optional[int] = None,
+    n_repeats: Optional[int] = None, # Number of cross valiation repeats, if None then no cross-validation
+    use_independent_test_set: bool = False,
+    n_test_sims: int = 20_000,
     show_tqdm: bool = False
 ) -> Array:
     
@@ -147,7 +129,7 @@ def objective(
     ) = jr.split(key, 6)
 
     results_dir = get_results_dir(config, args, arch_search=True)
-    posteriors_dir = get_posteriors_dir(config, args, arch_search=True)
+    posteriors_dir = get_posteriors_dir(args, arch_search=True)
     for _dir in [posteriors_dir, results_dir]:
         if not os.path.exists(_dir):
             os.makedirs(_dir, exist_ok=True)
@@ -161,6 +143,13 @@ def objective(
 
     dataset: Dataset = cumulants_dataset.data
 
+    if use_independent_test_set:
+        D_lin_test, Y_lin_test = get_linearised_data(
+            config, dataset, n_linear_sims=n_test_sims
+        )
+        # Indepedendent test set and summaries
+        X_lin_test = jax.vmap(cumulants_dataset.compression_fn)(D_lin_test, Y_lin_test)
+
     parameter_prior: Distribution = cumulants_dataset.prior
 
     if n_repeats is None:
@@ -169,6 +158,7 @@ def objective(
     # Container for cross-validation scores 
     scores, losses_lengths = [], []
     for i_repeat in range(n_repeats):
+
         jax.clear_caches()
 
         # Keys passed to pre-train and train functions (implies different dataset splits / training)
@@ -186,21 +176,17 @@ def objective(
             Build NDEs
         """
 
-        scaler = Scaler(
-            X, dataset.parameters, use_scaling=config.use_scalers
-        )
-
         ndes = get_ndes_from_config(
             config, 
+            cumulants_dataset,
             event_dim=dataset.alpha.size, 
-            scalers=scaler, # Same scaler for all NDEs 
             use_scalers=config.use_scalers, # NOTE: not to be trusted
             key=model_key
         )
 
         print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None) # Check scaler mu, std are not changed by gradient
 
-        ensemble = Ensemble(ndes, sbi_type=config.sbi_type)
+        ensemble = Ensemble(ndes)
 
         data_preprocess_fn = lambda x: x #2.0 * (x - X.min()) / (X.max() - X.min()) - 1.0 #/ jnp.max(dataset.fiducial_data, axis=0) #jnp.log(jnp.clip(x, min=1e-10))
 
@@ -236,8 +222,6 @@ def objective(
                 train_mode=config.sbi_type,
                 train_data=(data_preprocess_fn(X_l), Y_l), 
                 opt=opt,
-                use_ema=config.use_ema,
-                ema_rate=config.ema_rate,
                 n_batch=config.pretrain.n_batch,
                 patience=config.pretrain.patience,
                 n_epochs=config.pretrain.n_epochs,
@@ -257,7 +241,7 @@ def objective(
             log_prob_fn = ensemble.ensemble_log_prob_fn(data_preprocess_fn(x_), parameter_prior)
 
             state = jr.multivariate_normal(
-                key_state, x_, dataset.Finv, (2 * config.n_walkers,)
+                key_state, dataset.alpha, dataset.Finv, (2 * config.n_walkers,)
             )
 
             samples, weights = affine_sample(
@@ -370,10 +354,10 @@ def objective(
 
         opt = getattr(optax, config.train.opt)(config.train.lr)
 
-        if config.use_scalers:
-            ensemble = replace_scalers(
-                ensemble, X=data_preprocess_fn(X), P=dataset.parameters, config=config
-            )
+        # if config.use_scalers:
+        #     ensemble = replace_scalers(
+        #         ensemble, X=data_preprocess_fn(X), P=dataset.parameters, config=config
+        #     )
 
         ensemble, stats = train_ensemble(
             keys_train[1], 
@@ -381,8 +365,6 @@ def objective(
             train_mode=config.sbi_type,
             train_data=(data_preprocess_fn(X), dataset.parameters), 
             opt=opt,
-            use_ema=config.use_ema,
-            ema_rate=config.ema_rate,
             n_batch=config.train.n_batch,
             patience=config.train.patience,
             n_epochs=config.train.n_epochs,
@@ -407,7 +389,7 @@ def objective(
         log_prob_fn = ensemble.ensemble_log_prob_fn(data_preprocess_fn(x_), parameter_prior)
 
         state = jr.multivariate_normal(
-            key_state, x_, dataset.Finv, (2 * config.n_walkers,)
+            key_state, dataset.alpha, dataset.Finv, (2 * config.n_walkers,)
         )
 
         samples, weights = affine_sample(
@@ -465,7 +447,7 @@ def objective(
         )
         fig = c.plotter.plot()
         fig.suptitle(
-            r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n/k_2^{n-1}$" if config.reduced_cumulants else "$k_n$") + "\n" +
+            r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n$") + "\n" +
             "{} z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
                     ("linearised" if config.linearised else "non-linear") + "\n",
                     config.redshift, 
@@ -517,7 +499,7 @@ def objective(
         )
         fig = c.plotter.plot()
         fig.suptitle(
-            r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n/k_2^{n-1}$" if config.reduced_cumulants else "$k_n$") + "\n" +
+            r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n$") + "\n" +
             "{} z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
                     ("linearised" if config.linearised else "non-linear") + "\n",
                     config.redshift, 
@@ -537,7 +519,16 @@ def objective(
         gc.collect()
         jax.clear_caches()
 
-        scores.append(stats[0]["all_valid_loss"]) # Assuming one NDE
+        if use_independent_test_set and args.linearised:
+            print("Validating on independent test set...")
+            # Only one NDE for arch search, negative log-likelihood
+            test_loss_fn = lambda x, y: -ensemble.ndes[0].log_prob(x, y, key=None)
+            score = jnp.mean(jax.vmap(test_loss_fn)(X_lin_test, Y_lin_test)) 
+        else:
+            print("Validating on validation set...")
+            score = stats[0]["all_valid_loss"]
+
+        scores.append(score) # Assuming one NDE
         losses_lengths.append(len(stats[0]["valid_losses"]))
 
     # Delete results directories of useless trials
@@ -714,11 +705,11 @@ if __name__ == "__main__":
     config = arch_search_cumulants_config(
         seed=0, # Gets replaced in objective!
         redshift=args.redshift, 
-        reduced_cumulants=args.reduced_cumulants,
         sbi_type=args.sbi_type,
         linearised=args.linearised, 
         compression=args.compression,
         order_idx=args.order_idx,
+        scales=args.scales,
         n_linear_sims=args.n_linear_sims,
         freeze_parameters=args.freeze_parameters,
         pre_train=args.pre_train
@@ -784,7 +775,9 @@ if __name__ == "__main__":
         random_seeds=search_args.random_seeds,
         arch_search_dir=arch_search_dir, 
         n_repeats=search_args.n_repeats, # 'Cross validation' of trials... doesn't work with pruning
-        show_tqdm=False
+        show_tqdm=False,
+        use_independent_test_set=search_args.use_independent_test_set,
+        n_test_sims=search_args.n_test_sims
     )
 
     callback_fn = partial(
@@ -795,7 +788,9 @@ if __name__ == "__main__":
     )
 
     # Only run one trial per worker...
-    study.optimize(trial_fn, n_trials=search_args.n_trials, callbacks=[callback_fn])
+    study.optimize(
+        trial_fn, n_trials=search_args.n_trials, callbacks=[callback_fn]
+    )
 
     print("Number of finished trials: {}".format(len(study.trials)))
 

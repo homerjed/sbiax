@@ -1,6 +1,6 @@
 import os 
 import argparse
-from typing import Literal
+from typing import Literal, Callable
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import jax
@@ -15,7 +15,7 @@ from sbiax.ndes import Scaler
 
 from configs import cumulants_config, bulk_cumulants_config, bulk_pdf_config, get_results_dir
 from data.common import Dataset
-from data.pdfs import BulkCumulantsDataset, BulkPDFsDataset
+from data.pdfs import BulkCumulantsDataset, BulkPDFsDataset, TailsCumulantsDataset
 from data.cumulants import CumulantsDataset
 
 
@@ -33,7 +33,7 @@ def finite_samples_log_prob(samples_log_prob):
 
 def get_dataset_and_config(
     bulk_or_tails: Literal["bulk", "bulk_pdf", "tails"]
-) -> tuple[Dataset, ConfigDict]:
+) -> tuple[Callable[[...], Dataset], Callable[[...], ConfigDict]]:
 
     assert bulk_or_tails in ["bulk", "bulk_pdf", "tails"], (
         "bulk_or_tails == {}".format(bulk_or_tails)
@@ -46,33 +46,35 @@ def get_dataset_and_config(
         dataset_constructor = BulkPDFsDataset
         config = bulk_pdf_config 
     if bulk_or_tails == "tails":
-        dataset_constructor = CumulantsDataset
+        print("NOTE:\n\tusing calculations for full-shape dataset.")
+        dataset_constructor = TailsCumulantsDataset # CumulantsDataset
         config = cumulants_config 
 
     return dataset_constructor, config
 
 
-def get_datasets(args: argparse.Namespace) -> tuple[Dataset, dict[str, Dataset]]:
+def get_datasets(args: argparse.Namespace) -> tuple[ConfigDict, Dataset, dict[str, Dataset]]:
     # Get all configs and dataset objects for the dataset types here
+
     dataset_types = ["bulk", "bulk_pdf", "tails"]
 
     assert args.bulk_or_tails in dataset_types
 
-    use_pdfs_or_cumulants = "pdf" in args.bulk_or_tails
 
     datasets, configs = dict(), dict()
     for dataset_type in dataset_types:
+
         # Dataset and config constructor for each type
         _dataset, _config = get_dataset_and_config(dataset_type) 
 
         config = _config(
             seed=args.seed, 
             redshift=args.redshift, 
-            reduced_cumulants=args.reduced_cumulants,
             sbi_type=args.sbi_type,
             linearised=args.linearised, 
             compression=args.compression,
             order_idx=args.order_idx,
+            scales=args.scales,
             freeze_parameters=args.freeze_parameters,
             n_linear_sims=args.n_linear_sims,
             pre_train=args.pre_train
@@ -285,6 +287,71 @@ def plot_summaries(X, P, dataset, results_dir=None):
         plt.show()
 
 
+
+def plot_summaries_fiducial(X, X_, alpha, dataset, results_dir=None):
+
+    P = jnp.tile(alpha[jnp.newaxis, :], (X.shape[0], 1))
+
+    # Corner plot of summaries
+    c = ChainConsumer()
+    c.add_chain(
+        Chain(
+            samples=make_df(P, parameter_strings=dataset.parameter_strings), 
+            name="Params", 
+            color="blue", 
+            plot_cloud=True, 
+            plot_contour=False
+        )
+    )
+    c.add_chain(
+        Chain(
+            samples=make_df(X, parameter_strings=dataset.parameter_strings), 
+            name="Summaries", 
+            color="red", 
+            plot_cloud=True, 
+            plot_contour=False
+        )
+    )
+    c.add_chain(
+        Chain(
+            samples=make_df(X_, parameter_strings=dataset.parameter_strings), 
+            name="Summaries data", 
+            color="blue", 
+            plot_cloud=True, 
+            plot_contour=False
+        )
+    )
+    c.add_chain(
+        Chain.from_covariance(
+            dataset.alpha,
+            dataset.Finv,
+            columns=dataset.parameter_strings,
+            name=r"$F_{\Sigma^{-1}}$",
+            color="k",
+            linestyle=":",
+            shade_alpha=0.
+        )
+    )
+    c.add_truth(
+        Truth(location=dict(zip(dataset.parameter_strings, dataset.alpha)), name=r"$\pi^0$")
+    )
+    # plot_config = PlotConfig(
+    #     extents=dict(
+    #         zip(
+    #             dataset.parameter_strings, 
+    #             np.stack([dataset.lower, dataset.upper], axis=1)
+    #         )
+    #     )
+    # )
+    # c.set_plot_config(plot_config)
+    fig = c.plotter.plot()
+    if results_dir is not None:
+        plt.savefig(os.path.join(results_dir, "fiducial_params.pdf")) 
+        plt.close()
+    else:
+        plt.show()
+
+
 def plot_fisher_summaries(X, P, dataset, results_dir=None):
 # def plot_fisher_summaries(X_l, dataset, results_dir):
     # c = ChainConsumer()
@@ -322,6 +389,17 @@ def plot_fisher_summaries(X, P, dataset, results_dir=None):
             color="red", 
             plot_cloud=True, 
             plot_contour=False
+        )
+    )
+    c.add_chain(
+        Chain.from_covariance(
+            dataset.alpha,
+            dataset.Finv,
+            columns=dataset.parameter_strings,
+            name=r"$F_{\Sigma^{-1}}$",
+            color="k",
+            linestyle=":",
+            shade_alpha=0.
         )
     )
     c.add_truth(

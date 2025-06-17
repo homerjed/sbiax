@@ -1,8 +1,6 @@
 import os
 import time
 import datetime
-import argparse
-from typing import Literal
 
 import jax
 import jax.numpy as jnp
@@ -12,30 +10,22 @@ import optax
 
 import numpy as np 
 import matplotlib.pyplot as plt
-from chainconsumer import Chain, ChainConsumer, Truth
+from chainconsumer import Chain, ChainConsumer
 from tensorflow_probability.substrates.jax.distributions import Distribution
 import tensorflow_probability.substrates.jax.distributions as tfd
 
-from sbiax.ndes import Scaler, CNF, MAF 
+from sbiax.ndes import Scaler
 from sbiax.train import train_ensemble
 from sbiax.inference import nuts_sample
 from sbiax.utils import make_df, marker
 
 from configs import (
-    cumulants_config, 
-    bulk_cumulants_config, 
     get_results_dir, 
     get_posteriors_dir, 
     get_ndes_from_config
 )
 from configs.args import get_cumulants_sbi_args
-from data.cumulants import CumulantsDataset
-from data.common import (
-    Dataset, 
-    get_datavector, 
-    get_linearised_data
-)
-from data.pdfs import BulkCumulantsDataset, get_bulk_dataset
+from data.common import Dataset
 from cumulants_ensemble import Ensemble
 from affine import affine_sample
 from utils.utils import (
@@ -44,9 +34,9 @@ from utils.utils import (
     plot_moments, 
     plot_latin_moments, 
     plot_summaries, 
+    plot_summaries_fiducial,
     plot_fisher_summaries, 
     replace_scalers,
-    get_dataset_and_config,
     finite_samples_log_prob
 )
 
@@ -58,7 +48,6 @@ jax.clear_caches()
 
     - diagonal of covariance for compression?
     - freezing 'nuisance parameters'
-    - scaling of inputs? summaries seem to be high magnitude ... PCA whitening?
     - covariance conditioning?
     - remove outliers in latins?
 """ 
@@ -76,7 +65,7 @@ print("LINEARISED:", args.linearised)
     Config
 """
 
-config, cumulants_dataset, datasets = get_datasets(args)
+config, cumulants_dataset, datasets = get_datasets(args) # Config and cumulants_dataset can be bulk ... etc
 
 key = jr.key(config.seed)
 
@@ -87,7 +76,7 @@ key = jr.key(config.seed)
 
 results_dir = get_results_dir(config, args)
 
-posteriors_dir = get_posteriors_dir(config, args)
+posteriors_dir = get_posteriors_dir(args)
 
 dataset: Dataset = cumulants_dataset.data
 
@@ -182,6 +171,18 @@ X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
 # Plot summaries
 plot_summaries(X, dataset.parameters, dataset, results_dir)
 
+datavectors = cumulants_dataset.get_datavector(key, n=1000)
+X0 = jax.vmap(compression_fn, in_axes=(0, None))(dataset.fiducial_data, dataset.alpha)
+X_ = jax.vmap(compression_fn, in_axes=(0, None))(datavectors, dataset.alpha)
+
+plot_summaries_fiducial(
+    X0, 
+    X_,
+    dataset.alpha, 
+    dataset, 
+    results_dir
+)
+
 plot_moments(dataset.fiducial_data, config, results_dir)
 
 plot_latin_moments(dataset.data, config, results_dir)
@@ -190,23 +191,17 @@ plot_latin_moments(dataset.data, config, results_dir)
     Build NDEs
 """
 
-scaler = Scaler(
-    X, dataset.parameters, use_scaling=config.use_scalers
-)
-
 ndes = get_ndes_from_config(
     config, 
+    cumulants_dataset,
     event_dim=dataset.alpha.size, 
-    scalers=scaler, # Same scaler for all NDEs 
-    use_scalers=config.use_scalers, # NOTE: not to be trusted
+    use_scalers=config.use_scalers, 
     key=model_key
 )
 
 print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None) # Check scaler mu, std are not changed by gradient
 
 ensemble = Ensemble(ndes, sbi_type=config.sbi_type)
-
-data_preprocess_fn = lambda x: x #2.0 * (x - X.min()) / (X.max() - X.min()) - 1.0 #/ jnp.max(dataset.fiducial_data, axis=0) #jnp.log(jnp.clip(x, min=1e-10))
 
 """
     Pre-train NDEs on linearised data
@@ -227,10 +222,10 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
 
     plot_fisher_summaries(X_l, Y_l, dataset, results_dir)
 
-    if config.use_scalers:
-        ensemble = replace_scalers(
-            ensemble, config=config, X=data_preprocess_fn(X_l), P=Y_l
-        )
+    # if config.use_scalers:
+    #     ensemble = replace_scalers(
+    #         ensemble, config=config, X=X_l, P=Y_l
+    #     )
 
     opt = getattr(optax, config.pretrain.opt)(config.pretrain.lr)
 
@@ -238,10 +233,8 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
         pre_train_key, 
         ensemble,
         train_mode=config.sbi_type,
-        train_data=(data_preprocess_fn(X_l), Y_l), 
+        train_data=(X_l, Y_l), 
         opt=opt,
-        use_ema=config.use_ema,
-        ema_rate=config.ema_rate,
         n_batch=config.pretrain.n_batch,
         patience=config.pretrain.patience,
         n_epochs=config.pretrain.n_epochs,
@@ -255,10 +248,10 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
 
     x_ = compression_fn(datavector, dataset.alpha)
 
-    log_prob_fn = ensemble.ensemble_log_prob_fn(data_preprocess_fn(x_), parameter_prior)
+    log_prob_fn = ensemble.ensemble_log_prob_fn(x_, parameter_prior)
 
     state = jr.multivariate_normal(
-        key_state, x_, dataset.Finv, (2 * config.n_walkers,)
+        key_state, dataset.alpha, dataset.Finv, (2 * config.n_walkers,)
     )
 
     samples, weights = affine_sample(
@@ -326,12 +319,16 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
         )
     )
     c.add_chain(
-        Chain(samples=posterior_df, name="SBI[{}]".format(args.bulk_or_tails), color="r")
+        Chain(
+            samples=posterior_df, 
+            name="SBI[{}]".format(args.bulk_or_tails), 
+            color="r" if args.bulk_or_tails == "tails" else "b"
+        )
     )
     c.add_marker(
         location=marker(x_, parameter_strings=dataset.parameter_strings),
         name=r"$\hat{x}$", 
-        color="b"
+        color="r" if args.bulk_or_tails == "tails" else "b"
     )
     c.add_marker(
         location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
@@ -349,19 +346,17 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
 
 opt = getattr(optax, config.train.opt)(config.train.lr)
 
-if config.use_scalers:
-    ensemble = replace_scalers(
-        ensemble, config=config, X=data_preprocess_fn(X), P=dataset.parameters
-    )
+# if config.use_scalers:
+#     ensemble = replace_scalers(
+#         ensemble, config=config, X=X, P=dataset.parameters
+#     )
 
 ensemble, stats = train_ensemble(
     train_key, 
     ensemble,
     train_mode=config.sbi_type,
-    train_data=(data_preprocess_fn(X), dataset.parameters), 
+    train_data=(X, dataset.parameters), 
     opt=opt,
-    use_ema=config.use_ema,
-    ema_rate=config.ema_rate,
     n_batch=config.train.n_batch,
     patience=config.train.patience,
     n_epochs=config.train.n_epochs,
@@ -387,12 +382,12 @@ x_ = compression_fn(datavector, dataset.alpha)
 
 print("compressed datavector {} \n {} {}".format(x_.shape, x_, dataset.alpha))
 
-log_prob_fn = ensemble.ensemble_log_prob_fn(data_preprocess_fn(x_), parameter_prior)
+log_prob_fn = ensemble.ensemble_log_prob_fn(x_, parameter_prior)
 
 if 1:
     try:
         state = jr.multivariate_normal(
-            key_state, x_, dataset.Finv, (2 * config.n_walkers,)
+            key_state, dataset.alpha, dataset.Finv, (2 * config.n_walkers,)
         )
         # state = parameter_prior.sample(seed=key_state, sample_shape=(2 * config.n_walkers,))
 
@@ -473,7 +468,7 @@ if 1:
         c.add_marker(
             location=marker(x_, parameter_strings=dataset.parameter_strings),
             name=r"$\hat{x}$", 
-            color="b"
+            color="r" if args.bulk_or_tails == "tails" else "b"
         )
         c.add_marker(
             location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
@@ -496,6 +491,83 @@ if 1:
         )
         plt.savefig(os.path.join(results_dir, "posterior_affine.pdf"))
         plt.savefig(os.path.join(posteriors_dir, "posterior_affine.pdf"))
+        plt.close()
+
+        target_idx = np.array([0, 4])
+        _parameter_strings = [dataset.parameter_strings[p] for p in target_idx]
+        posterior_df = make_df(
+            samples[:, target_idx], 
+            samples_log_prob, 
+            parameter_strings=_parameter_strings
+        )
+
+        c = ChainConsumer()
+        c.add_chain(
+            Chain.from_covariance(
+                dataset.alpha[target_idx],
+                datasets["tails"].data.Finv[:, target_idx][target_idx, :],
+                columns=_parameter_strings,
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[tails]"),
+                color="r",
+                linestyle=":",
+                shade_alpha=0.
+            )
+        )
+        c.add_chain(
+            Chain.from_covariance(
+                dataset.alpha[target_idx],
+                datasets["bulk"].data.Finv[:, target_idx][target_idx, :],
+                columns=_parameter_strings,
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[bulk]"),
+                color="b",
+                linestyle=":",
+                shade_alpha=0.
+            )
+        )
+        c.add_chain(
+            Chain.from_covariance(
+                dataset.alpha[target_idx],
+                datasets["bulk_pdf"].data.Finv[:, target_idx][target_idx, :],
+                columns=_parameter_strings,
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]"),
+                color="g",
+                linestyle=":",
+                shade_alpha=0.
+            )
+        )
+        c.add_chain(
+            Chain(
+                samples=posterior_df, 
+                name="SBI[{}]".format(args.bulk_or_tails), 
+                color="r" if args.bulk_or_tails == "tails" else "b"
+            )
+        )
+        c.add_marker(
+            location=marker(x_[target_idx], parameter_strings=_parameter_strings),
+            name=r"$\hat{x}$", 
+            color="r" if args.bulk_or_tails == "tails" else "b"
+        )
+        c.add_marker(
+            location=marker(dataset.alpha[target_idx], parameter_strings=_parameter_strings),
+            name=r"$\alpha$", 
+            color="k"
+        )
+        fig = c.plotter.plot()
+        fig.suptitle(
+            (
+                r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
+                + " z={}".format(config.redshift) + "\n"
+                + (" linearised" if config.linearised else " Quijote") + ("[bulk]" if args.bulk_or_tails == "bulk" else "[tails]") + "\n"
+                + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
+                + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
+                + r"$k_n$ = [{}]".format(
+                    ", ".join([["var.", "skew.", "kurt."][_] for _ in config.order_idx])
+                )
+            ),
+            multialignment='center'
+        )
+        plt.savefig(os.path.join(results_dir, "posterior_affine_marginalised.pdf"))
+        plt.savefig(os.path.join(posteriors_dir, "posterior_affine_marginalised.pdf"))
         plt.close()
     except Exception as e:
         print("~" * 50)
@@ -545,9 +617,7 @@ if 0:
                 dataset.alpha,
                 dataset.Finv,
                 columns=dataset.parameter_strings,
-                name=r"$F_{\Sigma^{-1}}$" + " {}".format(
-                    "$S_n$[tails]" if config.reduced_cumulants else "$k_n$[tails]"
-                ),
+                name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[tails]"),
                 color="k",
                 linestyle=":",
                 shade_alpha=0.
@@ -579,7 +649,7 @@ if 0:
         c.add_marker(
             location=marker(x_, parameter_strings=dataset.parameter_strings),
             name=r"$\hat{x}$", 
-            color="b"
+            color="r" if args.bulk_or_tails == "tails" else "b"
         )
         c.add_marker(
             location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),

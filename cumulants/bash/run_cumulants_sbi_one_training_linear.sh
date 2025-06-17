@@ -1,17 +1,35 @@
 #!/bin/bash
 
-RUN_LINEARISED=true # Linearised is glitching for now...
-RUN_FROZEN=true
-ONLY_RUN_FIGURES=false # Only run figure_one.py jobs
+RESULTS_DIR="${1:-"results/"}"
+SINGLE_RUN="${2:-false}" # Run all experiments once for a single figure one
+ONLY_RUN_FIGURES="${3:-false}" # Only run figure_one.py jobs
 
-N_SEEDS=100
-N_SEEDS_GLOBAL=10
-START_SEED=100
-END_SEED=$(( $START_SEED + $N_SEEDS ))
-N_PARALLEL=50
+RUN_LINEARISED=true # Linearised is glitching for now...
+RUN_FROZEN=false
+RUN_NONLINEAR=true
+
+if [[ "$SINGLE_RUN" == "true" ]]; then
+    echo "SINGLE RUN."
+    N_SEEDS=0
+    START_SEED=0
+    N_SEEDS_GLOBAL=1 # Number of repeated training
+    END_SEED=$(( $START_SEED + $N_SEEDS ))
+    N_PARALLEL=1
+
+    RUN_FROZEN=false
+else
+    echo "MULTIPLE SEEDS RUN."
+    N_SEEDS=200
+    START_SEED=0
+    N_SEEDS_GLOBAL=10 # Number of repeated training
+    END_SEED=$(( $START_SEED + $N_SEEDS ))
+    N_PARALLEL=50
+fi
+
 N_GB=8
 N_CPU=8
 
+N_DATAVECTORS=10
 N_LINEAR_SIMS=2000
 
 TIMESTAMP=$(date +'%m%d_%H%M')
@@ -26,8 +44,13 @@ order_idxs=(
 # Repeat training / posterior sampling for 10 seeds with linearised experiemnts
 
 # JOB_ARRAY_STR="0-100,200-500"
-JOB_ARRAY_STR="0-200" # 200 posteriors sampled for each of the 10 seeds
-# JOB_ARRAY_STR="$START_SEED-$END_SEED%$N_PARALLEL"
+# JOB_ARRAY_STR="0-200" # 200 posteriors sampled for each of the 10 seeds
+JOB_ARRAY_STR="$START_SEED-$END_SEED%$N_PARALLEL"
+
+# Empty datasets dir, recalculate them only once each
+DATASETS_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/quijote_data/datasets/"
+rm -rf "${DATASETS_DIR:?}/"*
+echo "Emptied datasets directory: $DATASETS_DIR"
 
 for global_seed in $(seq 0 $N_SEEDS_GLOBAL); do
 for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
@@ -40,7 +63,7 @@ for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
             fi
 
             # Skip non-linearised if not requested
-            if [[ "$LINEARISED_FLAG" == "--no-linearised" ]]; then
+            if [[ "$RUN_NONLINEAR" == false && "$LINEARISED_FLAG" == "--no-linearised" ]]; then
                 continue
             fi
 
@@ -71,12 +94,12 @@ for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
 
                 for order_idx_args in "${order_idxs[@]}"; do
 
-                    echo ">>Running redshift loop with cumulants=$order_idx_args, pretrain=$PRETRAIN_FLAG, linearised=$LINEARISED_FLAG"
+                    echo ">>Running redshift loop with bulk/tails=$bt, cumulants=$order_idx_args, pretrain=$PRETRAIN_FLAG, linearised=$LINEARISED_FLAG, freeze=$FREEZE_FLAG"
 
                     # SBI job IDs that must all run for cumulants_multi_z.py to run for bulk/tails, linearised/no-linearised, freeze/no-freeze
                     sbi_job_ids=()
                     for z in 0.0 0.5 1.0; do
-                        cmd1="python cumulants_sbi.py \
+                        cmd1="RESULTS_DIR=$RESULTS_DIR python cumulants_sbi.py \
 --seed $global_seed \
 --sbi_type nle \
 --compression linear \
@@ -119,9 +142,10 @@ END
                     )
 
                     if [[ "$ONLY_RUN_FIGURES" == false ]]; then
-                        cmd2="python cumulants_multi_z.py \
+                        cmd2="RESULTS_DIR=$RESULTS_DIR python cumulants_multi_z.py \
 --seed $global_seed \
 --seed_datavector \$SLURM_ARRAY_TASK_ID \
+--n_datavectors $N_DATAVECTORS \
 --sbi_type nle \
 --compression linear \
 $LINEARISED_FLAG \
@@ -166,9 +190,10 @@ END
                         echo "$final_script" | sbatch
                     fi
 
-                    figure_cmd="python figure_one.py \
+                    figure_cmd="RESULTS_DIR=$RESULTS_DIR python figure_one.py \
 --seed $global_seed \
 --seed_datavector \$SLURM_ARRAY_TASK_ID \
+--n_linear_sims $N_LINEAR_SIMS \
 --sbi_type nle \
 --compression linear \
 $LINEARISED_FLAG \

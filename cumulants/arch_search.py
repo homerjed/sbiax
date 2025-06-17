@@ -195,17 +195,11 @@ def objective(
         """
             Build NDEs
         """
-        # cov_sqrt_inv = fractional_matrix_power(cov_X, -0.5)
-        # X_whitened = (X - mean_X) @ cov_sqrt_inv
-
-        scaler = Scaler(
-            X, dataset.parameters, use_scaling=config.use_scalers
-        )
 
         ndes = get_ndes_from_config(
             config, 
+
             event_dim=dataset.alpha.size, 
-            scalers=scaler, # Same scaler for all NDEs 
             use_scalers=config.use_scalers, # NOTE: not to be trusted
             key=model_key
         )
@@ -248,8 +242,6 @@ def objective(
                 train_mode=config.sbi_type,
                 train_data=(data_preprocess_fn(X_l), Y_l), 
                 opt=opt,
-                use_ema=config.use_ema,
-                ema_rate=config.ema_rate,
                 n_batch=config.pretrain.n_batch,
                 patience=config.pretrain.patience,
                 n_epochs=config.pretrain.n_epochs,
@@ -269,7 +261,7 @@ def objective(
             log_prob_fn = ensemble.ensemble_log_prob_fn(data_preprocess_fn(x_), parameter_prior)
 
             state = jr.multivariate_normal(
-                key_state, x_, dataset.Finv, (2 * config.n_walkers,)
+                key_state, dataset.alpha, dataset.Finv, (2 * config.n_walkers,)
             )
 
             samples, weights = affine_sample(
@@ -393,8 +385,6 @@ def objective(
             train_mode=config.sbi_type,
             train_data=(data_preprocess_fn(X), dataset.parameters), 
             opt=opt,
-            use_ema=config.use_ema,
-            ema_rate=config.ema_rate,
             n_batch=config.train.n_batch,
             patience=config.train.patience,
             n_epochs=config.train.n_epochs,
@@ -477,7 +467,7 @@ def objective(
         )
         fig = c.plotter.plot()
         fig.suptitle(
-            r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n/k_2^{n-1}$" if config.reduced_cumulants else "$k_n$") + "\n" +
+            r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n$") + "\n" +
             "{} z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
                     ("linearised" if config.linearised else "non-linear") + "\n",
                     config.redshift, 
@@ -530,7 +520,7 @@ def objective(
         )
         fig = c.plotter.plot()
         fig.suptitle(
-            r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n/k_2^{n-1}$" if config.reduced_cumulants else "$k_n$") + "\n" +
+            r"{} SBI & $F_{{\Sigma}}^{{-1}}$".format("$k_n$") + "\n" +
             "{} z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
                     ("linearised" if config.linearised else "non-linear") + "\n",
                     config.redshift, 
@@ -702,11 +692,11 @@ if __name__ == "__main__":
     config = cumulants_config(
         seed=0, # Gets replaced in objective!
         redshift=args.redshift, 
-        reduced_cumulants=args.reduced_cumulants,
         sbi_type=args.sbi_type,
         linearised=args.linearised, 
         compression=args.compression,
         order_idx=args.order_idx,
+        scales=args.scales,
         n_linear_sims=args.n_linear_sims,
         freeze_parameters=args.freeze_parameters,
         pre_train=args.pre_train

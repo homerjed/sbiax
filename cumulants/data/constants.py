@@ -3,18 +3,21 @@ from pathlib import Path
 import jax.numpy as jnp
 import numpy as np
 
+_RESULTS_DIR_ = os.environ.get("RESULTS_DIR", "results") + "/"
+
 # This file is in repo/subfolder/ w.r.t. .git root
 ROOT_DIR = str(Path(__file__).resolve().parent.parent.parent) 
 
 # Results and plots directories
-RESULTS_DIR = os.path.join(ROOT_DIR, "results/") 
-POSTERIORS_DIR = os.path.join(ROOT_DIR, "results/posteriors/") 
-FIGS_DIR = os.path.join(ROOT_DIR, "results/") 
+RESULTS_DIR = os.path.join(ROOT_DIR, _RESULTS_DIR_) 
+POSTERIORS_DIR = os.path.join(ROOT_DIR, _RESULTS_DIR_ + "posteriors/") 
+FIGS_DIR = os.path.join(ROOT_DIR, _RESULTS_DIR_) 
 
 # Save and load directories for quijote data
 DATA_DIR = os.path.join(ROOT_DIR, "quijote_data/") 
 OUT_DIR = DATA_DIR
-QUIJOTE_DIR = "/project/ls-gruen/users/jed.homer/quijote_pdfs/" # Cluster only!
+# QUIJOTE_DIR = "/project/ls-gruen/users/jed.homer/quijote_pdfs/" # Cluster only!
+QUIJOTE_DIR = "/project/ls-gruen/users/jed.homer/quijote_pdfs_later/" # Cluster only!
 DERIVATIVES_DIR = os.path.join(QUIJOTE_DIR, "derivatives/")
 
 
@@ -38,7 +41,7 @@ ALL_RADII = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
 ALL_REDSHIFTS = [0., 0.5, 1., 2., 3.]
 REDSHIFT_STRINGS = ["0", "0.5", "1", "2", "3"] # Quijote filename strings
 
-RESOLUTION = 1024 # NOTE: are hypercube realisations high resolution also?
+RESOLUTION = 1024
 
 PARAMETER_STRINGS = [
     r"$\Omega_m$", r"$\Omega_b$", r"$h_m$", r"$n_s$", r"$\sigma_8$"

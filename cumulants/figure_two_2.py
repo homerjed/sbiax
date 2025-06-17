@@ -52,7 +52,7 @@ from data.cumulants import (
     get_prior, 
     get_parameter_strings
 )
-from data.pdfs import get_multi_z_bulk_pdf_fisher_forecast
+from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
 from cumulants_ensemble import Ensemble, MultiEnsemble
 from affine import affine_sample
 
@@ -130,27 +130,7 @@ for exp_dict in exp_dicts:
 
             # Load Bulk PDF Fisher matrix just once
             if s == 0:
-                try:
-                    Finv_bulk_pdfs_all_z = np.load(
-                        os.path.join(
-                            data_dir, 
-                            "Finv_bulk_pdfs_all_z_{}.npy".format(
-                                "f" if args.freeze_parameters else "nf"
-                            )
-                        )
-                    )
-                except:
-                    Finv_bulk_pdfs_all_z = get_multi_z_bulk_pdf_fisher_forecast(args)
-
-                    np.save(
-                        os.path.join(
-                            data_dir, 
-                            "Finv_bulk_pdfs_all_z_{}.npy".format(
-                                "f" if args.freeze_parameters else "nf"
-                            )
-                        ),
-                        Finv_bulk_pdfs_all_z
-                    )
+                Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, args)        
 
             bulk_pdf_fisher_widths = jnp.diag(Finv_bulk_pdfs_all_z) # Variances (widths) for Bulk PDF Gaussian posterior
 

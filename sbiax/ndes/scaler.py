@@ -28,20 +28,20 @@ class Scaler(eqx.Module):
     """
     x_dim: int
     q_dim: Optional[int] = None
-    mu_x: Array
-    std_x: Array
-    mu_q: Array
-    std_q: Array
+    mu_x: Optional[Array]
+    std_x: Optional[Array]
+    mu_q: Optional[Array]
+    std_q: Optional[Array]
     use_scaling: bool
 
     @jaxtyped(typechecker=typechecker)
     def __init__(
         self, 
-        X: Float[Array, "n x"] = None, 
-        Q: Float[Array, "n q"] = None, 
+        X: Optional[Float[Array, "n x"]] = None, 
+        Q: Optional[Float[Array, "n q"]] = None, 
         *,
-        x_mu_std: Tuple[Float[Array, "x"], Float[Array, "x"]] = None,
-        q_mu_std: Tuple[Float[Array, "q"], Float[Array, "q"]] = None,
+        x_mu_std: Optional[Tuple[Float[Array, "x"], Float[Array, "x"]]] = None,
+        q_mu_std: Optional[Tuple[Float[Array, "q"], Float[Array, "q"]]] = None,
         use_scaling=True
     ):
         """
@@ -79,7 +79,7 @@ class Scaler(eqx.Module):
             self.q_dim = Q.shape[-1] 
             self.mu_q = Q.mean(axis=0)
             self.std_q = Q.std(axis=0)
-        if x_mu_std is not None:
+        if q_mu_std is not None:
             self.mu_q, self.std_q = q_mu_std
             self.q_dim = self.mu_q.size
 
@@ -126,9 +126,6 @@ class Scaler(eqx.Module):
             x = x * stop_grad(self.std_x) + stop_grad(self.mu_x)
             q = q * stop_grad(self.std_q) + stop_grad(self.mu_q)
         return x, q
-
-
-
 
 
 class WhiteScaler(eqx.Module):

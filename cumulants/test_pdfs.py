@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 from chainconsumer import Chain, ChainConsumer, Truth
 
@@ -897,7 +898,7 @@ if 0:
     Plot for calculated bulk and quijote cumulants dataset
     - standardise to show shapes of PDFs
 """
-if 1:
+if 0:
     from scipy.stats import gaussian_kde
 
     use_mean = False
@@ -945,7 +946,7 @@ if 1:
         print(R, bulk_cumulants_dataset.data.fiducial_data.mean(axis=0)[r * 3: (r + 1) * 3])
 
 
-    def corner_plot(data_list, labels=None, bins=30, contour_levels=4, figsize=8, colors=None):
+    def corner_plot(data_list, labels=None, bins=30, contour_levels=4, contour_linestyles=None, figsize=8, colors=None):
         """
         Parameters:
             data_list : list of np.ndarray, each shape (n_samples, n_dimensions)
@@ -955,6 +956,23 @@ if 1:
             figsize : float or tuple, figure size
             colors : list of color specs, one per dataset
         """
+
+        def get_contour_levels(Z, levels=[0.6827, 0.9545]):
+            """
+                Given a 2D density Z, get contour levels that enclose the specified probability masses.
+            """
+            Z_flat = Z.flatten()
+            Z_sorted = np.sort(Z_flat)[::-1]
+            cumsum = np.cumsum(Z_sorted)
+            cumsum /= cumsum[-1]  # Normalize to [0, 1]
+            thresholds = []
+            for p in levels:
+                idx = np.searchsorted(cumsum, p)
+                thresholds.append(Z_sorted[idx])
+            thresholds = sorted(thresholds)
+            thresholds[-1] = thresholds[-1] + 0.0001  # Slightly expand the last level for visibility
+            return thresholds
+
         if isinstance(data_list, np.ndarray):
             data_list = [data_list]
 
@@ -976,6 +994,7 @@ if 1:
         for i in range(d):
             for j in range(d):
                 ax = axes[i, j]
+
                 if i < j:
                     ax.axis("off")
                     continue
@@ -989,8 +1008,10 @@ if 1:
                     max_y = 0
                     for data, color in zip(data_list, colors):
                         # Plot Gaussian samples with KDE smooth PDF
-                        if color != "k":
-                            counts, bin_edges = np.histogram(data[:, i], bins=bins, density=True)
+                        counts, bin_edges = np.histogram(data[:, i], bins=bins, density=True)
+                        max_y = max(max_y, counts.max())
+                        # if color != "k":
+                        if "Gaussian" not in labels[i]:
                             ax.hist(
                                 data[:, i], 
                                 bins=bin_edges, 
@@ -999,7 +1020,6 @@ if 1:
                                 density=True
                             )
                         else:
-                            max_y = max(max_y, counts.max())
                             try:
                                 kde = gaussian_kde(data[:, i])
                                 y_vals = kde(x_vals)
@@ -1012,6 +1032,7 @@ if 1:
                                     bins=bin_edges, 
                                     histtype="step", 
                                     color=color, 
+                                    # linestyle='--',
                                     density=True
                                 )
 
@@ -1019,7 +1040,7 @@ if 1:
                     ax.set_xticks([]); ax.set_yticks([])
                 else:
                     # Off-diagonal: 2D KDE contours
-                    for data, color in zip(data_list, colors):
+                    for data, color, linestyle in zip(data_list, colors, contour_linestyles):
                         x = data[:, j]
                         y = data[:, i]
                         try:
@@ -1027,10 +1048,14 @@ if 1:
                             kde = gaussian_kde(xy)
                             xi, yi = np.mgrid[x.min():x.max():100j, y.min():y.max():100j]
                             zi = kde(np.vstack([xi.ravel(), yi.ravel()]))
+                            if isinstance(contour_levels, list):
+                                contour_levels = get_contour_levels(zi, levels=contour_levels)
+                            print("CONTOUR LEVELS:", contour_levels)
                             ax.contour(
                                 xi, yi, zi.reshape(xi.shape),
                                 levels=contour_levels,
                                 colors=[color], 
+                                linestyles=linestyle,
                                 linewidths=1
                             )
 
@@ -1082,7 +1107,12 @@ if 1:
     gaussian_bulk_cumulants = np.random.multivariate_normal(
         np.mean(bulk_cumulants_dataset.data.fiducial_data, axis=0),
         bulk_cumulants_dataset.data.C,
-        size=(100_000,)
+        size=(200_000,)
+    )
+    gaussian_tails_cumulants = np.random.multivariate_normal(
+        np.mean(cumulants_dataset.data.fiducial_data, axis=0),
+        cumulants_dataset.data.C,
+        size=(200_000,)
     )
 
     print(len(cumulant_strings_R))
@@ -1091,17 +1121,26 @@ if 1:
         return (data - np.mean(data, axis=0)) / np.std(data, axis=0)
 
     colors=[
-        "k", 
+        "b", 
+        "r", 
         "b", 
         "r"
     ]
+    linestyles = [
+        "dashed", #"--",       
+        "dashed", #"--",       
+        "solid", #"-",
+        "solid" #"-",
+    ]
     legend_labels = [
-        "Gaussian", 
+        "Bulk $k_n$[Gaussian]", 
+        "Tails $k_n$[Gaussian]", 
         "Bulk $k_n$[Quijote]",
         "Tails $k_n$[Quijote]",
     ]
     datasets = [
         gaussian_bulk_cumulants, 
+        gaussian_tails_cumulants,
         bulk_cumulants_dataset.data.fiducial_data, 
         cumulants_dataset.data.fiducial_data
     ]
@@ -1111,11 +1150,14 @@ if 1:
         datasets,
         labels=cumulant_strings_R, 
         colors=colors,        
-        contour_levels=2,
+        contour_levels=2, #[0.6827, 0.9545],
+        contour_linestyles=linestyles,
     )
 
-    from matplotlib.lines import Line2D
-    legend_handles = [Line2D([0], [0], color=c, lw=2.) for c in colors]
+    legend_handles = [
+        Line2D([0], [0], color=c, linestyle=l, lw=2.) 
+        for c, l in zip(colors, linestyles)
+    ]
     fig.legend(
         handles=legend_handles, 
         labels=legend_labels,
@@ -1128,3 +1170,62 @@ if 1:
     print("Saved corner plot at:\n", filename)
     plt.savefig(filename, bbox_inches="tight")
     plt.close()
+
+""" 
+    Are linearised / non-linearised dataset Finvs different? they should not be
+"""
+
+if 1:
+
+    scales = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
+
+    # Bulk calculated cumulants (non-linear)
+    bulk_config = bulk_cumulants_config()
+    bulk_config.use_bulk_means = True # NOTE: bulk calculated; use mean in conversion of moments to cumulants
+    bulk_config.stack_bulk_means = False # NOTE: if this is false, cumulants of shape (..., 3) as long as norms not used
+    bulk_config.stack_bulk_norms = False # NOTE: if this is false, cumulants are normalised (can be compared to Quijote)
+    bulk_config.scales = scales
+
+    # Bulk cumulants by my calculations
+    bulk_cumulants_dataset = BulkCumulantsDataset(
+        bulk_config, 
+        pdfs=False, 
+        check_cumulants_against_quijote=False, 
+        verbose=verbose
+    )
+
+    # Bulk calculated cumulants (linear)
+    bulk_config = bulk_cumulants_config()
+    bulk_config.use_bulk_means = True # NOTE: bulk calculated; use mean in conversion of moments to cumulants
+    bulk_config.stack_bulk_means = False # NOTE: if this is false, cumulants of shape (..., 3) as long as norms not used
+    bulk_config.stack_bulk_norms = False # NOTE: if this is false, cumulants are normalised (can be compared to Quijote)
+    bulk_config.scales = scales
+    bulk_config.linearised = True
+
+    # Bulk cumulants by my calculations
+    bulk_cumulants_dataset_linear = BulkCumulantsDataset(
+        bulk_config, 
+        pdfs=False, 
+        check_cumulants_against_quijote=False, 
+        verbose=verbose
+    )
+
+    print("Finvs:", np.allclose(bulk_cumulants_dataset.data.Finv, bulk_cumulants_dataset_linear.data.Finv))
+    # print("Fs:", np.allclose(bulk_cumulants_dataset.data.F, bulk_cumulants_dataset_linear.data.F))
+    
+    # Quijote cumulants for full shape of PDF (non-linear)
+    full_shape_config = cumulants_config()
+    full_shape_config.scales = scales
+    full_shape_config.linearised = False
+
+    cumulants_dataset = CumulantsDataset(full_shape_config, verbose=verbose)
+
+    # Quijote cumulants for full shape of PDF (linear)
+    full_shape_config = cumulants_config()
+    full_shape_config.scales = scales
+    full_shape_config.linearised = False
+
+    cumulants_dataset_linear = CumulantsDataset(full_shape_config, verbose=verbose)
+
+    print("Finvs:", np.allclose(cumulants_dataset.data.Finv, cumulants_dataset_linear.data.Finv))
+    # print("Fs:", np.allclose(cumulants_dataset.data.F, cumulants_dataset_linear.data.F))

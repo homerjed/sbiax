@@ -415,7 +415,6 @@ if __name__ == "__main__":
     config = _config(
         seed=args.seed, 
         redshift=args.redshift, 
-        reduced_cumulants=args.reduced_cumulants,
         sbi_type=args.sbi_type,
         linearised=args.linearised, 
         compression=args.compression,

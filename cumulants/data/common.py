@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from functools import partial
 from typing import Callable, Optional, Literal
 
@@ -11,23 +11,19 @@ from jaxtyping import PRNGKeyArray, Array, Float, Int, jaxtyped
 import equinox as eqx
 import optax
 from beartype import beartype as typechecker 
-from beartype.door import is_bearable
 import numpy as np
 from scipy.stats import qmc
 from ml_collections import ConfigDict
 import matplotlib.pyplot as plt
-from matplotlib import colors as mcolors
-from chainconsumer import Chain, ChainConsumer, Truth
 import tensorflow_probability.substrates.jax.distributions as tfd
 from tqdm.auto import trange
 
 from data.constants import get_quijote_parameters, get_save_and_load_dirs, get_target_idx
 from compression.nn import fit_nn, fit_nn_lbfgs
-from compression.pca import PCA
-from sbiax.utils import marker
 
 typecheck = jaxtyped(typechecker=typechecker)
 
+FORCE_NOISELESS_DATAVECTOR = True if os.environ.get("FORCE_NOISELESS_DATAVECTOR", "").lower() in ("1", "true") else False
 
 """
     Objects common to the PDF and cumulant datasets
@@ -66,58 +62,6 @@ def convert_dataset_to_jax(dataset: Dataset) -> Dataset:
         dataset, 
         is_leaf=lambda a: isinstance(a, np.ndarray)
     )
-
-
-def pca_dataset(dataset: Dataset) -> Dataset:
-
-    # Compress simulations as usual 
-    # X = jax.vmap(compressor)(dataset.data, dataset.parameters) # Fit PCA to latins
-    # X = jax.vmap(compressor, in_axes=(0, None))(dataset.fiducial_data, dataset.alpha) # Fit PCA to fiducials
-
-    # Standardise before PCA (don't get tricked by high variance due to units)
-    X = dataset.fiducial_data
-    mu_X = jnp.mean(X, axis=0)
-    std_X = jnp.std(X, axis=0)
-
-    def _preprocess_fn(X):
-        return X #(X - mu_X) / std_X
-
-    # Fit whitening-PCA to compressed simulations
-    pca = PCA(num_components=dataset.fiducial_data.shape[-1]) 
-    pca.fit(_preprocess_fn(X)) # Fit on fiducial data?
-    
-    # Reparameterize compression with both transforms
-    pca_fn = lambda d: pca.transform(_preprocess_fn(d))
-
-    derivatives = jnp.zeros_like(dataset.derivatives)
-    for p in range(dataset.alpha.size):
-        derivatives = derivatives.at[:, p, :].set(
-            jax.vmap(pca_fn)(dataset.derivatives[:, p, :])
-        )
-
-    fiducial_data = jax.vmap(pca_fn)(dataset.fiducial_data)
-
-    C = jnp.cov(fiducial_data, rowvar=False)
-    Cinv = jnp.linalg.inv(C)
-    _derivatives = jnp.mean(derivatives, axis=0)
-    Finv = jnp.linalg.multi_dot([_derivatives, Cinv, _derivatives.T])
-
-    frozen_dataset = Dataset(
-        name=dataset.name,
-        alpha=dataset.alpha,
-        lower=dataset.lower,
-        upper=dataset.upper,
-        parameter_strings=dataset.parameter_strings,
-        Finv=Finv,
-        Cinv=Cinv,
-        C=C,
-        fiducial_data=fiducial_data,
-        data=jax.vmap(pca_fn)(dataset.data),
-        parameters=dataset.parameters,
-        derivatives=derivatives
-    )
-
-    return frozen_dataset 
 
 
 def freeze_out_parameters_dataset(dataset: Dataset) -> Dataset:
@@ -212,6 +156,10 @@ def get_prior(config: ConfigDict, dataset: Dataset) -> tfd.Distribution:
     # lower = jnp.ones((dataset.alpha.size,)) * -1e4
     # upper = jnp.ones((dataset.alpha.size,)) * 1e4
 
+    # print("FORCING QUIJOTE PRIOR")
+    # lower = jnp.asarray(dataset.lower) # Avoid tfp warning
+    # upper = jnp.asarray(dataset.upper)
+
     prior = tfd.Blockwise(
         [tfd.Uniform(l, u) for l, u in zip(lower, upper)]
     )
@@ -274,7 +222,9 @@ def sample_prior(
 @typecheck
 def get_linearised_data(
     config: ConfigDict, 
-    dataset: Dataset
+    dataset: Dataset,
+    *,
+    n_linear_sims: Optional[int] = None
 ) -> tuple[Float[Array, "n d"], Float[Array, "n p"]]:
     """
         Get linearised PDFs and get their MLEs 
@@ -297,7 +247,7 @@ def get_linearised_data(
     if config.n_linear_sims is not None:
         Y = sample_prior(
             key_parameters, 
-            config.n_linear_sims, 
+            config.n_linear_sims if n_linear_sims is None else n_linear_sims, 
             dataset.alpha, 
             dataset.lower, 
             dataset.upper, 
@@ -339,8 +289,9 @@ def get_datavector(
 
     # Choose a linearised model datavector or simply one of the Quijote realisations
     # which corresponds to a non-linearised datavector with Gaussian noise
-    if config.use_expectation or use_expectation:
+    if config.use_expectation or use_expectation or FORCE_NOISELESS_DATAVECTOR:
         print("Using expectation (noiseless datavector)...")
+
         datavector = jnp.mean(dataset.fiducial_data, axis=0, keepdims=True)
     else:
         if config.linearised:
@@ -351,7 +302,9 @@ def get_datavector(
             datavector = jr.multivariate_normal(key, mean=mu, cov=dataset.C, shape=(n,))
         else:
             print("Using non-linearised datavector...")
-            datavector = jr.choice(key, dataset.fiducial_data, shape=(n,))
+            # datavector = jr.choice(key, dataset.fiducial_data, shape=(n,))
+            ix = jr.choice(key, jnp.arange(len(dataset.fiducial_data)), shape=(n,))
+            datavector = dataset.fiducial_data[ix]
 
     if not (n > 1):
         datavector = jnp.squeeze(datavector, axis=0) # Remove batch axis by default
@@ -491,6 +444,7 @@ def get_compression_fn(key, config, dataset, *, results_dir):
     """ 
         Get linear or neural network compressor
     """ 
+
     assert config.compression in ["linear", "nn", "nn-lbfgs"]
 
     if config.compression == "nn" or config.compression == "nn-lbfgs":
@@ -506,29 +460,6 @@ def get_compression_fn(key, config, dataset, *, results_dir):
 
     if config.compression == "linear":
         compressor = get_linear_compressor(config, dataset)
-
-    # Fit PCA transform to simulated data and apply after compressing
-    # if config.use_pca:
-
-    #     # Compress simulations as usual 
-    #     # X = jax.vmap(compressor)(dataset.data, dataset.parameters) # Fit PCA to latins
-    #     X = jax.vmap(compressor, in_axes=(0, None))(dataset.fiducial_data, dataset.alpha) # Fit PCA to fiducials
-
-    #     # Standardise before PCA (don't get tricked by high variance due to units)
-    #     mu_X = jnp.mean(X, axis=0)
-    #     std_X = jnp.std(X, axis=0)
-
-    #     def _preprocess_fn(X):
-    #         return (X - mu_X) / std_X
-
-    #     # Fit whitening-PCA to compressed simulations
-    #     pca = PCA(num_components=dataset.alpha.size) 
-    #     pca.fit(_preprocess_fn(X)) # Fit on fiducial data?
-        
-    #     # Reparameterize compression with both transforms
-    #     compression_fn = lambda d, p: pca.transform(_preprocess_fn(compressor(d, p)))
-    # else:
-    #     compression_fn = lambda d, p: compressor(d, p)
 
     compression_fn = lambda d, p: compressor(d, p)
 

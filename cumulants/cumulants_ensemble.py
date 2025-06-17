@@ -1,5 +1,4 @@
 from typing import Tuple, Literal, Sequence, Optional, Callable, Self
-from functools import partial
 import jax
 import jax.numpy as jnp
 import jax.random as jr 
@@ -31,7 +30,7 @@ class Ensemble(eqx.Module):
         Ensemble of NDEs to be fit to simulations at a fixed redshift
     """
 
-    sbi_type: str
+    sbi_type: Literal["nle", "npe"]
     ndes: Tuple[eqx.Module]
     n_ndes: int
     weights: list[float]
@@ -85,7 +84,11 @@ class Ensemble(eqx.Module):
               so a key is provided, the ndes are set to inference mode to 
               imply this key is not used for dropout etc.
         """
+        assert self.n_ndes == len(self.weights), (
+            "ndes={}, weights={}".format(self.n_ndes), len(self.weights)
+        )
 
+        @typecheck
         def _maybe_vmap_nde_log_L(
             nde: eqx.Module, 
             data: Float[Array, "d"] | Float[Array, "n d"], 
@@ -119,22 +122,31 @@ class Ensemble(eqx.Module):
         ) -> Scalar:
             """ Joint log-probability function for ensemble of NDEs """
 
-            L = jnp.zeros(())
-            for n, (nde, weight) in enumerate(
-                zip(self.ndes, jnp.atleast_1d(self.weights)) # NOTE: lax.scan
-            ): 
+            # L = jnp.zeros(())
+            # for n, (nde, weight) in enumerate(
+            #     zip(self.ndes, jnp.atleast_1d(self.weights)) # NOTE: lax.scan
+            # ): 
 
-                if exists(key):
-                    key = jr.fold_in(key, n)
+            #     if exists(key):
+            #         key = jr.fold_in(key, n)
 
-                nde_log_L = _maybe_vmap_nde_log_L(nde=nde, data=data, theta=theta, key=key) 
+            #     nde_log_L = _maybe_vmap_nde_log_L(nde=nde, data=data, theta=theta, key=key) 
 
-                # Add likelihoods together for ensemble ndes
-                L_nde = weight * jnp.exp(nde_log_L) # NOTE: weight inside log-prob fun?! weighting doesn't distribute over batches of datavecotrs?
+            #     # Add likelihoods together for ensemble ndes
+            #     L_nde = weight * jnp.exp(nde_log_L) # NOTE: weight inside log-prob fun?! weighting doesn't distribute over batches of datavecotrs?
 
-                L = L + L_nde
+            #     L = L + L_nde
+            # L = jnp.log(L) 
 
-            L = jnp.log(L) 
+            keys = jr.split(key, self.n_ndes) if (key is not None) else [None] * self.n_ndes
+            nde_log_Ls = jax.tree.map(
+                lambda weight, key, nde: weight * jnp.exp(_maybe_vmap_nde_log_L(nde=nde, data=data, theta=theta, key=key)),
+                list(jnp.atleast_1d(self.weights)),
+                keys,
+                self.ndes
+            )
+
+            L = jnp.log(sum(nde_log_Ls)) 
 
             if exists(prior) and self.sbi_type == "nle":
                 L = L + prior.log_prob(theta) # NOTE: just adding prior is the difference between NPE and NLE?
@@ -185,7 +197,7 @@ class MultiEnsemble(eqx.Module):
 
     ensembles: list[Ensemble]
     prior: Optional[Distribution]
-    sbi_type: Literal["nle", "npe"] 
+    sbi_type: Literal["nle", "npe"]
 
     @typecheck
     def __init___(
@@ -205,7 +217,8 @@ class MultiEnsemble(eqx.Module):
         datavectors: list[Float[Array, "n d"]] | Float[Array, "n d"], 
         prior: Optional[Distribution] = None
     ) -> LogProbFn:
-        # Prioritise prior specified in args
+        
+        # Prioritise prior specified in args of this function
         _prior = default(prior, self.prior)
 
         if isinstance(datavectors, jax.Array):
@@ -223,18 +236,28 @@ class MultiEnsemble(eqx.Module):
 
         @typecheck
         def _multi_ensemble_log_prob_fn(theta: Float[Array, "p"]) -> Scalar:
+            
             # Loop over matched ensembles / datavectors NOTE: vmap over datavectors (when have multiple per redshift)?
-            L = jnp.zeros(())
+            # L = jnp.zeros(())
 
             # Don't need this loop? tree map or something? jax.tree.map(lambda f, x: jax.vmap(f)(x), f, x, is_leaf=lambda l: isinstance(l, ...)) x is stack of datavectors, f is ensemble nde
-            for ensemble, _datavectors in zip(self.ensembles, datavectors):
 
-                ensemble_log_L = ensemble.ensemble_likelihood(_datavectors)(theta) # No use of prior
+            # Zip redshift NDE ensembles with their datavectors
+            # for ensemble, _datavectors in zip(self.ensembles, datavectors):
 
-                L = L + ensemble_log_L
+            #     ensemble_log_L = ensemble.ensemble_likelihood(_datavectors)(theta) # No use of prior here
+
+            #     L = L + ensemble_log_L
+
+            L = jax.tree.map(
+                lambda d, e: e.ensemble_likelihood(d)(theta),
+                datavectors,
+                self.ensembles
+            )
+            L = jnp.sum(jnp.asarray(L))
 
             if self.sbi_type == "nle":
-                L = L + _prior.log_prob(theta) # NOTE: only if NLE!
+                L = L + _prior.log_prob(theta) 
 
             return L 
 
