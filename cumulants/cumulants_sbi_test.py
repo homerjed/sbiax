@@ -181,7 +181,6 @@ print("LINEARISED:", args.linearised)
 # args = ConfigDict()
 # args.seed                = 0
 # args.redshift            = 0.
-# args.sbi_type            = "nle"
 # args.linearised          = False
 # args.reduced_cumulants   = True
 # args.compression         = "linear"
@@ -195,7 +194,6 @@ config = cumulants_config(
     seed=args.seed, 
     redshift=args.redshift, 
     reduced_cumulants=args.reduced_cumulants,
-    sbi_type=args.sbi_type,
     linearised=args.linearised, 
     compression=args.compression,
     order_idx=args.order_idx,

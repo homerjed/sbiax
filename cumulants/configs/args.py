@@ -10,6 +10,8 @@ ArgsTuple: Type[tuple] = None
     CLI args 
 """
 
+DEFAULT_N_LINEAR_SIMS = 2000
+
 
 def args_to_namedtuple(args: argparse.Namespace) -> tuple:
     ArgsTuple = namedtuple("ArgsTuple", vars(args).keys()) # Create namedtuple type
@@ -17,7 +19,7 @@ def args_to_namedtuple(args: argparse.Namespace) -> tuple:
     return args
 
 
-def get_cumulants_sbi_args(using_notebook: bool = False) -> argparse.Namespace | ArgsTuple:
+def get_cumulants_sbi_args(multi_z: bool = False, using_notebook: bool = False) -> argparse.Namespace | ArgsTuple:
     parser = argparse.ArgumentParser(
         description="Run SBI experiment with cumulants of the matter PDF."
     )
@@ -54,7 +56,7 @@ def get_cumulants_sbi_args(using_notebook: bool = False) -> argparse.Namespace |
     parser.add_argument(
         "-n",
         "--n_linear_sims", 
-        default=10_000,
+        default=DEFAULT_N_LINEAR_SIMS,
         type=int,
         help="Number of linearised simulations (used for pre-training if non-linear simulations and requested)."
     )
@@ -97,14 +99,6 @@ def get_cumulants_sbi_args(using_notebook: bool = False) -> argparse.Namespace |
         help="Freeze parameters not in [Om, s8] to their fixed values, in hypercube simulations."
     )
     parser.add_argument(
-        "-t",
-        "--sbi_type", 
-        default="nle",
-        choices=["nle", "npe"],
-        type=str,
-        help="Method of SBI: neural likelihood (NLE) or posterior (NPE)."
-    )
-    parser.add_argument(
         "-u",
         "--use-tqdm", 
         default=True,
@@ -118,7 +112,11 @@ def get_cumulants_sbi_args(using_notebook: bool = False) -> argparse.Namespace |
         action=argparse.BooleanOptionalAction, 
         help="Say what's going on."
     )
-    args = parser.parse_args()
+
+    if not multi_z:
+        args = parser.parse_args()
+    else:
+        args, unknown = parser.parse_known_args()
 
     if using_notebook:
         args = args_to_namedtuple(args)
@@ -126,7 +124,7 @@ def get_cumulants_sbi_args(using_notebook: bool = False) -> argparse.Namespace |
     return args
 
 
-def get_cumulants_multi_z_args(using_notebook: bool = False) -> argparse.Namespace | ArgsTuple:
+def get_cumulants_multi_z_args(figure_one: bool = False, using_notebook: bool = False) -> argparse.Namespace | ArgsTuple:
     parser = argparse.ArgumentParser(
         description="Run SBI experiment with moments of the matter PDF."
     )
@@ -143,6 +141,20 @@ def get_cumulants_multi_z_args(using_notebook: bool = False) -> argparse.Namespa
         type=int, 
         help="Seed for datavector given fixed ensemble/experiment seed.", 
         default=0
+    )
+    parser.add_argument(
+        "-n_d",
+        "--n_datavectors", 
+        type=int,
+        default=10,
+        help="Number of independent datavectors to measure at each redshift." # NOTE: possibly make this depend on redshift, a list of ints
+    )
+    parser.add_argument(
+        "-n_p",
+        "--n_posteriors_sample", 
+        type=int,
+        default=1,
+        help="Number of posteriors to sample (using different measurements for each)." 
     )
     parser.add_argument(
         "-l",
@@ -170,8 +182,8 @@ def get_cumulants_multi_z_args(using_notebook: bool = False) -> argparse.Namespa
     parser.add_argument(
         "-n",
         "--n_linear_sims", 
+        default=DEFAULT_N_LINEAR_SIMS,
         type=int,
-        default=10_000,
         help="Number of linearised simulations (used for pre-training if non-linear simulations and requested)."
     )
     parser.add_argument(
@@ -213,34 +225,18 @@ def get_cumulants_multi_z_args(using_notebook: bool = False) -> argparse.Namespa
         help="Freeze parameters not in [Om, s8] to their fixed values, in hypercube simulations."
     )
     parser.add_argument(
-        "-t",
-        "--sbi_type", 
-        choices=["nle", "npe"],
-        default="nle",
-        type=str,
-        help="Method of SBI: neural likelihood (NLE) or posterior (NPE)."
-    )
-    parser.add_argument(
-        "-n_d",
-        "--n_datavectors", 
-        type=int,
-        default=10,
-        help="Number of independent datavectors to measure at each redshift." # NOTE: possibly make this depend on redshift, a list of ints
-    )
-    parser.add_argument(
-        "-n_p",
-        "--n_posteriors_sample", 
-        type=int,
-        default=1,
-        help="Number of posteriors to sample (using different measurements for each)." 
-    )
-    parser.add_argument(
         "-v",
         "--verbose", 
         default=False,
         action=argparse.BooleanOptionalAction, 
         help="Say what's going on."
     )
+
+    # If running figure one scripts, don't parse these args (reset them inside figure one)
+    if not figure_one:
+        args = parser.parse_args()
+    else:
+        args, unknown = parser.parse_known_args()
 
     if using_notebook:
         args = parser.parse_args([])
@@ -268,6 +264,13 @@ def get_figure_one_args():
         default=0
     )
     parser.add_argument(
+        "-n_d",
+        "--n_datavectors", 
+        type=int,
+        default=10,
+        help="Number of independent datavectors to measure at each redshift." # NOTE: possibly make this depend on redshift, a list of ints
+    )
+    parser.add_argument(
         "-l",
         "--linearised", 
         default=True,
@@ -292,8 +295,8 @@ def get_figure_one_args():
     parser.add_argument(
         "-n",
         "--n_linear_sims", 
+        default=DEFAULT_N_LINEAR_SIMS,
         type=int,
-        default=10_000,
         help="Number of linearised simulations (used for pre-training if non-linear simulations and requested)."
     )
     parser.add_argument(
@@ -311,14 +314,6 @@ def get_figure_one_args():
         nargs="+", 
         type=float,
         help="Physical scales."
-    )
-    parser.add_argument(
-        "-t",
-        "--sbi_type", 
-        default="nle",
-        choices=["nle", "npe"],
-        type=str,
-        help="Method of SBI: neural likelihood (NLE) or posterior (NPE)."
     )
     parser.add_argument(
         "-f",

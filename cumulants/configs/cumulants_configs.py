@@ -185,7 +185,6 @@ def default_posterior_sampling(config, no_config=False):
 def cumulants_config(
     seed: int = 0, 
     redshift: float = 0., 
-    sbi_type: Literal["nle", "npe"] = "nle", 
     linearised: bool = True, 
     compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
     order_idx: list[int] = [0, 1, 2],
@@ -224,7 +223,7 @@ def cumulants_config(
     config.use_scalers        = USE_SCALERS # Input scalers for (xi, pi) in NDEs (NOTE: checked that scalings aren't optimised!)
 
     # SBI
-    config.sbi_type           = sbi_type
+    config.sbi_type           = "nle"
 
     # Posterior sampling
     config = default_posterior_sampling(config)
@@ -239,7 +238,6 @@ def cumulants_config(
 def arch_search_cumulants_config( # Copy of the above config for architecture search
     seed: int = 0, 
     redshift: float = 0., 
-    sbi_type: Literal["nle", "npe"] = "nle", 
     linearised: bool = True, 
     compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
     order_idx: list[int] = [0, 1, 2],
@@ -271,7 +269,7 @@ def arch_search_cumulants_config( # Copy of the above config for architecture se
     config.use_scalers        = USE_SCALERS # Input scalers for (xi, pi) in NDEs (NOTE: checked that scalings aren't optimised!)
 
     # SBI
-    config.sbi_type           = sbi_type
+    config.sbi_type           = "nle" 
 
     # Posterior sampling
     config = default_posterior_sampling(config)
@@ -286,7 +284,6 @@ def arch_search_cumulants_config( # Copy of the above config for architecture se
 def bulk_cumulants_config(
     seed: int = 0, 
     redshift: float = 0., 
-    sbi_type: Literal["nle", "npe"] = "nle", 
     linearised: bool = True, 
     compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
     order_idx: list[int] = [0, 1, 2],
@@ -325,7 +322,7 @@ def bulk_cumulants_config(
     config.use_scalers        = USE_SCALERS 
 
     # SBI
-    config.sbi_type           = sbi_type
+    config.sbi_type           = "nle" 
 
     # Posterior sampling
     config = default_posterior_sampling(config)
@@ -340,7 +337,6 @@ def bulk_cumulants_config(
 def bulk_pdf_config(
     seed: int = 0, 
     redshift: float = 0., 
-    sbi_type: Literal["nle", "npe"] = "nle", 
     linearised: bool = True, 
     compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
     order_idx: list[int] = [0, 1, 2],
@@ -352,7 +348,6 @@ def bulk_pdf_config(
     return bulk_cumulants_config(
         seed=seed,
         redshift=redshift,
-        sbi_type=sbi_type,
         linearised=linearised,
         compression=compression,
         order_idx=order_idx,

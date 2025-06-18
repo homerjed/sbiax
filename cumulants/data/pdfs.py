@@ -764,6 +764,7 @@ def get_calculated_cumulants_data(
 
         return return_dataset
 
+    # Create a fresh dataset if required, or generate one if it does not exist
     if not FORCE_RECOMPUTE_DATASET:
         try:
             print("Loading dataset:\n\t", dataset_filename)
@@ -1004,7 +1005,6 @@ def get_bulk_dataset(args, pdfs=False):
     config = bulk_cumulants_config(
         seed=args.seed, 
         redshift=args.redshift, 
-        sbi_type=args.sbi_type,
         linearised=args.linearised, 
         compression=args.compression,
         order_idx=args.order_idx,
@@ -1033,7 +1033,6 @@ def get_multi_z_bulk_pdf_fisher_forecast(args):
         config = bulk_cumulants_config(
             seed=args.seed, 
             redshift=redshift, # Force redshift!
-            sbi_type=args.sbi_type,
             linearised=args.linearised, 
             compression=args.compression,
             order_idx=args.order_idx,

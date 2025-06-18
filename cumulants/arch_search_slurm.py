@@ -705,7 +705,6 @@ if __name__ == "__main__":
     config = arch_search_cumulants_config(
         seed=0, # Gets replaced in objective!
         redshift=args.redshift, 
-        sbi_type=args.sbi_type,
         linearised=args.linearised, 
         compression=args.compression,
         order_idx=args.order_idx,

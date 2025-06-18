@@ -1,4 +1,3 @@
-import argparse
 from collections import namedtuple
 import os
 import jax
@@ -14,10 +13,7 @@ from configs.args import (
 )
 from configs.configs import (
     get_base_results_dir, 
-    get_multi_z_posterior_dir, 
-)
-from configs.ensembles_configs import (
-    ensembles_cumulants_config, ensembles_bulk_cumulants_config 
+    get_multi_z_posterior_filename 
 )
 from data.constants import (
     get_quijote_parameters, 
@@ -88,6 +84,31 @@ def get_posterior_object(posterior_file):
     posterior_tuple = PosteriorTuple(*(posterior_file[key] for key in posterior_file.files))
     return posterior_tuple
 
+def maybe_marginalise(
+    posterior_object, 
+    alpha, 
+    parameter_strings, 
+    Finv_bulk_pdfs_all_z, 
+    *,
+    marginalise, 
+    target_idx
+):
+    # Marginalise posterior object if required
+
+    if marginalise:
+        posterior_object = posterior_object._replace(
+            Finv=posterior_object.Finv[target_idx, :][:, target_idx]
+        )
+        posterior_object = posterior_object._replace(
+            samples=posterior_object.samples[:, target_idx]
+        )
+        alpha = alpha[target_idx] 
+        parameter_strings = [parameter_strings[t] for t in target_idx]
+        Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z[target_idx, :][:, target_idx] 
+
+    return posterior_object, alpha, parameter_strings, Finv_bulk_pdfs_all_z
+
+
 # General constants
 data_dir, _, _ = get_save_and_load_dirs()
 
@@ -106,9 +127,9 @@ figs_dir = os.path.join(get_base_results_dir(), "figure_one/")
 if not os.path.exists(figs_dir):
     os.makedirs(figs_dir, exist_ok=True)
 
-ARGS = get_figure_one_args() # Args for figure one
+figure_one_args = get_figure_one_args() # Args for figure one
 
-args = get_cumulants_multi_z_args() # Blueprint args for analysis
+multi_z_args = get_cumulants_multi_z_args(figure_one=True) # Blueprint multi_z_args for analysis
 
 # Plotting properties for bulk / tails
 plotting_dict = dict(
@@ -117,64 +138,47 @@ plotting_dict = dict(
 )
 
 # Args that are shared between bulk and tails SBI analyses/posteriors
-args.seed = ARGS.seed
-args.linearised = ARGS.linearised 
-args.pre_train = ARGS.pre_train
-args.order_idx = ARGS.order_idx
-args.freeze_parameters = ARGS.freeze_parameters
-args.n_linear_sims = ARGS.n_linear_sims
-
-posterior_objects = dict(bulk=None, tails=None)
+multi_z_args.seed              = figure_one_args.seed
+multi_z_args.seed_datavector   = figure_one_args.seed_datavector
+multi_z_args.n_datavectors     = figure_one_args.n_datavectors
+multi_z_args.scales            = figure_one_args.scales
+multi_z_args.linearised        = figure_one_args.linearised 
+multi_z_args.pre_train         = figure_one_args.pre_train
+multi_z_args.order_idx         = figure_one_args.order_idx
+multi_z_args.freeze_parameters = figure_one_args.freeze_parameters
+multi_z_args.n_linear_sims     = figure_one_args.n_linear_sims
 
 # Loop through bulk / tails (just grab PDF Fisher forecast, no posterior for PDFs)
+posterior_objects = dict(bulk=None, tails=None)
 for bulk_or_tails in ["bulk", "tails"]:
 
-    # Force args for posterior to be bulk or tails (for posterior save dir)
-    args.bulk_or_tails = bulk_or_tails 
+    # Force multi_z_args for posterior to be bulk or tails (for posterior save dir)
+    multi_z_args.bulk_or_tails = bulk_or_tails 
 
     # Posterior for bulk/tails for a given seed
-    posterior_save_dir = get_multi_z_posterior_dir(args)
-    posterior_filename = os.path.join(
-        posterior_save_dir, 
-        "multi_z_posterior_{}{}.npz".format(
-            args.seed, 
-            ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else ""
-        ) 
-    )
+    posterior_filename = get_multi_z_posterior_filename(multi_z_args)
     posterior_file = np.load(posterior_filename)
     posterior_object = get_posterior_object(posterior_file)
 
     posterior_objects[bulk_or_tails] = posterior_object
 
+    print("MULTI-Z POSTERIOR FILENAME:\n", posterior_filename)
     print("POSTERIOR OBJECT", jax.tree.map(lambda x: x.shape, posterior_object))
 
 # Get the bulk PDF Fisher forecast for all redshifts 
 # (easier to load frozen or not since it autosaves...)
-Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, args)
+Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, multi_z_args)
+Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z / multi_z_args.n_datavectors 
 
 """ 
     Plot the posteriors for SBI on the bulk and tails, bulk PDF Fisher 
 """
 
-def maybe_marginalise(posterior_object, alpha, parameter_strings, Finv_bulk_pdfs_all_z, marginalise):
-    # Marginalise posterior object if required
-    if marginalise:
-        posterior_object = posterior_object._replace(
-            Finv=posterior_object.Finv[target_idx, :][:, target_idx]
-        )
-        posterior_object = posterior_object._replace(
-            samples=posterior_object.samples[:, target_idx]
-        )
-        alpha = alpha[target_idx] 
-        parameter_strings = [parameter_strings[t] for t in target_idx]
-        Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z[target_idx, :][:, target_idx] 
-    return posterior_object, alpha, parameter_strings, Finv_bulk_pdfs_all_z
-
 # Load posteriors from bulk / tails for marginalised and non-marginalised cases
 for marginalised in [True, False]:
 
     # Don't plot marginalised posterior if freezing parameters, 'same' effect...
-    if marginalised and args.freeze_parameters:
+    if marginalised and multi_z_args.freeze_parameters:
         continue
 
     # Plot 
@@ -197,10 +201,11 @@ for marginalised in [True, False]:
             alpha, 
             parameter_strings, 
             Finv_bulk_pdfs_all_z, 
+            target_idx=target_idx,
             marginalise=marginalised
         )
 
-        if args.freeze_parameters: 
+        if multi_z_args.freeze_parameters: 
             _alpha = alpha[target_idx]
             _parameter_strings = [parameter_strings[t] for t in target_idx]
         
@@ -246,7 +251,7 @@ for marginalised in [True, False]:
             #     for n, _summary in enumerate(_summaries):
             #         c.add_marker(
             #             location=marker(_summary, _parameter_strings), 
-            #             name=r"$\hat{\pi}[\hat{\xi}]$ " + "z={}, n={}".format(args.redshifts[n_z], n) + title + n * " ", # Whitespace for unique name?
+            #             name=r"$\hat{\pi}[\hat{\xi}]$ " + "z={}, n={}".format(multi_z_args.redshifts[n_z], n) + title + n * " ", # Whitespace for unique name?
             #             color=plotting_dict[bulk_or_tails]["color"],
             #             show_label_in_legend=False if n > 0 else True
             #         )
@@ -255,11 +260,6 @@ for marginalised in [True, False]:
                 name=r"$\bar{\pi}[\hat{\xi}_i,...]$ " + title, # Whitespace for unique name?
                 color=plotting_dict[bulk_or_tails]["color"]
             )
-
-    # Scale Fisher matrix for bulk PDF by number of datavectors (already done for other Finvs)
-    # POSTERIOR OBJECT SUMMARIES SHAPE (3, 10, 5)
-    _, n_datavectors, _ = _posterior_object.summaries.shape
-    _Finv_bulk_pdfs_all_z = _Finv_bulk_pdfs_all_z / n_datavectors 
 
     # Fisher forecast for bulk of PDF over all redshifts
     c.add_chain(
@@ -287,12 +287,12 @@ for marginalised in [True, False]:
     fig.suptitle(
         r"{} SBI (bulk & tails) & $F_{{\Sigma}}^{{-1}}$".format("$k_n$") + "\n" +
         "{} z={},\n $n_s$={}, (pre-train $n_s$={}),\n R={} Mpc,\n $k_n$={}".format(
-                ("linearised" if args.linearised else "non-linear") + "\n",
-                "[{}]".format(", ".join(map(str, args.redshifts))),
-                args.n_linear_sims if args.linearised else 2000, 
-                args.n_linear_sims if args.pre_train else None,
-                "[{}]".format(", ".join(map(str, args.scales))),
-                "[{}]".format(", ".join(map(str, [["var.", "skew.", "kurt."][_] for _ in args.order_idx])))
+                ("linearised" if multi_z_args.linearised else "non-linear") + "\n",
+                "[{}]".format(", ".join(map(str, multi_z_args.redshifts))),
+                multi_z_args.n_linear_sims if multi_z_args.linearised else 2000, 
+                multi_z_args.n_linear_sims if multi_z_args.pre_train else None,
+                "[{}]".format(", ".join(map(str, multi_z_args.scales))),
+                "[{}]".format(", ".join(map(str, [["var.", "skew.", "kurt."][_] for _ in multi_z_args.order_idx])))
             ),
         multialignment='center'
     )
@@ -300,10 +300,10 @@ for marginalised in [True, False]:
     # Naming convention for figure one
     sub_figs_dir = os.path.join(
         figs_dir, 
-        "frozen/" if args.freeze_parameters else "nofrozen/", 
-        "linearised/" if args.linearised else "nonlinearised/", 
-        "pretrain/" if args.pre_train else "nopretrain/", 
-        "m{}/".format("".join(map(str, args.order_idx)))
+        "frozen/" if multi_z_args.freeze_parameters else "nofrozen/", 
+        "linearised/" if multi_z_args.linearised else "nonlinearised/", 
+        "pretrain/" if multi_z_args.pre_train else "nopretrain/", 
+        "m{}/".format("".join(map(str, multi_z_args.order_idx)))
     )
     if not os.path.exists(sub_figs_dir):
         os.makedirs(sub_figs_dir, exist_ok=True)
@@ -311,9 +311,9 @@ for marginalised in [True, False]:
     filename = os.path.join(
         sub_figs_dir, 
         "figure_one_{}{}{}.pdf".format(
-            args.seed, 
+            multi_z_args.seed, 
             "_marginalised" if marginalised else "",
-            ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else ""
+            ("_" + str(multi_z_args.seed_datavector)) if multi_z_args.seed_datavector is not None else ""
         )
     )
 

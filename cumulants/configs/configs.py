@@ -69,7 +69,6 @@ def get_config_subdir(
         "arch_search" if arch_search else None,
         "frozen" if args.freeze_parameters else "nonfrozen",
         args.bulk_or_tails,
-        args.sbi_type,
         "linearised" if args.linearised else "nonlinearised",
         args.compression,
         "pretrain" if args.pre_train else "nopretrain",
@@ -138,6 +137,27 @@ def get_multi_z_posterior_dir(args: argparse.Namespace) -> str:
     print("Multi-z posterior dir:\n", multi_z_dir)
 
     return multi_z_dir
+
+
+def get_multi_z_posterior_filename(args: argparse.Namespace) -> str:
+    # Save posterior, Fisher and summary
+
+    posterior_save_dir = get_multi_z_posterior_dir(args)
+
+    if not os.path.exists(posterior_save_dir):
+        os.makedirs(posterior_save_dir, exist_ok=True)
+
+    print("Multi-z posterior save dir:\n\t", posterior_save_dir)
+    
+    # Posterior depends on the seed of the SBI experiment and the seed used to generate the datavector
+    posterior_filename = os.path.join(
+        posterior_save_dir, 
+        "multi_z_posterior_{}{}.npz".format( # NOTE: was just 'posterior_...' before
+            args.seed, 
+            ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else ""
+        ) 
+    )
+    return posterior_filename
 
 
 """

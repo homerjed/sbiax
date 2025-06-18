@@ -13,7 +13,7 @@ N_PARALLEL=50
 N_GB=8
 N_CPU=8
 
-N_LINEAR_SIMS=10000
+N_LINEAR_SIMS=2000
 FIXED_SEED=0 # Repeat this for linearised...  NOTE: add this to formatting for sbatch job names!
 
 TIMESTAMP=$(date +'%m%d_%H%M')

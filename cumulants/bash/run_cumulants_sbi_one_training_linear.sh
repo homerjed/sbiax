@@ -101,12 +101,11 @@ for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
                     for z in 0.0 0.5 1.0; do
                         cmd1="RESULTS_DIR=$RESULTS_DIR python cumulants_sbi.py \
 --seed $global_seed \
---sbi_type nle \
 --compression linear \
 $LINEARISED_FLAG \
 $PRETRAIN_FLAG \
 --n_linear_sims $N_LINEAR_SIMS \
---order_idx $order_idx_args \
+--order_idx "$order_idx_args" \
 --redshift $z \
 --no-use-tqdm \
 --bulk_or_tails $bt \
@@ -116,8 +115,8 @@ $FREEZE_FLAG"
                             cat <<END
 #!/bin/bash
 #SBATCH --job-name=sbi_${global_seed}_${bt_flag}_${l_flag}_${f_flag}_z${z}
-#SBATCH --output=$OUT_DIR/sbi_${bt_flag}_${l_flag}_${f_flag}_z${z}_fixed.out
-#SBATCH --error=$OUT_DIR/sbi_${bt_flag}_${l_flag}_${f_flag}_z${z}_fixed.err
+#SBATCH --output=$OUT_DIR/sbi_${bt_flag}_${l_flag}_${f_flag}_z${z}_fixed_%j.out
+#SBATCH --error=$OUT_DIR/sbi_${bt_flag}_${l_flag}_${f_flag}_z${z}_fixed_%j.err
 #SBATCH --partition=cluster
 #SBATCH --time=06:00:00
 #SBATCH --mem=${N_GB}GB
@@ -141,17 +140,17 @@ END
                         echo "${sbi_job_ids[*]}"
                     )
 
+                    multi_z_job_ids=()
                     if [[ "$ONLY_RUN_FIGURES" == false ]]; then
                         cmd2="RESULTS_DIR=$RESULTS_DIR python cumulants_multi_z.py \
 --seed $global_seed \
 --seed_datavector \$SLURM_ARRAY_TASK_ID \
 --n_datavectors $N_DATAVECTORS \
---sbi_type nle \
 --compression linear \
 $LINEARISED_FLAG \
 $PRETRAIN_FLAG \
 --n_linear_sims $N_LINEAR_SIMS \
---order_idx $order_idx_args \
+--order_idx "$order_idx_args" \
 --bulk_or_tails $bt \
 $FREEZE_FLAG"
 
@@ -161,8 +160,8 @@ $FREEZE_FLAG"
                             cat <<END
 #!/bin/bash
 #SBATCH --job-name=m_z_${global_seed}_${bt_flag}_${l_flag}_${f_flag}
-#SBATCH --output=$OUT_DIR/multi_z_${bt_flag}_${l_flag}_${f_flag}_%a.out
-#SBATCH --error=$OUT_DIR/multi_z_${bt_flag}_${l_flag}_${f_flag}_%a.err
+#SBATCH --output=$OUT_DIR/multi_z_${bt_flag}_${l_flag}_${f_flag}_%a_%j.out
+#SBATCH --error=$OUT_DIR/multi_z_${bt_flag}_${l_flag}_${f_flag}_%a_%j.err
 #SBATCH --array=$JOB_ARRAY_STR
 #SBATCH --partition=cluster
 #SBATCH --time=08:00:00
@@ -190,15 +189,16 @@ END
                         echo "$final_script" | sbatch
                     fi
 
+                    figure_one_ids=()
                     figure_cmd="RESULTS_DIR=$RESULTS_DIR python figure_one.py \
 --seed $global_seed \
 --seed_datavector \$SLURM_ARRAY_TASK_ID \
+--n_datavectors $N_DATAVECTORS \
 --n_linear_sims $N_LINEAR_SIMS \
---sbi_type nle \
 --compression linear \
 $LINEARISED_FLAG \
 $PRETRAIN_FLAG \
---order_idx $order_idx_args \
+--order_idx "$order_idx_args" \
 $FREEZE_FLAG"
 
                     # Need to run this after both bulk and tails multi_z samplings
@@ -206,8 +206,8 @@ $FREEZE_FLAG"
                         cat <<END
 #!/bin/bash
 #SBATCH --job-name=figure_one
-#SBATCH --output=$OUT_DIR/figure_one_${global_seed}_${l_flag}_${f_flag}_%a.out
-#SBATCH --error=$OUT_DIR/figure_one_${global_seed}_${l_flag}_${f_flag}_%a.err
+#SBATCH --output=$OUT_DIR/figure_one_${global_seed}_${l_flag}_${f_flag}_%a_%j.out
+#SBATCH --error=$OUT_DIR/figure_one_${global_seed}_${l_flag}_${f_flag}_%a_%j.err
 #SBATCH --array=$JOB_ARRAY_STR
 #SBATCH --partition=cluster
 #SBATCH --time=02:00:00
@@ -220,11 +220,17 @@ $FREEZE_FLAG"
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
 
-echo "Running final figure script"
+echo "Running final figure one script"
 $figure_cmd
 END
                     )
-                    echo "$figure_job" | sbatch
+                    figure_job_id=$(echo "$figure_job" | sbatch | awk '{print $4}')
+                    figure_one_ids+=("$figure_job_id")
+
+                    figure_one_deps=$(
+                        IFS=":"
+                        echo "${figure_one_ids[*]}"
+                    )
 
                 done
             done
@@ -232,3 +238,33 @@ END
     done
 done
 done
+
+figure_two_cmd="
+N_DATAVECTOR_SEEDS=$N_SEEDS \
+N_REPEATED_SBI_SEEDS=$N_SEEDS_GLOBAL \
+RESULTS_DIR=$RESULTS_DIR \
+python figure_two2.py
+"
+
+figure_two_job=$(
+    cat <<END
+#!/bin/bash
+#SBATCH --job-name=figure_two
+#SBATCH --output=$OUT_DIR/figure_two_${l_flag}_${f_flag}_%j.out
+#SBATCH --error=$OUT_DIR/figure_two_${l_flag}_${f_flag}_%j.err
+#SBATCH --partition=cluster
+#SBATCH --time=04:00:00
+#SBATCH --mem=${N_GB}GB
+#SBATCH --cpus-per-task=$N_CPU
+#SBATCH --mail-user=jed.homer@physik.lmu.de
+#SBATCH --mail-type=begin,end,fail
+#SBATCH --dependency=afterok:$sbi_deps:$multi_z_deps:$figure_one_deps
+
+cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
+source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
+
+echo "Running final figure two script"
+$figure_two_cmd
+END
+)
+echo "$figure_two_job" | sbatch

@@ -70,7 +70,6 @@ def get_datasets(args: argparse.Namespace) -> tuple[ConfigDict, Dataset, dict[st
         config = _config(
             seed=args.seed, 
             redshift=args.redshift, 
-            sbi_type=args.sbi_type,
             linearised=args.linearised, 
             compression=args.compression,
             order_idx=args.order_idx,

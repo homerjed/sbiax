@@ -201,7 +201,7 @@ ndes = get_ndes_from_config(
 
 print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None) # Check scaler mu, std are not changed by gradient
 
-ensemble = Ensemble(ndes, sbi_type=config.sbi_type)
+ensemble = Ensemble(ndes)
 
 """
     Pre-train NDEs on linearised data
@@ -232,7 +232,7 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
     ensemble, stats = train_ensemble(
         pre_train_key, 
         ensemble,
-        train_mode=config.sbi_type,
+        train_mode="nle",
         train_data=(X_l, Y_l), 
         opt=opt,
         n_batch=config.pretrain.n_batch,
@@ -354,7 +354,7 @@ opt = getattr(optax, config.train.opt)(config.train.lr)
 ensemble, stats = train_ensemble(
     train_key, 
     ensemble,
-    train_mode=config.sbi_type,
+    train_mode="nle",
     train_data=(X, dataset.parameters), 
     opt=opt,
     n_batch=config.train.n_batch,

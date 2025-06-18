@@ -96,7 +96,6 @@ for exp_dict in exp_dicts:
 
             config = ensembles_config(
                 seed=args.seed, # Defaults if run without argparse args
-                sbi_type=args.sbi_type, 
                 linearised=args.linearised,
                 n_linear_sims=args.n_linear_sims,
                 compression=args.compression,
@@ -483,7 +482,6 @@ for exp_dict in exp_dicts:
                 config = ensembles_config(
                     # seed=args.seed, # Defaults if run without argparse args
                     seed=_global_seed,
-                    sbi_type=args.sbi_type, 
                     linearised=args.linearised,
                     n_linear_sims=args.n_linear_sims,
                     compression=args.compression,
@@ -667,7 +665,6 @@ for exp_dict in exp_dicts:
 
     parts = [
         "frozen" if config.freeze_parameters else "nonfrozen",
-        # config.sbi_type,
         "linearised" if config.linearised else "nonlinearised",
         config.compression,
         "pretrain" if config.pre_train else "nopretrain",
@@ -803,7 +800,6 @@ for exp_dict in exp_dicts:
 
         parts = [
             "frozen" if config.freeze_parameters else "nonfrozen",
-            # config.sbi_type,
             "linearised" if config.linearised else "nonlinearised",
             config.compression,
             "pretrain" if config.pre_train else "nopretrain",

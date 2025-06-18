@@ -33,7 +33,7 @@ class Ensemble(eqx.Module):
     sbi_type: Literal["nle", "npe"]
     ndes: Tuple[eqx.Module]
     n_ndes: int
-    weights: list[float]
+    weights: Float[Array, "n"]
 
     @typecheck
     def __init__(
@@ -46,10 +46,6 @@ class Ensemble(eqx.Module):
         self.sbi_type = sbi_type
         self.weights = default_weights(weights, ndes)
         self.n_ndes = len(ndes)
-
-    # @property
-    # def n_ndes(self):
-    #     return len(self.ndes)
 
     @typecheck
     def nde_log_prob_fn(
@@ -197,7 +193,7 @@ class MultiEnsemble(eqx.Module):
 
     ensembles: list[Ensemble]
     prior: Optional[Distribution]
-    sbi_type: Literal["nle", "npe"]
+    sbi_type: Literal["nle", "npe"] = "nle"
 
     @typecheck
     def __init___(
@@ -239,8 +235,6 @@ class MultiEnsemble(eqx.Module):
             
             # Loop over matched ensembles / datavectors NOTE: vmap over datavectors (when have multiple per redshift)?
             # L = jnp.zeros(())
-
-            # Don't need this loop? tree map or something? jax.tree.map(lambda f, x: jax.vmap(f)(x), f, x, is_leaf=lambda l: isinstance(l, ...)) x is stack of datavectors, f is ensemble nde
 
             # Zip redshift NDE ensembles with their datavectors
             # for ensemble, _datavectors in zip(self.ensembles, datavectors):
