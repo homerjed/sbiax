@@ -18,7 +18,8 @@ from configs.configs import (
 from data.constants import (
     get_quijote_parameters, 
     get_save_and_load_dirs,
-    get_target_idx
+    get_target_idx,
+    get_Finv_planck
 )
 from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
 
@@ -69,15 +70,6 @@ def customize_plot(fig, lw=1.5, fs=16):
                     coll.set_sizes([50] * len(sizes))
     return fig
 
-"""
-    Loop through seeds, getting...
-    - configs for ensembles for 
-        - bulk and bulk + tails
-        -over all redshifts, 
-    ...loading posteriors from them.
-    Then plot posteriors together with the bulk PDF Fisher forecast.
-"""
-
 def get_posterior_object(posterior_file):
     # Create posterior object from .npz posterior file that contains samples, log prob, Finv, summary, ...
     PosteriorTuple = namedtuple("PosteriorTuple", posterior_file.files)
@@ -108,6 +100,14 @@ def maybe_marginalise(
 
     return posterior_object, alpha, parameter_strings, Finv_bulk_pdfs_all_z
 
+"""
+    Loop through seeds, getting...
+    - configs for ensembles for 
+        - bulk and bulk + tails
+        -over all redshifts, 
+    ...loading posteriors from them.
+    Then plot posteriors together with the bulk PDF Fisher forecast.
+"""
 
 # General constants
 data_dir, _, _ = get_save_and_load_dirs()
@@ -147,6 +147,7 @@ multi_z_args.pre_train         = figure_one_args.pre_train
 multi_z_args.order_idx         = figure_one_args.order_idx
 multi_z_args.freeze_parameters = figure_one_args.freeze_parameters
 multi_z_args.n_linear_sims     = figure_one_args.n_linear_sims
+multi_z_args.use_planck        = figure_one_args.use_planck
 
 # Loop through bulk / tails (just grab PDF Fisher forecast, no posterior for PDFs)
 posterior_objects = dict(bulk=None, tails=None)
@@ -159,15 +160,15 @@ for bulk_or_tails in ["bulk", "tails"]:
     posterior_filename = get_multi_z_posterior_filename(multi_z_args)
     posterior_file = np.load(posterior_filename)
     posterior_object = get_posterior_object(posterior_file)
-
-    posterior_objects[bulk_or_tails] = posterior_object
+ 
+    posterior_objects[bulk_or_tails] = posterior_object # NOTE: already F_planck'd 
 
     print("MULTI-Z POSTERIOR FILENAME:\n", posterior_filename)
     print("POSTERIOR OBJECT", jax.tree.map(lambda x: x.shape, posterior_object))
 
 # Get the bulk PDF Fisher forecast for all redshifts 
 # (easier to load frozen or not since it autosaves...)
-Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, multi_z_args)
+Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, multi_z_args) # NOTE: already F_planck'd 
 Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z / multi_z_args.n_datavectors 
 
 """ 

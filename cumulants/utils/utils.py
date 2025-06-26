@@ -2,21 +2,28 @@ import os
 import argparse
 from typing import Literal, Callable
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 import jax
 import jax.numpy as jnp
 import equinox as eqx
 import numpy as np
 from ml_collections import ConfigDict
-from chainconsumer import Chain, ChainConsumer, Truth, PlotConfig
+from chainconsumer import Chain, ChainConsumer, Truth
 
-from sbiax.utils import make_df, marker
+from sbiax.utils import make_df
 from sbiax.ndes import Scaler
 
-from configs import cumulants_config, bulk_cumulants_config, bulk_pdf_config, get_results_dir
+from configs.log import setup_module_logger, get_log_level
+from configs.configs import get_results_dir
+from configs.cumulants_configs import cumulants_config, bulk_cumulants_config, bulk_pdf_config
 from data.common import Dataset
 from data.pdfs import BulkCumulantsDataset, BulkPDFsDataset, TailsCumulantsDataset
 from data.cumulants import CumulantsDataset
+
+logger = setup_module_logger(__name__, level=get_log_level())
+
+DatasetType = CumulantsDataset | BulkCumulantsDataset | BulkPDFsDataset | TailsCumulantsDataset
+
+USE_QUIJOTE_TAILS = True if os.environ.get("USE_QUIJOTE_TAILS", "").lower() in ("1", "true") else False
 
 
 def finite_samples_log_prob(samples_log_prob):
@@ -33,7 +40,9 @@ def finite_samples_log_prob(samples_log_prob):
 
 def get_dataset_and_config(
     bulk_or_tails: Literal["bulk", "bulk_pdf", "tails"]
-) -> tuple[Callable[[...], Dataset], Callable[[...], ConfigDict]]:
+) -> tuple[
+    Callable[[...], DatasetType], Callable[[...], ConfigDict]
+]:
 
     assert bulk_or_tails in ["bulk", "bulk_pdf", "tails"], (
         "bulk_or_tails == {}".format(bulk_or_tails)
@@ -41,13 +50,22 @@ def get_dataset_and_config(
 
     if bulk_or_tails == "bulk": 
         dataset_constructor = BulkCumulantsDataset
+
         config = bulk_cumulants_config 
     if bulk_or_tails == "bulk_pdf":
         dataset_constructor = BulkPDFsDataset
+
         config = bulk_pdf_config 
     if bulk_or_tails == "tails":
-        print("NOTE:\n\tusing calculations for full-shape dataset.")
-        dataset_constructor = TailsCumulantsDataset # CumulantsDataset
+        if USE_QUIJOTE_TAILS:
+            logger.info("NOTE:\n\tusing Quijote data for full-shape dataset.")
+
+            dataset_constructor = CumulantsDataset
+        else:
+            logger.info("NOTE:\n\tusing calculations for full-shape dataset.")
+
+            dataset_constructor = TailsCumulantsDataset 
+
         config = cumulants_config 
 
     return dataset_constructor, config
@@ -59,7 +77,6 @@ def get_datasets(args: argparse.Namespace) -> tuple[ConfigDict, Dataset, dict[st
     dataset_types = ["bulk", "bulk_pdf", "tails"]
 
     assert args.bulk_or_tails in dataset_types
-
 
     datasets, configs = dict(), dict()
     for dataset_type in dataset_types:
@@ -76,7 +93,8 @@ def get_datasets(args: argparse.Namespace) -> tuple[ConfigDict, Dataset, dict[st
             scales=args.scales,
             freeze_parameters=args.freeze_parameters,
             n_linear_sims=args.n_linear_sims,
-            pre_train=args.pre_train
+            pre_train=args.pre_train,
+            use_planck=args.use_planck
         )
 
         results_dir = get_results_dir(config, args)
@@ -286,8 +304,7 @@ def plot_summaries(X, P, dataset, results_dir=None):
         plt.show()
 
 
-
-def plot_summaries_fiducial(X, X_, alpha, dataset, results_dir=None):
+def plot_summaries_fiducial(X, X_, alpha, dataset, results_dir=None, Finv=None):
 
     P = jnp.tile(alpha[jnp.newaxis, :], (X.shape[0], 1))
 
@@ -323,7 +340,7 @@ def plot_summaries_fiducial(X, X_, alpha, dataset, results_dir=None):
     c.add_chain(
         Chain.from_covariance(
             dataset.alpha,
-            dataset.Finv,
+            Finv if Finv is not None else dataset.Finv,
             columns=dataset.parameter_strings,
             name=r"$F_{\Sigma^{-1}}$",
             color="k",
@@ -352,7 +369,6 @@ def plot_summaries_fiducial(X, X_, alpha, dataset, results_dir=None):
 
 
 def plot_fisher_summaries(X, P, dataset, results_dir=None):
-# def plot_fisher_summaries(X_l, dataset, results_dir):
     # c = ChainConsumer()
 
     # c.add_chain(

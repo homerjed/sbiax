@@ -20,6 +20,7 @@ from tensorflow_probability.substrates.jax.distributions import Distribution
 from sbiax.inference import nuts_sample
 from sbiax.utils import make_df, marker
 
+from configs.log import setup_module_logger, get_log_level
 from configs.cumulants_configs import default_posterior_sampling
 from configs.configs import (
     get_results_dir, 
@@ -27,8 +28,8 @@ from configs.configs import (
     get_ndes_from_config
 )
 from configs.args import get_cumulants_sbi_args, get_cumulants_multi_z_args
-from data.common import linearised_model
-from data.constants import get_base_posteriors_dir, get_save_and_load_dirs, get_target_idx
+from data.common import linearised_model, add_planck_information_to_Finv
+from data.constants import get_base_posteriors_dir, get_save_and_load_dirs, get_target_idx, get_F_planck
 from data.cumulants import get_parameter_strings
 from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
 from cumulants_ensemble import Ensemble, MultiEnsemble
@@ -37,11 +38,17 @@ from utils.utils import finite_samples_log_prob, get_datasets
 
 typecheck = jaxtyped(typechecker=typechecker)
 
+logger = setup_module_logger(__name__, level=get_log_level())
+
 CompressionFn = Callable[[Float[Array, "d"], Float[Array, "p"]], Float[Array, "p"]]
 
 jax.clear_caches()
 
-cumulant_names = [r"$\langle \delta^2 \rangle_c$", r"$\langle \delta^3 \rangle_c$", r"$\langle \delta^4 \rangle_c$"] # ["var.", "skew.", "kurt."]
+cumulant_names = [
+    r"$\langle \delta^2 \rangle_c$", 
+    r"$\langle \delta^3 \rangle_c$",
+    r"$\langle \delta^4 \rangle_c$"
+] # ["var.", "skew.", "kurt."]
 
 ix = get_target_idx()
 
@@ -136,11 +143,8 @@ def get_z_config_and_datavector(
     # SBI configuration, main dataset and all datasets for given redshift
     config_z, cumulants_dataset, datasets = get_datasets(sbi_args) # Config and cumulants_dataset can be bulk ... etc
 
-    config_z.seed = seed
-
-    if verbose: 
-        print("bulk or tails", bulk_or_tails)
-        print(config_z)
+    logger.info("BULK/TAILS:".format(bulk_or_tails))
+    logger.info("CONFIG:\n{}".format(config_z))
 
     # Sample datavector(s) at the fiducial parameters
     datavectors = cumulants_dataset.get_datavector(key_datavector, n=n_datavectors) # Generates linearised (or not) datavector 
@@ -167,8 +171,8 @@ def get_z_config_and_datavector(
     ensemble_path = os.path.join(get_results_dir(config_z, args=sbi_args), "ensemble.eqx")
     ensemble = eqx.tree_deserialise_leaves(ensemble_path, ensemble)
 
-    print("Loaded ensemble from:\n\t", ensemble_path)
-    print("Ensemble weights", ensemble.weights)
+    logger.info("Loaded ensemble from:\n\t{}".format(ensemble_path))
+    logger.info("Ensemble weights:\n\t{}".format(ensemble.weights))
 
     return (
         ensemble, 
@@ -186,33 +190,12 @@ def get_z_config_and_datavector(
     )
 
 
-if __name__ == "__main__":
-    import time
-
-    key = jr.key(int(time.time())) # Only for datavectors, split for each redshift, datavector and separate posterior
-
-    multi_z_args = get_cumulants_multi_z_args()
-
-    # Multi-z inference concerning the bulk or bulk + tails
-    sampling_config = default_posterior_sampling(config=None, no_config=True)
-
-    # Get the bulk Fisher forecast for all redshifts 
-    # but easier to load frozen or not since it autosaves...
-    data_dir, _, _ = get_save_and_load_dirs()
-
-    Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, multi_z_args)
-    Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z / multi_z_args.n_datavectors
-
-    parameter_strings = get_parameter_strings()
-    parameter_strings_ = [parameter_strings[_] for _ in ix]
-
-    linear_str = "linearised" if multi_z_args.linearised else "nonlinearised"
-    pretrain_str = "pretrain" if multi_z_args.pre_train else "nopretrain"
+def get_figs_dir(multi_z_args):
+    # Save location for posterior plots
 
     # Where SBI's are saved (add on suffix for experiment details)
     posteriors_dir = get_base_posteriors_dir()
 
-    # Save location for posterior plots
     parts = [
         "figs",
         "frozen" if multi_z_args.freeze_parameters else "nonfrozen",
@@ -231,7 +214,36 @@ if __name__ == "__main__":
     if not os.path.exists(figs_dir):
         os.makedirs(figs_dir, exist_ok=True)
 
-    print("MULTI-Z FIGS_DIR:\n\t", figs_dir)
+    logger.info("MULTI-Z FIGS_DIR:\n\t{}".format(figs_dir))
+
+    return figs_dir 
+
+
+if __name__ == "__main__":
+    import time
+
+    key = jr.key(int(time.time())) # Only for datavectors, split for each redshift, datavector and separate posterior
+
+    multi_z_args = get_cumulants_multi_z_args()
+
+    # Multi-z inference concerning the bulk or bulk + tails (just sampling args)
+    sampling_config = default_posterior_sampling(config=None, no_config=True)
+
+    # Get the bulk Fisher forecast for all redshifts 
+    # but easier to load frozen or not since it autosaves...
+    data_dir, _, _ = get_save_and_load_dirs()
+
+    # Planck information added here if required
+    Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, multi_z_args)
+    Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z / multi_z_args.n_datavectors
+
+    parameter_strings = get_parameter_strings()
+    parameter_strings_ = [parameter_strings[_] for _ in ix]
+
+    linear_str = "linearised" if multi_z_args.linearised else "nonlinearised"
+    pretrain_str = "pretrain" if multi_z_args.pre_train else "nopretrain"
+
+    figs_dir = get_figs_dir(multi_z_args)
 
     parameter_dim = 2 if multi_z_args.freeze_parameters else 5
 
@@ -315,6 +327,23 @@ if __name__ == "__main__":
         multi_ensemble = MultiEnsemble(ensembles, prior=prior) 
 
         # Combined Fisher information over all redshifts
+        if multi_z_args.use_planck:
+            F_planck = get_F_planck()
+
+            # Only add Fisher from Planck once, to information accrued over all redshifts
+            F = F + F_planck
+            F_bulk = F_bulk + F_planck
+            F_tails = F_tails + F_planck
+
+            bulk_Finvs = [
+               add_planck_information_to_Finv(Finv, use_planck=multi_z_args.use_planck)
+               for Finv in bulk_Finvs
+            ]
+            tails_Finvs = [
+               add_planck_information_to_Finv(Finv, use_planck=multi_z_args.use_planck)
+               for Finv in bulk_Finvs
+            ]
+
         Finv_all_z = jnp.linalg.inv(F) 
         bulk_Finv_all_z = jnp.linalg.inv(F_bulk) 
         tails_Finv_all_z = jnp.linalg.inv(F_tails) 
@@ -542,7 +571,7 @@ if __name__ == "__main__":
         samples_log_prob = finite_samples_log_prob(samples_log_prob)
 
         summaries_all_z = np.stack(x_s, axis=0) # NOTE: (n_z, n_datavectors, n_x) ?
-        print("SUMMARIES ALL Z:", summaries_all_z.shape)
+        logger.info("SUMMARIES ALL Z:{}".format(summaries_all_z.shape))
 
         # Save posterior, Fisher and summary
         # posterior_save_dir = get_multi_z_posterior_dir(multi_z_args)

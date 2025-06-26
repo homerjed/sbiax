@@ -5,7 +5,6 @@ import datetime
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-import equinox as eqx
 import optax
 
 import numpy as np 
@@ -14,7 +13,6 @@ from chainconsumer import Chain, ChainConsumer
 from tensorflow_probability.substrates.jax.distributions import Distribution
 import tensorflow_probability.substrates.jax.distributions as tfd
 
-from sbiax.ndes import Scaler
 from sbiax.train import train_ensemble
 from sbiax.inference import nuts_sample
 from sbiax.utils import make_df, marker
@@ -24,8 +22,10 @@ from configs import (
     get_posteriors_dir, 
     get_ndes_from_config
 )
+from configs.log import setup_module_logger, get_log_level
 from configs.args import get_cumulants_sbi_args
-from data.common import Dataset
+from data.constants import get_Finv_planck
+from data.common import Dataset, add_planck_information_to_Finv
 from cumulants_ensemble import Ensemble
 from affine import affine_sample
 from utils.utils import (
@@ -36,11 +36,12 @@ from utils.utils import (
     plot_summaries, 
     plot_summaries_fiducial,
     plot_fisher_summaries, 
-    replace_scalers,
     finite_samples_log_prob
 )
 
 jax.clear_caches()
+
+logger = setup_module_logger(__name__, level=get_log_level())
 
 
 """ 
@@ -97,7 +98,9 @@ if args.seed == 0:
         c.add_chain(
             Chain.from_covariance(
                 datasets[dataset_type].data.alpha,
-                datasets[dataset_type].data.Finv,
+                    add_planck_information_to_Finv(
+                        datasets[dataset_type].data.Finv, use_planck=args.use_planck
+                    ),
                 columns=dataset.parameter_strings,
                 name=r"$F_{\Sigma^{-1}}$" + name,
                 shade_alpha=0.
@@ -123,9 +126,22 @@ if args.seed == 0:
             c.add_chain(
                 Chain.from_covariance(
                     datasets[dataset_type].data.alpha[target_idx],
-                    datasets[dataset_type].data.Finv[:, target_idx][target_idx, :],
+                    add_planck_information_to_Finv(
+                        datasets[dataset_type].data.Finv, use_planck=args.use_planck
+                    )[:, target_idx][target_idx, :],
                     columns=[dataset.parameter_strings[_] for _ in target_idx],
                     name=r"$F_{\Sigma^{-1}}$" + name,
+                    shade_alpha=0.
+                )
+            )
+        if args.use_planck:
+            c.add_chain(
+                Chain.from_covariance(
+                    datasets[dataset_type].data.alpha[target_idx],
+                    get_Finv_planck()[:, target_idx][target_idx, :],
+                    columns=[dataset.parameter_strings[_] for _ in target_idx],
+                    name=r"$F_{\Sigma^{-1}}$" + " Planck",
+                    color="k",
                     shade_alpha=0.
                 )
             )
@@ -180,7 +196,8 @@ plot_summaries_fiducial(
     X_,
     dataset.alpha, 
     dataset, 
-    results_dir
+    results_dir,
+    Finv=add_planck_information_to_Finv(dataset.Finv, use_planck=args.use_planck)
 )
 
 plot_moments(dataset.fiducial_data, config, results_dir)
@@ -199,7 +216,7 @@ ndes = get_ndes_from_config(
     key=model_key
 )
 
-print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None) # Check scaler mu, std are not changed by gradient
+logger.debug("scaler: {}".format(ndes[0].scaler.mu_x if ndes[0].scaler is not None else None)) # Check scaler mu, std are not changed by gradient
 
 ensemble = Ensemble(ndes)
 
@@ -209,7 +226,7 @@ ensemble = Ensemble(ndes)
 
 # Only pre-train if required and not inferring from linear simulations
 if ((not config.linearised) and config.pre_train and (config.n_linear_sims is not None)):
-    print("Linearised pre-training...")
+    logger.info("Linearised pre-training...")
 
     pre_train_key, summaries_key = jr.split(key)
 
@@ -218,7 +235,7 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
 
     X_l = jax.vmap(compression_fn)(D_l, Y_l)
 
-    print("Pre-training with", D_l.shape, X_l.shape, Y_l.shape)
+    logger.info("Pre-training with", D_l.shape, X_l.shape, Y_l.shape)
 
     plot_fisher_summaries(X_l, Y_l, dataset, results_dir)
 
@@ -251,7 +268,10 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
     log_prob_fn = ensemble.ensemble_log_prob_fn(x_, parameter_prior)
 
     state = jr.multivariate_normal(
-        key_state, dataset.alpha, dataset.Finv, (2 * config.n_walkers,)
+        key_state, 
+        dataset.alpha, 
+        add_planck_information_to_Finv(dataset.Finv, use_planck=args.use_planck), 
+        (2 * config.n_walkers,)
     )
 
     samples, weights = affine_sample(
@@ -288,7 +308,7 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
     c.add_chain(
         Chain.from_covariance(
             dataset.alpha,
-            dataset.Finv,
+            add_planck_information_to_Finv(dataset.Finv, use_planck=args.use_planck), 
             columns=dataset.parameter_strings,
             name=r"$F_{\Sigma^{-1}}$",
             color="k",
@@ -299,7 +319,7 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
     c.add_chain(
         Chain.from_covariance(
             dataset.alpha,
-            datasets["bulk"].data.Finv,
+            add_planck_information_to_Finv(datasets["bulk"].data.Finv, use_planck=args.use_planck), 
             columns=dataset.parameter_strings,
             name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[bulk]"),
             color="b",
@@ -310,7 +330,7 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
     c.add_chain(
         Chain.from_covariance(
             dataset.alpha,
-            datasets["bulk_pdf"].data.Finv,
+            add_planck_information_to_Finv(datasets["bulk_pdf"].data.Finv, use_planck=args.use_planck), 
             columns=dataset.parameter_strings,
             name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]"),
             color="g",
@@ -366,8 +386,7 @@ ensemble, stats = train_ensemble(
     results_dir=results_dir
 )
 
-print("scaler mu:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None)
-print("scaler std:", ndes[0].scaler.std_x if ndes[0].scaler is not None else None)
+logger.debug("scaler: {}".format(ndes[0].scaler.mu_x if ndes[0].scaler is not None else None)) # Check scaler mu, std are not changed by gradient
 
 """ 
     Sample and plot posterior for NDE with noisy datavectors
@@ -376,18 +395,21 @@ print("scaler std:", ndes[0].scaler.std_x if ndes[0].scaler is not None else Non
 # Generates linearised (or not) datavector at fiducial parameters
 datavector = cumulants_dataset.get_datavector(key_datavector)
 
-print("datavector {} \n {}".format(datavector.shape, datavector))
+logger.debug("datavector {} \n {}".format(datavector.shape, datavector))
 
 x_ = compression_fn(datavector, dataset.alpha)
 
-print("compressed datavector {} \n {} {}".format(x_.shape, x_, dataset.alpha))
+logger.debug("compressed datavector {} \n {} {}".format(x_.shape, x_, dataset.alpha))
 
 log_prob_fn = ensemble.ensemble_log_prob_fn(x_, parameter_prior)
 
 if 1:
     try:
         state = jr.multivariate_normal(
-            key_state, dataset.alpha, dataset.Finv, (2 * config.n_walkers,)
+            key_state, 
+            dataset.alpha, 
+            add_planck_information_to_Finv(dataset.Finv, use_planck=args.use_planck), 
+            (2 * config.n_walkers,)
         )
         # state = parameter_prior.sample(seed=key_state, sample_shape=(2 * config.n_walkers,))
 
@@ -406,8 +428,8 @@ if 1:
         samples_log_prob = jax.vmap(log_prob_fn)(samples)
         samples_log_prob = finite_samples_log_prob(samples_log_prob) 
 
-        print("samples:", samples.min(), samples.max())
-        print("probs:", samples_log_prob.min(), samples_log_prob.max())
+        logger.debug("samples: {} {}".format(samples.min(), samples.max()))
+        logger.debug("probs: {} {}".format(samples_log_prob.min(), samples_log_prob.max()))
 
         posterior_df = make_df(
             samples, 
@@ -428,7 +450,9 @@ if 1:
         c.add_chain(
             Chain.from_covariance(
                 dataset.alpha,
-                datasets["tails"].data.Finv,
+                add_planck_information_to_Finv(
+                    datasets["tails"].data.Finv, use_planck=args.use_planck
+                ),
                 columns=dataset.parameter_strings,
                 name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[tails]"),
                 color="r",
@@ -439,7 +463,9 @@ if 1:
         c.add_chain(
             Chain.from_covariance(
                 dataset.alpha,
-                datasets["bulk"].data.Finv,
+                add_planck_information_to_Finv(
+                    datasets["bulk"].data.Finv, use_planck=args.use_planck
+                ),
                 columns=dataset.parameter_strings,
                 name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[bulk]"),
                 color="b",
@@ -450,7 +476,9 @@ if 1:
         c.add_chain(
             Chain.from_covariance(
                 dataset.alpha,
-                datasets["bulk_pdf"].data.Finv,
+                add_planck_information_to_Finv(
+                    datasets["bulk_pdf"].data.Finv, use_planck=args.use_planck
+                ),
                 columns=dataset.parameter_strings,
                 name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]"),
                 color="g",
@@ -505,7 +533,9 @@ if 1:
         c.add_chain(
             Chain.from_covariance(
                 dataset.alpha[target_idx],
-                datasets["tails"].data.Finv[:, target_idx][target_idx, :],
+                add_planck_information_to_Finv(
+                    datasets["tails"].data.Finv, use_planck=args.use_planck
+                )[:, target_idx][target_idx, :],
                 columns=_parameter_strings,
                 name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[tails]"),
                 color="r",
@@ -516,7 +546,9 @@ if 1:
         c.add_chain(
             Chain.from_covariance(
                 dataset.alpha[target_idx],
-                datasets["bulk"].data.Finv[:, target_idx][target_idx, :],
+                add_planck_information_to_Finv(
+                    datasets["bulk"].data.Finv, use_planck=args.use_planck
+                )[:, target_idx][target_idx, :],
                 columns=_parameter_strings,
                 name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[bulk]"),
                 color="b",
@@ -527,7 +559,9 @@ if 1:
         c.add_chain(
             Chain.from_covariance(
                 dataset.alpha[target_idx],
-                datasets["bulk_pdf"].data.Finv[:, target_idx][target_idx, :],
+                add_planck_information_to_Finv(
+                    datasets["bulk_pdf"].data.Finv, use_planck=args.use_planck
+                )[:, target_idx][target_idx, :],
                 columns=_parameter_strings,
                 name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]"),
                 color="g",

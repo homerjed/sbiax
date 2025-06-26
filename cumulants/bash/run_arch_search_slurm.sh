@@ -6,18 +6,18 @@
 #   so that 
 
 # --- Config ---
-RESULTS_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/results_17_06_maf/" # Base save directory for all results
+RESULTS_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/results_tuesday/" # Base save directory for all results
 
 STUDY_NAME="arch_para"
 N_JOBS=10
-FREEZE_FLAG="--no-freeze-parameters"
 N_GB=8
 N_CPU=8
-N_LINEAR_SIMS=20_000 
+N_LINEAR_SIMS=10_000 
 PARTITION="inter"
 LINEAR_ONLY=true
-
-NDE_TYPE="CNF"
+FREEZE_FLAG="--no-freeze-parameters"
+NDE_TYPE="MAF"
+USE_PLANCK=false
 
 TIMESTAMP=$(date +'%m%d_%H%M')
 
@@ -65,6 +65,12 @@ else
     JOB_NAME="${JOB_NAME}_nl"
 fi
 
+if [ "$USE_PLANCK" == true ]; then 
+    USE_PLANCK_FLAG="--use-planck"
+else
+    USE_PLANCK_FLAG="--no-use-planck"
+fi
+
 # --- Submit SLURM jobs ---
 # MULTI_SLURM environment variable ensures shared journal storage for search across slurm jobs
 for i in $(seq 1 $N_JOBS); do
@@ -90,13 +96,20 @@ source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
 
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 
-MULTI_SLURM=1 RESULTS_DIR=$RESULTS_DIR DEFAULT_NDE_TYPE=$NDE_TYPE python arch_search_slurm.py \
+export MULTI_SLURM=1 
+export RESULTS_DIR=$RESULTS_DIR 
+export DEFAULT_NDE_TYPE=$NDE_TYPE 
+export DEFAULT_NDE_TYPE=$NDE_TYPE 
+export DEFAULT_N_NDES=1
+
+python arch_search_slurm.py \
 --seed 0 \
 --redshift 0.0 \
 --order_idx 0 1 2 \
 --n_linear_sims $N_LINEAR_SIMS \
 $LINEARISED_FLAG \
 $FREEZE_FLAG \
+$USE_PLANCK_FLAG \
 $PRETRAIN_FLAG
 
 EOF

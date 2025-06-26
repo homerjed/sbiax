@@ -18,16 +18,26 @@ import matplotlib.pyplot as plt
 import tensorflow_probability.substrates.jax.distributions as tfd
 from tqdm.auto import trange
 
-from data.constants import get_quijote_parameters, get_save_and_load_dirs, get_target_idx
+from configs.log import setup_module_logger, get_log_level
+from data.constants import get_quijote_parameters, get_target_idx, get_F_planck, get_Finv_planck
 from compression.nn import fit_nn, fit_nn_lbfgs
 
 typecheck = jaxtyped(typechecker=typechecker)
+
+logger = setup_module_logger(__name__, level=get_log_level())
 
 FORCE_NOISELESS_DATAVECTOR = True if os.environ.get("FORCE_NOISELESS_DATAVECTOR", "").lower() in ("1", "true") else False
 
 """
     Objects common to the PDF and cumulant datasets
 """
+
+def add_planck_information_to_Finv(Finv, use_planck=False):
+    # Add Fisher information from Planck to any Finv matrix
+    if use_planck:
+        F_planck = get_F_planck()
+        Finv = jnp.linalg.inv(jnp.linalg.inv(Finv) + F_planck)
+    return Finv
 
 
 def hartlap(n_s: int, n_d: int) -> float: 
@@ -54,14 +64,6 @@ class Dataset:
     data: Float[Array, "nl d"]
     parameters: Float[Array, "nl p"]
     derivatives: Float[Array, "500 p d"]
-
-
-def convert_dataset_to_jax(dataset: Dataset) -> Dataset:
-    return jax.tree.map(
-        lambda a: jnp.asarray(a), 
-        dataset, 
-        is_leaf=lambda a: isinstance(a, np.ndarray)
-    )
 
 
 def freeze_out_parameters_dataset(dataset: Dataset) -> Dataset:
@@ -141,12 +143,13 @@ def freeze_out_parameters_dataset(dataset: Dataset) -> Dataset:
 def get_prior(config: ConfigDict, dataset: Dataset) -> tfd.Distribution:
 
     if config.linearised:
-        print("Using flat prior")
+        logger.info("Using flat prior")
+
         flat_limit = 1e4
         lower = jnp.ones((dataset.alpha.size,)) * -flat_limit
         upper = jnp.ones((dataset.alpha.size,)) * flat_limit
     else:
-        print("Using Quijote uniform prior")
+        logger.info("Using Quijote uniform prior")
         lower = jnp.asarray(dataset.lower) # Avoid tfp warning
         upper = jnp.asarray(dataset.upper)
 
@@ -160,9 +163,28 @@ def get_prior(config: ConfigDict, dataset: Dataset) -> tfd.Distribution:
     # lower = jnp.asarray(dataset.lower) # Avoid tfp warning
     # upper = jnp.asarray(dataset.upper)
 
-    prior = tfd.Blockwise(
-        [tfd.Uniform(l, u) for l, u in zip(lower, upper)]
-    )
+    # parameter_distributions = []
+    # for p in range(5):
+    #     if p in [1, 3]: # O_b and n_s
+    #         if p == 1:
+    #             dist = tfd.Normal(dataset.alpha[1], 0.052 / 100. / (dataset.alpha[2] ** 2.))
+    #         if p == 3:
+    #             dist = tfd.Normal(dataset.alpha[3], 0.0041)
+    #         parameter_distributions.append(dist)
+    #     else:
+    #         parameter_distributions.append(
+    #             tfd.Uniform(dataset.lower[p], dataset.upper[p])
+    #         )
+    # prior = tfd.Blockwise(parameter_distributions)
+
+    if config.use_planck:
+        prior = tfd.MultivariateNormalFullCovariance(
+            dataset.alpha, covariance_matrix=get_Finv_planck()
+        )
+    else:
+        prior = tfd.Blockwise(
+            [tfd.Uniform(l, u) for l, u in zip(lower, upper)]
+        )
 
     return prior
 
@@ -197,12 +219,14 @@ def sample_prior(
     keys_p = jr.split(key, alpha.size)
 
     if hypercube:
-        print("Hypercube sampling...")
+        logger.info("Hypercube sampling...")
+
         sampler = qmc.LatinHypercube(d=alpha.size)
         samples = sampler.random(n=n_linear_sims)
         Y = jnp.asarray(qmc.scale(samples, lower, upper))
     else:
-        print("Uniform box sampling...")
+        logger.info("Uniform box sampling...")
+
         Y = jnp.stack(
             [
                 jr.uniform(
@@ -238,7 +262,7 @@ def get_linearised_data(
         )
     """
     
-    print("Linearising data...")
+    logger.info("Linearising data...")
 
     key = jr.key(config.seed)
 
@@ -271,7 +295,7 @@ def get_linearised_data(
     keys = jr.split(key_simulations, len(Y))
     D = jax.vmap(_simulator)(keys, Y) 
 
-    print("... linearised data", D.shape, Y.shape)
+    logger.info("... linearised data {} {}".format(D.shape, Y.shape))
 
     return D, Y 
 
@@ -290,18 +314,19 @@ def get_datavector(
     # Choose a linearised model datavector or simply one of the Quijote realisations
     # which corresponds to a non-linearised datavector with Gaussian noise
     if config.use_expectation or use_expectation or FORCE_NOISELESS_DATAVECTOR:
-        print("Using expectation (noiseless datavector)...")
+        logger.info("Using expectation (noiseless datavector)...")
 
         datavector = jnp.mean(dataset.fiducial_data, axis=0, keepdims=True)
     else:
         if config.linearised:
-            print("Using linearised datavector...")
+            logger.info("Using linearised datavector...")
 
             mu = jnp.mean(dataset.fiducial_data, axis=0)
 
             datavector = jr.multivariate_normal(key, mean=mu, cov=dataset.C, shape=(n,))
         else:
-            print("Using non-linearised datavector...")
+            logger.info("Using non-linearised datavector...")
+
             # datavector = jr.choice(key, dataset.fiducial_data, shape=(n,))
             ix = jr.choice(key, jnp.arange(len(dataset.fiducial_data)), shape=(n,))
             datavector = dataset.fiducial_data[ix]
@@ -319,12 +344,16 @@ def get_datavector(
 
 @typecheck
 def get_linear_compressor(
-    config: ConfigDict, dataset: Dataset
+    config: ConfigDict, 
+    dataset: Dataset
 ) -> Callable[[Float[Array, "d"], Float[Array, "p"]], Float[Array, "p"]]:
     """ 
         Get Chi^2 minimisation function; compressing datavector 
         at estimated parameters to summary 
     """
+
+    alpha = dataset.alpha
+    F_planck = get_F_planck()
 
     @typecheck
     def mle(
@@ -335,24 +364,20 @@ def get_linear_compressor(
         dmu: Float[Array, "p d"], 
         precision: Float[Array, "d d"]
     ) -> Float[Array, "p"]:
-        """
-            Calculates a maximum likelihood estimator (MLE) from a datavector by
-            assuming a linear model `mu` in parameters `pi` and using
-
-            Args:
-                d (`Array`): The datavector to compress.
-                p (`Array`): The estimated parameters of the datavector (e.g. a fiducial set).
-                Finv (`Array`): The Fisher matrix. Calculated with a precision matrix (e.g. `precision`) and 
-                    theory derivatives.
-                mu (`Array`): The model evaluated at the estimated set of parameters `pi`.
-                dmu (`Array`): The first-order theory derivatives (for the implicitly assumed linear model, 
-                    these are parameter independent!)
-                precision (`Array`): The precision matrix - defined as the inverse of the data covariance matrix.
-
-            Returns:
-                `Array`: the MLE statistic.
-        """
         return pi + jnp.linalg.multi_dot([Finv, dmu, precision, d - mu])
+
+    @typecheck
+    def map(
+        d: Float[Array, "d"], 
+        pi: Float[Array, "p"], 
+        Finv: Float[Array, "p p"], 
+        mu: Float[Array, "d"], 
+        dmu: Float[Array, "p d"], 
+        precision: Float[Array, "d d"]
+    ) -> Float[Array, "p"]:
+        F = jnp.linalg.inv(Finv)
+        _Finv = jnp.linalg.inv(F + F_planck)
+        return pi + jnp.linalg.multi_dot([_Finv, dmu, precision, d - mu]) + jnp.linalg.multi_dot([_Finv, F_planck, alpha - pi])
 
     @typecheck
     def compressor(
@@ -361,10 +386,14 @@ def get_linear_compressor(
         mu: Float[Array, "d"], 
         dmu: Float[Array, "p d"]
     ) -> Float[Array, "p"]: 
+
         mu_p = linearised_model(
-            alpha=dataset.alpha, alpha_=p, mu=mu, dmu=dmu
+            alpha=alpha, alpha_=p, mu=mu, dmu=dmu
         )
-        p_ = mle(
+
+        _estimator_fn = map if config.use_planck else mle
+
+        p_ = _estimator_fn(
             d,
             pi=p,
             Finv=dataset.Finv, 
@@ -372,6 +401,7 @@ def get_linear_compressor(
             dmu=dmu, 
             precision=dataset.Cinv
         )
+
         return p_
 
     mu = jnp.mean(dataset.fiducial_data, axis=0)

@@ -8,9 +8,9 @@ from data.constants import ALL_RADII
 
 typecheck = jaxtyped(typechecker=typechecker)
 
-USE_SCALERS = True #if os.environ.get('USE_SCALERS', '').lower() in ('1', 'true') else False 
-DEFAULT_NDE_TYPE = os.environ.get('DEFAULT_NDE_TYPE', None)
-DEFAULT_N_NDES = os.environ.get('DEFAULT_N_NDES', 1)
+USE_SCALERS = True #if os.environ.get("USE_SCALERS", "").lower() in ("1", "true") else False 
+DEFAULT_NDE_TYPE = os.environ.get("DEFAULT_NDE_TYPE", None)
+DEFAULT_N_NDES = int(os.environ.get("DEFAULT_N_NDES", 1))
 
 def exists(v):
     return v is not None
@@ -96,8 +96,8 @@ HP_OPT_OPT_CNF = dict(
 DEFAULT_MAF_ARCH = HP_OPT_MAF_ARCH 
 DEFAULT_OPT_MAF = HP_OPT_OPT_MAF 
 
-DEFAULT_CNF_ARCH = HP_OPT_CNF_ARCH # DEFAULT_CNF_ARCH
-DEFAULT_OPT_CNF = HP_OPT_OPT_CNF # HP_OPT_OPT 
+DEFAULT_CNF_ARCH = DEFAULT_CNF_ARCH # HP_OPT_CNF_ARCH 
+DEFAULT_OPT_CNF = DEFAULT_OPT # HP_OPT_OPT_CNF 
 
 # Number of density estimators in the ensemble
 N_NDES = default(int(DEFAULT_N_NDES), 1)
@@ -171,7 +171,7 @@ def default_posterior_sampling(config, no_config=False):
 
     # Posterior sampling
     if linearised:
-        config.n_steps        = 50
+        config.n_steps        = 100
         config.n_walkers      = 2000
     else:
         config.n_steps        = 100
@@ -181,9 +181,8 @@ def default_posterior_sampling(config, no_config=False):
     return config
 
 
-@typecheck
-def cumulants_config(
-    seed: int = 0, 
+def default_cumulants_configuration(
+    config,
     redshift: float = 0., 
     linearised: bool = True, 
     compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
@@ -191,15 +190,9 @@ def cumulants_config(
     scales: list[float] = ALL_RADII,
     freeze_parameters: bool = False,
     n_linear_sims: Optional[int] = None,
-    pre_train: bool = False
-) -> ConfigDict:
-
-    config = ConfigDict()
-
-    config.seed               = seed # For argparse script running without args!
-
-    # Data
-    config.dataset_name       = "cumulants" 
+    pre_train: bool = False,
+    use_planck: bool = False
+):
     config.redshift           = redshift
     config.scales             = scales
     config.order_idx          = order_idx # Maximum index is 2
@@ -212,12 +205,64 @@ def cumulants_config(
     config.valid_fraction     = 0.1
     config.freeze_parameters  = freeze_parameters
 
-    config.p_value_min        = 0.01
-    config.p_value_max        = 0.99
+    config.use_planck         = use_planck
+
+    return config
+    
+
+def default_cut_configuration(config, bulk_or_tails):
+
+    if bulk_or_tails == "tails":
+        config.p_value_min    = 0.01
+        config.p_value_max    = 0.99
+    if bulk_or_tails == "bulk":
+        config.p_value_min    = 0.03
+        config.p_value_max    = 0.90
+
     config.use_bulk_means     = False # Calculate central moments of the bulk or not
     config.stack_bulk_means   = True # Stack means of bulk of the PDF at each scale with the other cumulants
     config.stack_bulk_norms   = True # Stack norms of bulk of the PDF at each scale with the other cumulants
     config.fiducial_based_normalisation = config.p_value_max - config.p_value_min
+
+    return config 
+
+
+@typecheck
+def cumulants_config(
+    seed: int = 0, 
+    redshift: float = 0., 
+    linearised: bool = True, 
+    compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
+    order_idx: list[int] = [0, 1, 2],
+    scales: list[float] = ALL_RADII,
+    freeze_parameters: bool = False,
+    n_linear_sims: Optional[int] = None,
+    pre_train: bool = False,
+    use_planck: bool = False
+) -> ConfigDict:
+
+    config = ConfigDict()
+
+    config.seed               = seed # For argparse script running without args!
+
+    # Data
+    config.dataset_name       = "cumulants" 
+
+    config = default_cumulants_configuration(
+        config, 
+        redshift=redshift, 
+        linearised=linearised,
+        compression=compression,
+        order_idx=order_idx,
+        scales=scales,
+        freeze_parameters=freeze_parameters,
+        n_linear_sims=n_linear_sims,
+        pre_train=pre_train
+    )
+
+    config = default_cut_configuration(config, bulk_or_tails="tails")
+
+    config.use_planck         = use_planck
 
     # Miscallaneous
     config.use_scalers        = USE_SCALERS # Input scalers for (xi, pi) in NDEs (NOTE: checked that scalings aren't optimised!)
@@ -244,7 +289,8 @@ def arch_search_cumulants_config( # Copy of the above config for architecture se
     scales: list[float] = ALL_RADII,
     freeze_parameters: bool = False,
     n_linear_sims: Optional[int] = None,
-    pre_train: bool = False
+    pre_train: bool = False,
+    use_planck: bool = False
 ) -> ConfigDict:
 
     config = ConfigDict()
@@ -252,18 +298,23 @@ def arch_search_cumulants_config( # Copy of the above config for architecture se
     config.seed               = seed # For argparse script running without args!
 
     # Data
-    config.dataset_name       = "cumulants" 
-    config.redshift           = redshift
-    config.scales             = scales
-    config.order_idx          = order_idx # Maximum index is 2
-    config.compression        = compression
-    config.linearised         = linearised
-    config.covariance_epsilon = None # 1e-6
-    config.pre_train          = pre_train and (not linearised)
-    config.n_linear_sims      = n_linear_sims # This is for pre-train or linearised simulations 
-    config.use_expectation    = False # Noiseless datavector
-    config.valid_fraction     = 0.1
-    config.freeze_parameters  = freeze_parameters
+    config.dataset_name       = "cumulants"
+
+    config = default_cumulants_configuration(
+        config, 
+        redshift=redshift, 
+        linearised=linearised,
+        compression=compression,
+        order_idx=order_idx,
+        scales=scales,
+        freeze_parameters=freeze_parameters,
+        n_linear_sims=n_linear_sims,
+        pre_train=pre_train
+    )
+
+    config = default_cut_configuration(config, bulk_or_tails="tails")
+
+    config.use_planck         = use_planck
 
     # Miscallaneous
     config.use_scalers        = USE_SCALERS # Input scalers for (xi, pi) in NDEs (NOTE: checked that scalings aren't optimised!)
@@ -290,7 +341,8 @@ def bulk_cumulants_config(
     scales: list[float] = ALL_RADII,
     freeze_parameters: bool = False,
     n_linear_sims: Optional[int] = None,
-    pre_train: bool = False
+    pre_train: bool = False,
+    use_planck: bool = False
 ) -> ConfigDict:
 
     config = ConfigDict()
@@ -299,24 +351,22 @@ def bulk_cumulants_config(
 
     # Data
     config.dataset_name       = "bulk cumulants" 
-    config.redshift           = redshift
-    config.scales             = scales
-    config.order_idx          = order_idx # Maximum index is 2
-    config.compression        = compression
-    config.linearised         = linearised
-    config.covariance_epsilon = None # 1e-6
-    config.pre_train          = pre_train and (not linearised)
-    config.n_linear_sims      = n_linear_sims # This is for pre-train or linearised simulations 
-    config.use_expectation    = False # Noiseless datavector
-    config.valid_fraction     = 0.1
-    config.freeze_parameters  = freeze_parameters
 
-    config.p_value_min        = 0.03
-    config.p_value_max        = 0.90
-    config.use_bulk_means     = False # Calculate central moments of the bulk or not
-    config.stack_bulk_means   = True # Stack means of bulk of the PDF at each scale with the other cumulants
-    config.stack_bulk_norms   = True # Stack norms of bulk of the PDF at each scale with the other cumulants
-    config.fiducial_based_normalisation = config.p_value_max - config.p_value_min
+    config = default_cumulants_configuration(
+        config, 
+        redshift=redshift, 
+        linearised=linearised,
+        compression=compression,
+        order_idx=order_idx,
+        scales=scales,
+        freeze_parameters=freeze_parameters,
+        n_linear_sims=n_linear_sims,
+        pre_train=pre_train
+    )
+
+    config = default_cut_configuration(config, bulk_or_tails="bulk")
+
+    config.use_planck         = use_planck
 
     # Miscallaneous
     config.use_scalers        = USE_SCALERS 
@@ -343,7 +393,8 @@ def bulk_pdf_config(
     scales: list[float] = ALL_RADII,
     freeze_parameters: bool = False,
     n_linear_sims: Optional[int] = None,
-    pre_train: bool = False
+    pre_train: bool = False,
+    use_planck: bool = False
 ) -> ConfigDict:
     return bulk_cumulants_config(
         seed=seed,
@@ -354,5 +405,6 @@ def bulk_pdf_config(
         scales=scales,
         freeze_parameters=freeze_parameters,
         n_linear_sims=n_linear_sims,
-        pre_train=pre_train
+        pre_train=pre_train,
+        use_planck=use_planck
     )

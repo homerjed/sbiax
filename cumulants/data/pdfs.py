@@ -6,7 +6,6 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 from jaxtyping import PRNGKeyArray, Float, Int, Array, Scalar, jaxtyped
-import equinox as eqx
 from beartype import beartype as typechecker
 from ml_collections import ConfigDict
 
@@ -16,10 +15,12 @@ from chainconsumer import Chain, ChainConsumer, Truth
 import tensorflow_probability.substrates.jax.distributions as tfd
 from tqdm.auto import trange
 
+from configs.log import setup_module_logger, get_log_level
 from data.constants import (
     get_quijote_parameters, 
     get_save_and_load_dirs, 
-    get_target_idx
+    get_target_idx,
+    get_F_planck
 )
 from data.common import (
     Dataset,
@@ -30,14 +31,16 @@ from data.common import (
     get_datavector,
     freeze_out_parameters_dataset, 
     hartlap,
-    get_parameter_strings
+    get_parameter_strings,
+    add_planck_information_to_Finv
 )
 from sbiax.utils import make_df, marker
-from configs import bulk_cumulants_config
+from configs.cumulants_configs import bulk_cumulants_config
 
 typecheck = jaxtyped(typechecker=typechecker)
 
-# Re-compute datasets if so desired
+logger = setup_module_logger(__name__, level=get_log_level())
+
 FORCE_RECOMPUTE_DATASET = True if os.environ.get("FORCE_RECOMPUTE_DATASET", "").lower() in ("1", "true") else False 
 
 PRINT_FREQ = 500
@@ -73,14 +76,16 @@ def get_raw_data(
     derivatives = np.load(
         os.path.join(data_dir, f"raw/pdfs_derivatives_plus_minus.npy")
     )
-    
-    if verbose:
-        print("Derivatives:", derivatives.shape)
 
     deltas = np.load(os.path.join(data_dir, "raw/deltas.npy"))
 
     DELTA_BIN_EDGES = np.geomspace(1e-2, 1e2, num=100) # 1911.11158 Section 4.1, NOTE: This is in rho
     D_DELTAS = DELTA_BIN_EDGES[1:] - DELTA_BIN_EDGES[:-1] 
+    
+    logger.debug("Fiducials: {}".format(fiducials.shape))
+    logger.debug("Latins: {}".format(latins.shape))
+    logger.debug("Latins (parameters): {}".format(latin_parameters.shape))
+    logger.debug("Derivatives: {}".format(derivatives.shape))
 
     return fiducials, latins, latin_parameters, derivatives, deltas, D_DELTAS
 
@@ -103,7 +108,8 @@ def get_calculated_cumulants_data(
         - Return PDFs of cumulants of the bulk
     """
 
-    print("Using bulk means..." if use_mean else "Not using bulk means...")
+    logger.info("Getting calculated cumulants for dataset={}".format(config.dataset_name))
+    logger.info("Using bulk means..." if use_mean else "Not using bulk means...")
 
     data_dir, *_ = get_save_and_load_dirs()
 
@@ -134,7 +140,7 @@ def get_calculated_cumulants_data(
     central_moments              = True                    # Calculate central moments or not (NOTE: 4th cumulant not the same as 4th central moment, but Bernardeau formulae use non-central moments)
 
     # Value of normalisation of bulk PDF (NOTE: turn this off for the comparison? Divide ALL cumulants by this? => it's off for full-shape)
-    fiducial_based_normalisation = (config.p_value_max - config.p_value_min) 
+    fiducial_based_normalisation = config.p_value_max - config.p_value_min 
 
     n_scales           = len(config.scales)
     n_redshifts        = 1
@@ -164,8 +170,8 @@ def get_calculated_cumulants_data(
             "_central" if central_moments else "",
             "_with_norms" if use_normalisations else "",
             "_with_means_stacked" if stack_mean else "",
-            "_full_shape" if full_shape else "",
-            "_linearised" if config.linearised else "_nonlinear"
+            # "_full_shape" if full_shape else "", # NOTE: pointless; bulk or tails instead
+            # "_linearised" if config.linearised else "_nonlinear" # NOTE: pointless? linearised after calculation
         ]
     )
 
@@ -174,13 +180,14 @@ def get_calculated_cumulants_data(
         data_dir, "datasets/{}_cumulants_dataset{}.npz".format(bulk_or_tails, dataset_identifier_str)
     )
 
-    tqdm_desc_str = config.dataset_name
-    if pdfs:
-        tqdm_desc_str += " pdfs"
-    if full_shape:
-        tqdm_desc_str += " full-shape"
-
     def generate_dataset() -> list[np.ndarray]:
+
+        tqdm_desc_str = config.dataset_name
+        if pdfs:
+            tqdm_desc_str += " pdfs"
+        if full_shape:
+            tqdm_desc_str += " full-shape"
+
         # Get fiducial, derivative and hypercube PDFs
         (
             fiducials,        # Float[np.ndarray, "z 15000 R d"]
@@ -250,7 +257,9 @@ def get_calculated_cumulants_data(
                 # cuts = [
                 #     np.arange(n_bins_pdf) for R, _ in enumerate(config.scales) 
                 # ] 
-                print("NOTE: using p min/max for cutting full-shape")
+
+                logger.info("NOTE: using p min/max for cutting full-shape")
+
                 cuts = [
                     np.where(
                         (cdf[R * n_bins_pdf : (R + 1) * n_bins_pdf] >= p_value_min) & \
@@ -271,17 +280,14 @@ def get_calculated_cumulants_data(
             z_cut_dim_totals = 0
             for R, cut_z in zip(config.scales, cuts):
                 z_cut_dim_totals += cut_z.shape[0]
-                if verbose:
-                    print(f" R={R} cut: {cut_z.shape}")
 
-            if verbose:
-                print("CUTS (idx):\n", [(min(cut), max(cut)) for cut in cuts])
-                print("CUTS (deltas) min/max={:.1f}/{:.1f}:\n".format(deltas.min(), deltas.max())) 
-                print("CUTS:\n", ["{:.1f} {:.1f}".format(min(deltas[cut]), max(deltas[cut])) for cut in cuts])
-                print("Cut total dim:", sum([_.size for _ in cuts]))
-                print("All cuts added:", z_cut_dim_totals)
-                print(f"\n>CDF shape: {cdf.shape}") 
-                print(f"Total bins kept in CDF cut: {z_cut_dim_totals}/{1 * n_scales * n_bins_pdf}")
+                logger.info(f" R={R} cut: {cut_z.shape}")
+
+            logger.debug("CUTS (idx):\n {}".format([(min(cut), max(cut)) for cut in cuts]))
+            logger.debug("CUTS (deltas) min/max={:.1f}/{:.1f}:\n".format(deltas.min(), deltas.max())) 
+            logger.debug("CUTS:\n{}".format(["{:.1f} {:.1f}".format(min(deltas[cut]), max(deltas[cut])) for cut in cuts]))
+            logger.debug(f"\n>CDF shape: {cdf.shape}") 
+            logger.debug(f"Total bins kept in CDF cut: {z_cut_dim_totals}/{1 * n_scales * n_bins_pdf}")
 
             return cuts
 
@@ -292,17 +298,16 @@ def get_calculated_cumulants_data(
         ) -> Float[np.ndarray, "d"]:
             # Renormalise PDF in bulk region (pdf) which is already normalised
 
-            if verbose:
-                print("PDF (before)", np.sum(pdf), np.sum(pdf * D_deltas_cut))
+            # logger.debug("PDF (before) {} {}".format(np.sum(pdf), np.sum(pdf * D_deltas_cut)))
 
             if normalise:
                 pdf = pdf / np.sum(pdf * D_deltas_cut) # Denominator is PDF integral
-                if verbose:
-                    print("PDF (after, normalised)", np.sum(pdf), np.sum(pdf * D_deltas_cut))
+
+                # logger.debug("PDF (after, normalised) {}, {}".format(np.sum(pdf), np.sum(pdf * D_deltas_cut)))
             else:
                 pdf = pdf # Don't normalise: might throw out information for extreme cosmologies
-                if verbose:
-                    print("PDF (after, no-norm)", np.sum(pdf), np.sum(pdf * D_deltas_cut))
+
+                # logger.debug("PDF (after, no-norm) {}, {}".format(np.sum(pdf), np.sum(pdf * D_deltas_cut)))
 
             return pdf 
 
@@ -359,6 +364,7 @@ def get_calculated_cumulants_data(
 
             deltamod = deltas - _delta_
 
+            # Assuming <delta>=0? see Bernardeau eq (130)
             cumulant_2 = np.sum(deltamod ** 2 * cut_pdf * ddeltas)
             cumulant_3 = np.sum(deltamod ** 3 * cut_pdf * ddeltas)
             cumulant_4 = np.sum(deltamod ** 4 * cut_pdf * ddeltas) - (3. * np.sum(deltamod ** 2 * cut_pdf * ddeltas) ** 2)
@@ -381,7 +387,7 @@ def get_calculated_cumulants_data(
             if fiducial_based_normalisation is not None:
                 means = means / fiducial_based_normalisation
 
-            print("FULL MEANS MOMENTS", means_and_moments.shape)
+            # logger.debug("FULL MEANS MOMENTS: {}".format(means_and_moments.shape))
 
             # Stack cumulants such that at each scale: M_R = [M_1, k_n]
             for r in range(n_scales):
@@ -389,7 +395,8 @@ def get_calculated_cumulants_data(
                     means[..., [r]], # Keep last dimension
                     moments[..., r * n_cumulants : (r + 1) * n_cumulants]
                 ]
-                print("MEANS MOMENTS", [_.shape for _ in _means_and_moments])
+
+                # logger.debug("MEANS MOMENTS: {}".format([_.shape for _ in _means_and_moments]))
 
                 # Stack on last axis
                 means_and_moments[
@@ -414,7 +421,7 @@ def get_calculated_cumulants_data(
             if fiducial_based_normalisation is not None:
                 normalisations = normalisations / fiducial_based_normalisation
 
-            print("NORMALISATIONS AND MOMENTS", normalisations_and_moments.shape)
+            # logger.debug("NORMALISATIONS AND MOMENTS: {}".format(normalisations_and_moments.shape))
 
             # Stack cumulants such that at each scale: M_R = [M_0, M_1, k_n]
             for r in range(n_scales):
@@ -422,7 +429,8 @@ def get_calculated_cumulants_data(
                     normalisations[..., [r]], # Keep last dimension
                     moments[..., r * (n_cumulants + 1) : (r + 1) * (n_cumulants + 1)] # Additional +1 for stacked mean
                 ]
-                print("NORMALISATIONS MOMENTS", [_.shape for _ in _normalisations_and_moments])
+
+                # logger.debug("NORMALISATIONS AND MOMENTS (r): {}".format([_.shape for _ in _normalisations_and_moments]))
 
                 # Stack on last axis
                 normalisations_and_moments[
@@ -669,10 +677,12 @@ def get_calculated_cumulants_data(
         for p in range(n_p):
             derivative_moments_z_R[:, p, ...] = derivative_moments_z_R[:, p, ...] / dparams[p] # NOTE: parameter / redshifts axis!!!!!
 
-        print(
-            "Fiducials: ", fiducial_pdfs_z_R_cut.shape, 
-            "Latins: ", latin_pdfs_z_R_cut.shape, 
-            "Derivatives: ", derivative_pdfs_z_R_cut.shape
+        logger.info(
+            "Fiducials: {} \n Latins: {} \n Derivatives: {}".format(
+                fiducial_pdfs_z_R_cut.shape, 
+                latin_pdfs_z_R_cut.shape, 
+                derivative_pdfs_z_R_cut.shape
+            )
         )
 
         """
@@ -720,8 +730,6 @@ def get_calculated_cumulants_data(
         # If requiring PDFs return dataset for bulk of the PDF (not cumulants of the bulk) NOTE: check this.s... NOTE: check this.s... NOTE: check this.s... NOTE: check this.s...
         return_dataset = dataset
 
-        print("Returning PDFs as dataset...")
-
         if pdfs:
             # Fisher information in bulk of the PDF
             _, data_dim_pdfs = fiducial_pdfs_z_R_cut.shape 
@@ -753,8 +761,12 @@ def get_calculated_cumulants_data(
 
             return_dataset = pdf_dataset 
 
+            logger.info("Returning PDFs as dataset...")
+
         # NOTE: whether PDFs or cumulants convert to linearised dataset if so required...
         if config.linearised:
+            logger.info("Using linearised dataset...")
+
             D, Y = get_linearised_data(config, return_dataset) 
 
             return_dataset = replace(return_dataset, data=D, parameters=Y)
@@ -762,17 +774,24 @@ def get_calculated_cumulants_data(
         # Save return dataset to ensure loading (not creating) next time around
         np.savez(dataset_filename, **asdict(return_dataset))
 
-        return return_dataset
+        logger.info("Saved dataset:\n\t{}".format(dataset_filename))
+
+        return return_dataset # NOTE: why was this here?
 
     # Create a fresh dataset if required, or generate one if it does not exist
     if not FORCE_RECOMPUTE_DATASET:
         try:
-            print("Loading dataset:\n\t", dataset_filename)
+            logger.info("Loading dataset:\n\t{}".format(dataset_filename))
 
             dataset_dict = np.load(dataset_filename, allow_pickle=True) 
 
+            if pdfs:
+                dataset_name = "{}_pdf".format("bulk" if not full_shape else "tails") 
+            else:
+                dataset_name = "bulk" if not full_shape else "tails"
+
             return_dataset = Dataset(
-                name="bulk_pdf" if pdfs else ("bulk" if not full_shape else "tails"),
+                name=dataset_name,
                 alpha=jnp.asarray(dataset_dict["alpha"]),
                 lower=jnp.asarray(dataset_dict["lower"]),
                 upper=jnp.asarray(dataset_dict["upper"]),
@@ -786,20 +805,20 @@ def get_calculated_cumulants_data(
                 derivatives=jnp.asarray(dataset_dict["derivatives"]),
             )
 
-            print("Loaded dataset:\n\t", dataset_filename)
+            logger.info("Loaded dataset:\n\t{}".format(dataset_filename))
 
         except FileNotFoundError:
-            print("Generating dataset:\n\t", dataset_filename)
+            logger.info("Generating dataset:\n\t{}".format(dataset_filename))
 
             return_dataset = generate_dataset()
 
-            print("Generated dataset:\n\t", dataset_filename)
+            logger.info("Generated dataset:\n\t{}".format(dataset_filename))
     else:
-        print("Generating dataset:\n\t", dataset_filename)
+        logger.info("Generating dataset:\n\t{}".format(dataset_filename))
 
         return_dataset = generate_dataset()
 
-        print("Generating dataset:\n\t", dataset_filename)
+        logger.info("Generated dataset:\n\t{}".format(dataset_filename))
 
     return return_dataset 
 
@@ -851,9 +870,17 @@ class BulkCumulantsDataset:
 
         self.results_dir = results_dir
 
-        print("PDFS DATASET")
-        print(">DATA:\n\t", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (self.data.fiducial_data, self.data.data)])
-        print(">DATA / PARAMETERS:\n\t", [_.shape for _ in (self.data.data, self.data.parameters)])
+        logger.info("BULK CUMULANT DATASET")
+        logger.info(
+            ">DATA:\n\t {}".format(
+                ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (self.data.fiducial_data, self.data.data)]
+            )
+        )
+        logger.info(
+            ">DATA / PARAMETERS:\n\t {}".format(
+                [_.shape for _ in (self.data.data, self.data.parameters)]
+            )
+        )
 
     def get_parameter_strings(self):
         return get_parameter_strings()
@@ -936,9 +963,17 @@ class TailsCumulantsDataset:
 
         self.results_dir = results_dir
 
-        print("PDFS DATASET")
-        print(">DATA:\n\t", ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (self.data.fiducial_data, self.data.data)])
-        print(">DATA / PARAMETERS:\n\t", [_.shape for _ in (self.data.data, self.data.parameters)])
+        logger.info("TAILS CUMULANT DATASET")
+        logger.info(
+            ">DATA:\n\t {}".format(
+                ["{:.3E} {:.3E}".format(_.min(), _.max()) for _ in (self.data.fiducial_data, self.data.data)]
+            )
+        )
+        logger.info(
+            ">DATA / PARAMETERS:\n\t {}".format(
+                [_.shape for _ in (self.data.data, self.data.parameters)]
+            )
+        )
 
     def get_parameter_strings(self):
         return get_parameter_strings()
@@ -1015,9 +1050,9 @@ def get_bulk_dataset(args, pdfs=False):
     )
 
     if pdfs: 
-        print("Using PDF dataset for bulk dataset.")
+        logger.info("Using PDF dataset for bulk dataset.")
     else:
-        print("Using cumulants dataset for bulk dataset.")
+        logger.info("Using cumulants dataset for bulk dataset.")
 
     dataset = BulkCumulantsDataset(config, pdfs=pdfs, verbose=False)
 
@@ -1042,7 +1077,7 @@ def get_multi_z_bulk_pdf_fisher_forecast(args):
             freeze_parameters=args.freeze_parameters
         )
 
-        print("Using PDF dataset for bulk dataset.")
+        logger.info("Using PDF dataset for bulk dataset. z={}".format(redshift))
 
         dataset = BulkCumulantsDataset(config, pdfs=True, verbose=False)
 
@@ -1056,7 +1091,7 @@ def get_multi_z_bulk_pdf_fisher_forecast(args):
 
 def load_multi_z_bulk_pdf_fisher_forecast(data_dir, args):
     """
-        Load Fisher inverse matrix of PDF dataset consistently with args
+        Load Fisher inverse matrix of PDF dataset, over multiple redshifts, consistently with args
     """
     identifier_str = "".join(
         [
@@ -1079,6 +1114,13 @@ def load_multi_z_bulk_pdf_fisher_forecast(data_dir, args):
             np.save(Finv_file_path, Finv_bulk_pdfs_all_z)
         else:
             Finv_bulk_pdfs_all_z = get_multi_z_bulk_pdf_fisher_forecast(args)
+
+    # Don't save with Fisher information from Planck
+    Finv_bulk_pdfs_all_z = add_planck_information_to_Finv(
+        Finv_bulk_pdfs_all_z, use_planck=args.use_planck
+    )
+
+    logger.info("Finv bulk PDFs all z loaded from:\n\t{}".format(Finv_file_path))
 
     return Finv_bulk_pdfs_all_z
 

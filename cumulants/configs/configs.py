@@ -9,13 +9,15 @@ from jaxtyping import PRNGKeyArray, jaxtyped
 from beartype import beartype as typechecker
 from ml_collections import ConfigDict
 
-from data.constants import get_base_results_dir, get_base_posteriors_dir
-from data.common import Dataset
+from .log import setup_module_logger, get_log_level
+from data.constants import get_base_results_dir, get_base_posteriors_dir, ALL_RADII
 from data.cumulants import CumulantsDataset
 from data.pdfs import BulkCumulantsDataset, TailsCumulantsDataset, BulkPDFsDataset
 from sbiax.ndes import CNF, MAF, Scaler
 
 typecheck = jaxtyped(typechecker=typechecker)
+
+logger = setup_module_logger(__name__, level=get_log_level())
 
 DatasetClass = BulkCumulantsDataset | TailsCumulantsDataset | BulkPDFsDataset | CumulantsDataset
 
@@ -44,10 +46,10 @@ def load_config(filepath: str) -> ConfigDict:
 """
 
 
-def make_dirs(results_dir: str) -> None:
-    if not os.path.exists(results_dir):
-        os.makedirs(results_dir, exist_ok=True)
-    print("RESULTS_DIR:\n", results_dir)
+# def make_dirs(results_dir: str) -> None:
+#     if not os.path.exists(results_dir):
+#         os.makedirs(results_dir, exist_ok=True)
+#     # print("RESULTS_DIR:\n", results_dir)
 
 
 def dump_args_and_config(args: argparse.Namespace, config: ConfigDict, results_dir: str) -> None:
@@ -65,6 +67,26 @@ def get_config_subdir(
     arch_search: bool = False, 
     multi_z: bool = False
 ) -> str:
+    # NOTE: Multi-z posteriors marked by cumulants in datavector, not redshift!
+
+    # Scales marker
+    if args.scales == ALL_RADII:
+        R_str = "R_all" 
+    else:
+        R_str = "R_{}".format("".join(map(str, args.scales)))
+
+    # Datavector cumulant marker
+    m_str = "m_{}".format("".join(map(str, args.order_idx)))
+
+    # Seed str (make sure not same seed for each)
+    s_str = "s={}".format(str(args.seed))
+
+    # Redshift marker (NOTE: multi-z over all z, so no redshift str)
+    if multi_z:
+        z_str = "z={}".format("".join(map(str, args.redshifts)))
+    else:
+        z_str = "z={}".format(str(args.redshift))
+
     parts = [
         "arch_search" if arch_search else None,
         "frozen" if args.freeze_parameters else "nonfrozen",
@@ -72,15 +94,16 @@ def get_config_subdir(
         "linearised" if args.linearised else "nonlinearised",
         args.compression,
         "pretrain" if args.pre_train else "nopretrain",
-        "z={}".format(
-            "".join(map(str, args.redshifts)) if multi_z else args.redshift
-        ),
-        "".join(map(str, args.order_idx)) if multi_z else None, # NOTE: Multi-z posteriors marked by cumulants in datavector, not redshift!
-        # "".join(map(str, args.scales)) if multi_z else None, # NOTE: Multi-z posteriors marked by cumulants in datavector, not redshift!
-        str(args.seed),
+        z_str,
+        m_str, 
+        R_str,
+        s_str, # SBI seed
         "multi_z" if multi_z else None
     ]
-    return "/".join(filter(None, parts)) + "/"
+
+    config_subdir = "/".join(filter(None, parts)) + "/"
+
+    return config_subdir
 
 
 def get_results_dir(
@@ -101,7 +124,9 @@ def get_results_dir(
 
     dump_args_and_config(args, config, results_dir=results_dir) # Save conifg and args in run dir
 
-    print("RESULTS_DIR:\n", results_dir)
+    print("RESULTS_DIR:\n\t", results_dir)
+
+    logger.info("RESULTS DIR: {}".format(results_dir))
 
     return results_dir
 
@@ -121,7 +146,9 @@ def get_posteriors_dir(
     if not os.path.exists(posteriors_dir):
         os.makedirs(posteriors_dir, exist_ok=True)
 
-    print("POSTERIORS_DIR:\n", posteriors_dir)
+    print("POSTERIORS DIR:\n\t", posteriors_dir)
+
+    logger.info("POSTERIORS DIR: {}".format(posteriors_dir))
     
     return posteriors_dir
 
@@ -134,7 +161,9 @@ def get_multi_z_posterior_dir(args: argparse.Namespace) -> str:
         get_config_subdir(args, multi_z=True) 
     )
 
-    print("Multi-z posterior dir:\n", multi_z_dir)
+    # print("MULTI-Z POSTERIOR DIR:\n", multi_z_dir)
+
+    logger.info("MULTI-Z POSTERIOR DIR: {}".format(multi_z_dir))
 
     return multi_z_dir
 
@@ -147,8 +176,6 @@ def get_multi_z_posterior_filename(args: argparse.Namespace) -> str:
     if not os.path.exists(posterior_save_dir):
         os.makedirs(posterior_save_dir, exist_ok=True)
 
-    print("Multi-z posterior save dir:\n\t", posterior_save_dir)
-    
     # Posterior depends on the seed of the SBI experiment and the seed used to generate the datavector
     posterior_filename = os.path.join(
         posterior_save_dir, 
@@ -157,6 +184,9 @@ def get_multi_z_posterior_filename(args: argparse.Namespace) -> str:
             ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else ""
         ) 
     )
+
+    logger.info("MULTI-Z POSTERIOR FILENAME: {}".format(posterior_filename))
+
     return posterior_filename
 
 
@@ -204,11 +234,14 @@ def get_ndes_from_config(
         # Required to remove / add some arguments to specify NDEs
         nde_dict = dict(
             event_dim=event_dim, 
-            context_dim=context_dim if (context_dim is not None) else event_dim, 
+            context_dim=context_dim if exists(context_dim) else event_dim, 
             key=key,
             scaler=scaler if (nde.use_scaling and use_scalers) else None,
             **dict(nde)
         )
+
+        logger.info("NDE DICT: {}".format(nde_dict))
+
         nde_dict.pop("model_type")
         nde_dict.pop("use_scaling")
 

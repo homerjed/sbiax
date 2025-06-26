@@ -3,7 +3,9 @@ from pathlib import Path
 import jax.numpy as jnp
 import numpy as np
 
-_RESULTS_DIR_ = os.environ.get("RESULTS_DIR", "results") + "/"
+_RESULTS_DIR_ = os.environ.get("RESULTS_DIR", "") + "/"
+
+assert _RESULTS_DIR_ != "/", "RESULTS_DIR={} IS NOT ALLOWED.".format(_RESULTS_DIR_)
 
 # This file is in repo/subfolder/ w.r.t. .git root
 ROOT_DIR = str(Path(__file__).resolve().parent.parent.parent) 
@@ -107,3 +109,21 @@ def get_alpha_and_parameter_strings():
 
 def get_delta_bin_widths():
     return D_DELTAS
+
+
+F_PLANCK = jnp.array(
+    [
+        [ 2.13080592e+05, -1.20573100e+06,  1.48016560e+05, 2.93458548e+04, -2.06713944e+04, -1.65766154e+03],
+        [-1.20573100e+06,  1.35133806e+07, -2.18303421e+05, -1.26270926e+04, -1.61514959e+04, -5.92496230e+04],
+        [ 1.48016560e+05, -2.18303421e+05,  2.03038428e+05, -1.38685185e+04, -1.61497519e+04, -1.55300001e+03],
+        [ 2.93458548e+04, -1.26270926e+04, -1.38685185e+04, 1.02172866e+05, -6.36387231e+03, -5.65461481e+03],
+        [-2.06713944e+04, -1.61514959e+04, -1.61497519e+04, -6.36387231e+03,  2.29958884e+04,  6.30418193e+03],
+        [-1.65766154e+03, -5.92496230e+04, -1.55300001e+03, -5.65461481e+03,  6.30418193e+03,  2.27796421e+03]
+    ]
+)
+
+def get_F_planck():
+    return F_PLANCK[:-1, :-1] # Drop M_nu
+
+def get_Finv_planck():
+    return jnp.linalg.inv(get_F_planck())

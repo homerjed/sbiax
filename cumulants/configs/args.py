@@ -100,6 +100,13 @@ def get_cumulants_sbi_args(multi_z: bool = False, using_notebook: bool = False) 
     )
     parser.add_argument(
         "-u",
+        "--use-planck", 
+        default=False,
+        action=argparse.BooleanOptionalAction, 
+        help="Use Planck prior."
+    )
+    parser.add_argument(
+        "-ut",
         "--use-tqdm", 
         default=True,
         action=argparse.BooleanOptionalAction, 
@@ -225,6 +232,13 @@ def get_cumulants_multi_z_args(figure_one: bool = False, using_notebook: bool = 
         help="Freeze parameters not in [Om, s8] to their fixed values, in hypercube simulations."
     )
     parser.add_argument(
+        "-u",
+        "--use-planck", 
+        default=False,
+        action=argparse.BooleanOptionalAction, 
+        help="Use Planck prior."
+    )
+    parser.add_argument(
         "-v",
         "--verbose", 
         default=False,
@@ -321,6 +335,85 @@ def get_figure_one_args():
         default=False,
         action=argparse.BooleanOptionalAction, 
         help="Freeze parameters not in [Om, s8] to their fixed values, in hypercube simulations."
+    )
+    parser.add_argument(
+        "-u",
+        "--use-planck", 
+        default=False,
+        action=argparse.BooleanOptionalAction, 
+        help="Use Planck prior."
+    )
+    args = parser.parse_args()
+    return args
+
+
+def get_figure_two_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-n_d",
+        "--n_datavectors", 
+        type=int,
+        default=10,
+        help="Number of independent datavectors to measure at each redshift." # NOTE: possibly make this depend on redshift, a list of ints
+    )
+    parser.add_argument(
+        "-l",
+        "--linearised", 
+        default=True,
+        action=argparse.BooleanOptionalAction, 
+        help="Linearised model for datavector."
+    )
+    parser.add_argument(
+        "-c",
+        "--compression", 
+        default="linear",
+        choices=["linear", "nn", "nn-lbfgs"],
+        type=str,
+        help="Compression with neural network or MOPED."
+    )
+    parser.add_argument(
+        "-p",
+        "--pre-train", 
+        default=False,
+        action=argparse.BooleanOptionalAction, 
+        help="Pre-train (only) when using non-linearised model for datavector. Pre-train on linearised simulations."
+    )
+    parser.add_argument(
+        "-n",
+        "--n_linear_sims", 
+        default=DEFAULT_N_LINEAR_SIMS,
+        type=int,
+        help="Number of linearised simulations (used for pre-training if non-linear simulations and requested)."
+    )
+    parser.add_argument(
+        "-o", 
+        "--order_idx",
+        default=[0, 1, 2],
+        nargs="+", 
+        type=int,
+        help="Indices of variance, skewness and kurtosis sample cumulants."
+    )
+    parser.add_argument(
+        "-r", 
+        "--scales",
+        default=ALL_RADII,
+        nargs="+", 
+        type=float,
+        help="Physical scales."
+    )
+    parser.add_argument(
+        "-f",
+        "--freeze-parameters", 
+        default=False,
+        action=argparse.BooleanOptionalAction, 
+        help="Freeze parameters not in [Om, s8] to their fixed values, in hypercube simulations."
+    )
+    parser.add_argument(
+        "-u",
+        "--use-planck", 
+        default=False,
+        action=argparse.BooleanOptionalAction, 
+        help="Use Planck prior."
     )
     args = parser.parse_args()
     return args
