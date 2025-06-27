@@ -30,6 +30,9 @@ N_REPEATED_SBI_SEEDS = int(os.environ.get("N_REPEATED_SBI_SEEDS", 10))
     for repeated experiments (sbi training) and repeated posteriors 
     (for independent datavectors) for both linearised and non-linearised
     experiments.
+
+    -> figure_two3.py: plotting histograms for one exp_dict instead of 
+    all of them together
 """
 
 # General constants
@@ -48,19 +51,10 @@ data_dir, _, _ = get_save_and_load_dirs()
 
 target_idx = get_target_idx()
 
+# Plotting stuff
 scale_by_fisher = False # Scale parameter constraints by bulk-PDF Fisher widths
 use_consistent_binning = False # Same bins for bulk / tails posterior widths
-y_axis_off = True # Turn off y-axis for histograms, "density" label
-
-# Experiment setups for which to load posteriors (both bulk and tails)
-no_frozen = True
-keys = ["linearised", "pretrain", "freeze_parameters"]
-exp_dicts = [
-    dict(zip(keys, values)) 
-    for values in list(product([True, False], repeat=len(keys)))
-]
-
-print(exp_dicts)
+y_axis_off = False # Turn off y-axis for histograms, "density" label
 
 """
     Figure two for global-seed repeated experiments
@@ -68,6 +62,7 @@ print(exp_dicts)
 
 figure_two_args = get_figure_two_args()
 
+# Experiment setup for which to load posteriors (both bulk and tails)
 exp_dict = dict(
     linearised=figure_two_args.linearised,
     pretrain=figure_two_args.pre_train,
@@ -85,15 +80,16 @@ for key in exp_dict:
 
 n_p = target_idx.size if multi_z_args.freeze_parameters else alpha.size
 
+# Load Bulk PDF Fisher matrix just once NOTE: replace this with PDFs dataset NOTE: Scale PDF Fisher information by number of datavectors!
+Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, multi_z_args)
+Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z / multi_z_args.n_datavectors 
+
 # Load all posteriors from multi-z, calculating widths, for bulk and tails (over all redshifts)
 posterior_widths = dict(
     bulk=np.zeros((N_DATAVECTOR_SEEDS, N_REPEATED_SBI_SEEDS, n_p)), 
     tails=np.zeros((N_DATAVECTOR_SEEDS, N_REPEATED_SBI_SEEDS, n_p))
 )
-Finvs = dict(
-    bulk=dict(frozen=None, nonfrozen=None),
-    tails=dict(frozen=None, nonfrozen=None)
-)
+Finvs = dict(bulk=None, tails=None)
 for bulk_or_tails in ["bulk", "tails"]:
 
     for _global_seed in range(N_REPEATED_SBI_SEEDS):
@@ -102,7 +98,6 @@ for bulk_or_tails in ["bulk", "tails"]:
             N_DATAVECTOR_SEEDS, 
             desc="Posterior widths (SBI seed={})".format(_global_seed)
         ):
-
             # Attempt to load posterior 
             try:
                 # NOTE: what is the seed here should be reset?
@@ -110,33 +105,39 @@ for bulk_or_tails in ["bulk", "tails"]:
                 multi_z_args.seed_datavector = s # Seed for datavector 
                 multi_z_args.bulk_or_tails = bulk_or_tails
 
-                # Load Bulk PDF Fisher matrix just once NOTE: replace this with PDFs dataset
-                if s == 0:
-                    # NOTE: Scale PDF Fisher information by number of datavectors!
-                    Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, multi_z_args)
-                    Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z / multi_z_args.n_datavectors 
-
                 # Load posterior for seed and experiment
                 posterior_filename = get_multi_z_posterior_filename(multi_z_args)
                 posterior = np.load(posterior_filename)
+                    
+                widths = np.var(posterior["samples"], axis=0) # Shape (n_samples, parameters)
 
-                widths = np.var(posterior["samples"], axis=0)
+                # print(
+                #     "SBI seed: {}\ndatavector: {}\nvar (sigma8): {}".format(
+                #         _global_seed, bulk_or_tails, widths[-1]
+                #     )
+                # )
 
                 if scale_by_fisher:
                     widths = widths / np.diag(Finv_bulk_pdfs_all_z) - 1.
 
                 posterior_widths[bulk_or_tails][s, _global_seed, :] = widths
 
-                if exp_dict["freeze_parameters"]:
-                    Finvs[bulk_or_tails]["frozen"] = posterior["Finv"]
-                else:
-                    Finvs[bulk_or_tails]["nonfrozen"] = posterior["Finv"]
+                # Grab multi-z Fisher forecast, scaled by n_datavectors
+                Finvs[bulk_or_tails] = posterior["Finv"]
+
             except Exception as e:
                 print(
                     "BAD POSTERIOR:\n\tEXCEPTION: {}\n\t SBI_SEED={}, DATAVECTOR_SEED={} \n\t FILENAME={}".format(
                         e, _global_seed, s, posterior_filename
                     )
                 )
+
+for _global_seed in range(N_REPEATED_SBI_SEEDS):
+    print("SEED", _global_seed)
+    print("MEAN VARIANCE SIGMA_8 BULK:", np.sqrt(posterior_widths["bulk"][:, _global_seed, 4].mean(axis=0)))
+    print("MEAN VARIANCE SIGMA_8 TAILS:", np.sqrt(posterior_widths["tails"][:, _global_seed, 4].mean(axis=0)))
+    print("MEAN VARIANCE SIGMA_8 BULK:", np.sqrt(np.diag(Finvs["bulk"]))[4])
+    print("MEAN VARIANCE SIGMA_8 TAILS:", np.sqrt(np.diag(Finvs["tails"]))[4])
  
 """
     Plotting
@@ -145,7 +146,7 @@ for bulk_or_tails in ["bulk", "tails"]:
 # Plot histogram of posterior widths across all seeds for all multi-z posteriors
 landscape = False
 
-vertical_lines = jnp.diag(Finv_bulk_pdfs_all_z) # Variances (widths) for Bulk PDF Gaussian posterior
+vertical_lines = np.diag(Finv_bulk_pdfs_all_z) # Variances (widths) for Bulk PDF Gaussian posterior
 
 plotting_dict = dict(
     bulk=dict(color="b"),
@@ -169,7 +170,7 @@ else:
 
 fig_dim = (16. / 5.) * n_p
 if landscape:
-    fig, axes = plt.subplots(1, n_p, figsize=(fig_dim, 4.), sharey=True)
+    fig, axes = plt.subplots(1, n_p, figsize=(fig_dim, 4.), sharey=False)
 else:
     fig, axes = plt.subplots(n_p, 1, figsize=(5., fig_dim), sharex=False)
 axes = np.atleast_1d(axes)
@@ -184,6 +185,17 @@ for i in range(n_p):
             tag = " (linearised)" 
         else:
             tag = ""
+
+        # Don't plot bad runs
+        if (
+            jnp.all(posterior_widths["bulk"][:, _global_seed, i] == 0.)
+            or
+            jnp.all(posterior_widths["tails"][:, _global_seed, i] == 0.)
+        ): 
+            continue
+        
+        # if i == 4:
+        #     print("sigma_8 posterior var.:", posterior_widths["bulk"][:, _global_seed, i])
 
         _ = ax.hist(
             posterior_widths["bulk"][:, _global_seed, i], 
@@ -223,34 +235,35 @@ for i in range(n_p):
 
     # Bulk Fisher information line
     ax.axvline(
-        vertical_lines[i], 
+        np.diag(Finv_bulk_pdfs_all_z)[i], 
         color="green", 
         linestyle="--", 
         linewidth=2, 
         label=r"$F^{{-1}}[{}]$ (PDF[bulk])".format(parameter_strings[i][1:-1])
     )
     ax.axvline(
-        np.diag(Finvs["bulk"]["frozen"] if exp_dict["freeze_parameters"] else Finvs["bulk"]["nonfrozen"])[i], 
+        np.diag(Finvs["bulk"])[i], 
         color="blue", 
         linestyle="--", 
         linewidth=2, 
         label=r"$F^{{-1}}[{}]$ ($k_n$[bulk])".format(parameter_strings[i][1:-1])
     )
     ax.axvline(
-        np.diag(Finvs["tails"]["frozen"] if exp_dict["freeze_parameters"] else Finvs["tails"]["nonfrozen"])[i], 
+        np.diag(Finvs["tails"])[i], 
         color="red", 
         linestyle="--", 
         linewidth=2, 
         label=r"$F^{{-1}}[{}]$ ($k_n$[tails])".format(parameter_strings[i][1:-1])
     )
-    # if multi_z_args.use_planck:
-    #     ax.axvline(
-    #         np.diag(get_Finv_planck())[i], 
-    #         color="k", 
-    #         linestyle="--", 
-    #         linewidth=2, 
-    #         label=r"$F^{{-1}}[{}]_{{Planck}}$".format(parameter_strings[i][1:-1])
-    #     )
+
+    if multi_z_args.use_planck:
+        ax.axvline(
+            np.diag(get_Finv_planck())[i], 
+            color="k", 
+            linestyle="--", 
+            linewidth=2, 
+            label=r"$F^{{-1}}[{}]_{{Planck}}$".format(parameter_strings[i][1:-1])
+        )
 
 
     # Set xlims for this marginalised plot only, for given parameter i 
@@ -295,6 +308,7 @@ parts = [
     multi_z_args.compression,
     "pretrain" if multi_z_args.pre_train else "nopretrain",
     "".join(map(str, multi_z_args.order_idx)),
+    "".join(map(str, multi_z_args.scales)),
     # str(multi_z_args.seed)
 ]
 identifier_str = "_".join(filter(None, parts))
@@ -318,7 +332,7 @@ if not exp_dict["freeze_parameters"]:
     fig_dim = (16. / 5.) * n_p
 
     if landscape:
-        fig, axes = plt.subplots(1, n_p, figsize=(fig_dim, 4.), sharey=True)
+        fig, axes = plt.subplots(1, n_p, figsize=(fig_dim, 4.), sharey=False)
     else:
         fig, axes = plt.subplots(n_p, 1, figsize=(5., fig_dim), sharex=False)
     axes = np.atleast_1d(axes)
@@ -333,6 +347,17 @@ if not exp_dict["freeze_parameters"]:
                 tag = " (linearised)" 
             else:
                 tag = ""
+
+            _bulk_widths = posterior_widths["bulk"][:, _global_seed, i]
+            _tails_widths = posterior_widths["tails"][:, _global_seed, i]
+
+            # Don't plot bad runs
+            if (
+                jnp.all(_bulk_widths == 0.)
+                or
+                jnp.all(_tails_widths == 0.)
+            ): 
+                continue
 
             _ = ax.hist(
                 posterior_widths["bulk"][:, _global_seed, i], 
@@ -379,27 +404,28 @@ if not exp_dict["freeze_parameters"]:
             label=r"$F^{{-1}}[{}]$ (PDF[bulk])".format(parameter_strings[i][1:-1])
         )
         ax.axvline(
-            np.diag(Finvs["bulk"]["frozen"] if exp_dict["freeze_parameters"] else Finvs["bulk"]["nonfrozen"])[i], 
+            np.diag(Finvs["bulk"])[i], 
             color="blue", 
             linestyle="--", 
             linewidth=2, 
             label=r"$F^{{-1}}[{}]$ ($k_n$[bulk])".format(parameter_strings[i][1:-1])
         )
         ax.axvline(
-            np.diag(Finvs["tails"]["frozen"] if exp_dict["freeze_parameters"] else Finvs["tails"]["nonfrozen"])[i], 
+            np.diag(Finvs["tails"])[i], 
             color="red", 
             linestyle="--", 
             linewidth=2, 
             label=r"$F^{{-1}}[{}]$ ($k_n$[tails])".format(parameter_strings[i][1:-1])
         )
-        # if multi_z_args.use_planck:
-        #     ax.axvline(
-        #         np.diag(get_Finv_planck())[i], 
-        #         color="k", 
-        #         linestyle="--", 
-        #         linewidth=2, 
-        #         label=r"$F^{{-1}}[{}]_{{Planck}}$".format(parameter_strings[i][1:-1])
-        #     )
+
+        if multi_z_args.use_planck:
+            ax.axvline(
+                np.diag(get_Finv_planck())[i], 
+                color="k", 
+                linestyle="--", 
+                linewidth=2, 
+                label=r"$F^{{-1}}[{}]_{{Planck}}$".format(parameter_strings[i][1:-1])
+            )
 
         # Set xlims for this marginalised plot only, for given parameter i 
         # if _i == 0:
@@ -443,6 +469,7 @@ if not exp_dict["freeze_parameters"]:
         multi_z_args.compression,
         "pretrain" if multi_z_args.pre_train else "nopretrain",
         "".join(map(str, multi_z_args.order_idx)),
+        "".join(map(str, multi_z_args.scales)),
         # str(multi_z_args.seed),
         "marginalised"
     ]

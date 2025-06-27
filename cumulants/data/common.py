@@ -19,12 +19,12 @@ import tensorflow_probability.substrates.jax.distributions as tfd
 from tqdm.auto import trange
 
 from configs.log import setup_module_logger, get_log_level
-from data.constants import get_quijote_parameters, get_target_idx, get_F_planck, get_Finv_planck
+from data.constants import get_quijote_parameters, get_target_idx, get_F_planck, get_Finv_planck, LOWER, UPPER, ALPHA
 from compression.nn import fit_nn, fit_nn_lbfgs
 
 typecheck = jaxtyped(typechecker=typechecker)
 
-logger = setup_module_logger(__name__, level=get_log_level())
+logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
 FORCE_NOISELESS_DATAVECTOR = True if os.environ.get("FORCE_NOISELESS_DATAVECTOR", "").lower() in ("1", "true") else False
 
@@ -180,6 +180,34 @@ def get_prior(config: ConfigDict, dataset: Dataset) -> tfd.Distribution:
     if config.use_planck:
         prior = tfd.MultivariateNormalFullCovariance(
             dataset.alpha, covariance_matrix=get_Finv_planck()
+        )
+    else:
+        prior = tfd.Blockwise(
+            [tfd.Uniform(l, u) for l, u in zip(lower, upper)]
+        )
+
+    return prior
+
+
+@typecheck
+def get_prior_from_args(args) -> tfd.Distribution:
+
+    if args.linearised:
+        logger.info("Using flat prior")
+
+        flat_limit = 1e4
+        lower = jnp.ones((5,)) * -flat_limit
+        upper = jnp.ones((5,)) * flat_limit
+    else:
+        logger.info("Using Quijote uniform prior")
+        lower = jnp.asarray(LOWER) # Avoid tfp warning
+        upper = jnp.asarray(UPPER)
+
+    assert jnp.all((upper - lower) > 0.)
+
+    if args.use_planck:
+        prior = tfd.MultivariateNormalFullCovariance(
+            ALPHA, covariance_matrix=get_Finv_planck()
         )
     else:
         prior = tfd.Blockwise(

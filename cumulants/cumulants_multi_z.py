@@ -1,4 +1,5 @@
 from typing import Optional, Literal, Callable
+import logging
 import time
 import os
 
@@ -28,8 +29,8 @@ from configs.configs import (
     get_ndes_from_config
 )
 from configs.args import get_cumulants_sbi_args, get_cumulants_multi_z_args
-from data.common import linearised_model, add_planck_information_to_Finv
-from data.constants import get_base_posteriors_dir, get_save_and_load_dirs, get_target_idx, get_F_planck
+from data.common import linearised_model, add_planck_information_to_Finv, get_prior_from_args
+from data.constants import get_base_posteriors_dir, get_save_and_load_dirs, get_target_idx, get_F_planck, get_alpha_and_parameter_strings
 from data.cumulants import get_parameter_strings
 from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
 from cumulants_ensemble import Ensemble, MultiEnsemble
@@ -38,7 +39,7 @@ from utils.utils import finite_samples_log_prob, get_datasets
 
 typecheck = jaxtyped(typechecker=typechecker)
 
-logger = setup_module_logger(__name__, level=get_log_level())
+logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
 CompressionFn = Callable[[Float[Array, "d"], Float[Array, "p"]], Float[Array, "p"]]
 
@@ -101,9 +102,6 @@ def get_z_config_and_datavector(
     Ensemble,
     Float[Array, "n p"],
     Float[Array, "n d"],
-    Distribution,
-    Float[Array, "p"],
-    Float[Array, "p p"],
     Float[Array, "p p"],
     Float[Array, "p p"],
     Float[Array, "d d"],
@@ -174,16 +172,66 @@ def get_z_config_and_datavector(
     logger.info("Loaded ensemble from:\n\t{}".format(ensemble_path))
     logger.info("Ensemble weights:\n\t{}".format(ensemble.weights))
 
+    # Debugging plots
+    get_filename = lambda name: os.path.join(log_figs_dir, name)
+
+    plt.figure()
+    plt.title(
+        "Cumulants covariance \n z={}, \n R={}, \n m={}]".format(
+            redshift, 
+            "".join(map(str, scales)),
+            "".join(map(str, order_idx))
+        )
+    )
+    print("cov max:", jnp.max(cumulants_dataset.data.C))
+    plt.imshow(jnp.log(cumulants_dataset.data.C), cmap="coolwarm")
+    plt.colorbar()
+    plt.savefig(get_filename("multi_z_covariance_{}_{}.png".format(redshift, bulk_or_tails)))
+    plt.close()
+
+    plt.figure()
+    plt.title(
+        "Cumulants precision \n z={}, \n R={}, \n m={}]".format(
+            redshift, 
+            "".join(map(str, scales)),
+            "".join(map(str, order_idx))
+        )
+    )
+    _precision_ = jnp.linalg.inv(cumulants_dataset.data.C)
+    assert jnp.all(jnp.isfinite(_precision_))
+    plt.imshow(_precision_, cmap="coolwarm")
+    plt.colorbar()
+    plt.savefig(get_filename("multi_z_precision_{}_{}.png".format(redshift, bulk_or_tails)))
+    plt.close()
+
+    plt.figure()
+    plt.title("Histogram; kurtoses")
+    for R, _ in enumerate(scales):
+        if R > 0:
+            continue
+        print(cumulants_dataset.data.fiducial_data.shape)
+        ks = cumulants_dataset.data.fiducial_data[:, R * len(order_idx) : (R + 1) * len(order_idx)]
+        kurts = ks[:, -1]
+        print("var kurts:", np.var(kurts))
+        print(kurts.shape, kurts.min(), kurts.max())
+        plt.hist(
+            kurts,
+            bins="auto",
+            histtype="step",
+            density=True
+        )
+    # plt.xscale("log")
+    # plt.yscale("log")
+    plt.savefig(get_filename("kurtoses_hist_{}_{}.png".format(redshift, bulk_or_tails)))
+    plt.close()
+
     return (
         ensemble, 
         x_, 
         datavectors,
-        cumulants_dataset.prior, # Quijote prior (same for all z, only applied once with combined z-likelihoods)
-        jnp.asarray(cumulants_dataset.data.alpha), 
         # Scale data and parameter covariances by number of measurements (these are not used in MLEs)
         jnp.asarray(datasets["bulk"].data.Finv) / n_datavectors, 
         jnp.asarray(datasets["tails"].data.Finv) / n_datavectors, 
-        jnp.asarray(cumulants_dataset.data.Finv) / n_datavectors, 
         jnp.asarray(cumulants_dataset.data.C) / n_datavectors, 
         jnp.mean(cumulants_dataset.data.fiducial_data, axis=0), 
         jnp.mean(cumulants_dataset.data.derivatives, axis=0)
@@ -224,21 +272,24 @@ if __name__ == "__main__":
 
     key = jr.key(int(time.time())) # Only for datavectors, split for each redshift, datavector and separate posterior
 
+    data_dir, _, _ = get_save_and_load_dirs()
+
     multi_z_args = get_cumulants_multi_z_args()
+
+    alpha, parameter_strings = get_alpha_and_parameter_strings()
+    alpha = jnp.asarray(alpha)
+    parameter_strings_ = [parameter_strings[_] for _ in ix]
+
+    prior = get_prior_from_args(multi_z_args)
 
     # Multi-z inference concerning the bulk or bulk + tails (just sampling args)
     sampling_config = default_posterior_sampling(config=None, no_config=True)
 
     # Get the bulk Fisher forecast for all redshifts 
     # but easier to load frozen or not since it autosaves...
-    data_dir, _, _ = get_save_and_load_dirs()
-
     # Planck information added here if required
     Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, multi_z_args)
     Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z / multi_z_args.n_datavectors
-
-    parameter_strings = get_parameter_strings()
-    parameter_strings_ = [parameter_strings[_] for _ in ix]
 
     linear_str = "linearised" if multi_z_args.linearised else "nonlinearised"
     pretrain_str = "pretrain" if multi_z_args.pre_train else "nopretrain"
@@ -259,10 +310,8 @@ if __name__ == "__main__":
         covariances  = [] # Covariance matrices of simulations at each redshift
         derivatives_ = [] # Derivatives of theory model at each redshift 
         mus          = [] # Expectation model at each redshift 
-        Finvs        = [] # Fisher parameter covariances at each redshift
         bulk_Finvs   = [] # Fisher parameter covariances at each redshift
         tails_Finvs  = [] # Fisher parameter covariances at each redshift
-        F            = jnp.zeros((parameter_dim, parameter_dim)) # Add independent information from data at each redshift 
         F_bulk       = jnp.zeros((parameter_dim, parameter_dim)) # Add independent information from data at each redshift (for bulk)
         F_tails      = jnp.zeros((parameter_dim, parameter_dim)) # Add independent information from data at each redshift (for bulk)
 
@@ -279,11 +328,8 @@ if __name__ == "__main__":
                     ensemble, 
                     x_z, # MLE[datavectors] at this redshift
                     datavector, # list[Array["n d"]]
-                    prior, # Same prior for each z, only needed / used once
-                    alpha, # Datavectors generated at these parameters for each redshift
                     bulk_Finv_z, # NOTE: This Finv not used for compression (scaled by n_datavectors)
                     tails_Finv_z, # NOTE: This Finv not used for compression (scaled by n_datavectors)
-                    Finv_z, # NOTE: This Finv not used for compression (scaled by n_datavectors)
                     C, # NOTE: Scaled by n_datavectors
                     mu, 
                     derivatives
@@ -304,7 +350,6 @@ if __name__ == "__main__":
                 ) 
 
                 # Add Fisher information from redshift (independent; Limber)
-                F += jnp.linalg.inv(Finv_z)
                 F_bulk += jnp.linalg.inv(bulk_Finv_z)
                 F_tails += jnp.linalg.inv(tails_Finv_z)
 
@@ -313,7 +358,6 @@ if __name__ == "__main__":
                 covariances.append(C)
                 x_s.append(x_z)
                 datavectors.append(datavector)
-                Finvs.append(Finv_z)
                 bulk_Finvs.append(bulk_Finv_z)
                 tails_Finvs.append(tails_Finv_z)
                 ensembles.append(ensemble)      
@@ -331,25 +375,31 @@ if __name__ == "__main__":
             F_planck = get_F_planck()
 
             # Only add Fisher from Planck once, to information accrued over all redshifts
-            F = F + F_planck
             F_bulk = F_bulk + F_planck
             F_tails = F_tails + F_planck
 
             bulk_Finvs = [
-               add_planck_information_to_Finv(Finv, use_planck=multi_z_args.use_planck)
-               for Finv in bulk_Finvs
+               add_planck_information_to_Finv(_Finv, use_planck=multi_z_args.use_planck)
+               for _Finv in bulk_Finvs
             ]
             tails_Finvs = [
-               add_planck_information_to_Finv(Finv, use_planck=multi_z_args.use_planck)
-               for Finv in bulk_Finvs
+               add_planck_information_to_Finv(_Finv, use_planck=multi_z_args.use_planck)
+               for _Finv in tails_Finvs
             ]
 
-        Finv_all_z = jnp.linalg.inv(F) 
         bulk_Finv_all_z = jnp.linalg.inv(F_bulk) 
         tails_Finv_all_z = jnp.linalg.inv(F_tails) 
 
-        if multi_z_args.verbose:
-            # Plot Fisher forecasts
+        # Choose 'main' Finv for sampling
+        if multi_z_args.bulk_or_tails == "bulk":
+            Finv_all_z = bulk_Finv_all_z
+            Finvs = bulk_Finvs
+        else:
+            Finv_all_z = tails_Finv_all_z
+            Finvs = tails_Finvs
+
+        if logger.isEnabledFor(logging.DEBUG):
+            # Plot Fisher forecasts over all redshifts
             for z, bulk_Finv_z, tails_Finv_z in zip(multi_z_args.redshifts, bulk_Finvs, tails_Finvs):
                 c = ChainConsumer()
                 c.add_chain(
@@ -376,7 +426,7 @@ if __name__ == "__main__":
                 fig = c.plotter.plot()
 
                 forecast_filename = os.path.join(
-                        figs_dir if figs_dir is not None else "fisher_forecasts/", 
+                        log_figs_dir, 
                         "fisher_forecast_z={}_R={}_m={}.png".format(
                             z,
                             "".join(map(str, multi_z_args.order_idx)),
@@ -415,7 +465,7 @@ if __name__ == "__main__":
             fig = c.plotter.plot()
 
             forecast_filename = os.path.join(
-                    figs_dir if figs_dir is not None else "fisher_forecasts/", 
+                    log_figs_dir, 
                     "fisher_forecast_tails_R={}_m={}.png".format(
                         z,
                         "".join(map(str, multi_z_args.order_idx)),
@@ -451,7 +501,7 @@ if __name__ == "__main__":
             fig = c.plotter.plot()
 
             forecast_filename = os.path.join(
-                    figs_dir if figs_dir is not None else "fisher_forecasts/", 
+                    log_figs_dir, 
                     "fisher_forecast_bulk_R={}_m={}.png".format(
                         z,
                         "".join(map(str, multi_z_args.order_idx)),
@@ -464,32 +514,8 @@ if __name__ == "__main__":
 
             print("FISHER FORECAST SAVED AT: \n", forecast_filename)
 
-
             # Multi z Fisher
             c = ChainConsumer()
-            # for z, Finv_z in zip(config.redshifts, Finvs):
-            #     c.add_chain(
-            #         Chain.from_covariance(
-            #             alpha,
-            #             Finv_z,
-            #             columns=parameter_strings,
-            #             name=r"$F_{\Sigma^{-1}}$ z=" + str(z),
-            #             linestyle=":",
-            #             shade_alpha=0.
-            #         )
-            #     )
-            # for z, bulk_Finv_z in zip(config.redshifts, bulk_Finvs):
-            #     c.add_chain(
-            #         Chain.from_covariance(
-            #             alpha,
-            #             bulk_Finv_z,
-            #             columns=parameter_strings,
-            #             name=r"$F_{\Sigma^{-1}}$ z=" + str(z) + " [bulk]",
-            #             linestyle=":",
-            #             color="g",
-            #             shade_alpha=0.
-            #         )
-            #     )
             c.add_chain(
                 Chain.from_covariance(
                     alpha,
@@ -518,7 +544,7 @@ if __name__ == "__main__":
             fig = c.plotter.plot()
 
             forecast_filename = os.path.join(
-                    figs_dir if figs_dir is not None else "fisher_forecasts/", 
+                    log_figs_dir, 
                     "fisher_forecast_all_z_R={}_m={}.png".format(
                         # "".join(map(str, multi_z_args.redshifts)),
                         "".join(map(str, multi_z_args.scales)),
@@ -574,20 +600,6 @@ if __name__ == "__main__":
         logger.info("SUMMARIES ALL Z:{}".format(summaries_all_z.shape))
 
         # Save posterior, Fisher and summary
-        # posterior_save_dir = get_multi_z_posterior_dir(multi_z_args)
-        # if not os.path.exists(posterior_save_dir):
-        #     os.makedirs(posterior_save_dir, exist_ok=True)
-
-        # print("Multi-z posterior save dir:\n\t", posterior_save_dir)
-        
-        # # NOTE: Additional seed added if provided
-        # posterior_filename = os.path.join(
-        #     posterior_save_dir, 
-        #     "multi_z_posterior_{}{}.npz".format( # NOTE: was just 'posterior_...' before
-        #         multi_z_args.seed, 
-        #         ("_" + str(multi_z_args.seed_datavector)) if multi_z_args.seed_datavector is not None else ""
-        #     ) 
-        # )
         posterior_filename = get_multi_z_posterior_filename(multi_z_args)
         np.savez(
             posterior_filename,
@@ -597,6 +609,10 @@ if __name__ == "__main__":
             datavectors=datavectors,
             summaries=summaries_all_z, 
         )
+
+        print("MEAN FISHER VARIANCE SIGMA_8 BULK/TAILS:", np.sqrt(np.diag(Finv_all_z))[4])
+        print("MEAN FISHER VARIANCE SIGMA_8 BULK:", np.sqrt(np.diag(bulk_Finv_all_z))[4])
+        print("MEAN FISHER VARIANCE SIGMA_8 TAILS:", np.sqrt(np.diag(bulk_Finv_all_z))[4])
 
         print("MULTI-Z POSTERIOR FILENAME:\n", posterior_filename)
 
@@ -1039,7 +1055,6 @@ if __name__ == "__main__":
 
         print("MULTI-Z POSTERIOR PLOT FILENAME (MCMC):\n", posterior_plot_filename)
 
-
         """
             Plot all summaries
         """
@@ -1050,7 +1065,7 @@ if __name__ == "__main__":
             c.add_chain(
                 Chain.from_covariance(
                     alpha[ix],
-                    Finvs[i][ix, :][:, ix], # Bulk or tails?
+                    Finvs[i][ix, :][:, ix] * multi_z_args.n_datavectors, # Bulk or tails?
                     columns=parameter_strings_,
                     name=r"$F_{\Sigma^{-1}}$" + " (z={})".format(redshift),
                     color=colors[i],
@@ -1070,7 +1085,7 @@ if __name__ == "__main__":
         c.add_chain(
             Chain.from_covariance(
                 alpha[ix],
-                Finv_all_z[ix, :][:, ix], # Bulk or tails?
+                Finv_all_z[ix, :][:, ix] * multi_z_args.n_datavectors, # Bulk or tails?
                 columns=parameter_strings_,
                 name=r"$F_{\Sigma^{-1}}$" + " (z=all)",
                 color="k",

@@ -39,9 +39,12 @@ from configs.cumulants_configs import bulk_cumulants_config
 
 typecheck = jaxtyped(typechecker=typechecker)
 
-logger = setup_module_logger(__name__, level=get_log_level())
+logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
 FORCE_RECOMPUTE_DATASET = True if os.environ.get("FORCE_RECOMPUTE_DATASET", "").lower() in ("1", "true") else False 
+REDUCED_CUMULANTS = True if os.environ.get("REDUCED_CUMULANTS", "").lower() in ("1", "true") else False 
+USE_QUIJOTE_TAILS = True if os.environ.get("USE_QUIJOTE_TAILS", "").lower() in ("1", "true") else False
+FIDUCIAL_REDUCE = True if os.environ.get("FIDUCIAL_REDUCE", "").lower() in ("1", "true") else False
 
 PRINT_FREQ = 500
 
@@ -170,6 +173,7 @@ def get_calculated_cumulants_data(
             "_central" if central_moments else "",
             "_with_norms" if use_normalisations else "",
             "_with_means_stacked" if stack_mean else "",
+            "_reduced" if FIDUCIAL_REDUCE else ""
             # "_full_shape" if full_shape else "", # NOTE: pointless; bulk or tails instead
             # "_linearised" if config.linearised else "_nonlinear" # NOTE: pointless? linearised after calculation
         ]
@@ -454,6 +458,7 @@ def get_calculated_cumulants_data(
 
         fiducial_pdfs_z_R_cut = np.zeros((n_fiducial_pdfs, cut_dim)) # Bulk PDFs
         fiducial_moments_z_R = np.zeros((n_fiducial_pdfs, n_scales * n_cumulants)) # Cumulants of bulk PDFs
+        fiducial_vars_z_R = np.zeros((n_fiducial_pdfs, n_scales)) # Variances from cumulants of bulk PDFs
         fiducial_moments_z_R_means = np.zeros((n_fiducial_pdfs, n_scales)) # Means of bulk PDFs
         fiducial_normalisations = np.zeros((n_fiducial_pdfs, n_scales)) # Normalisations of bulk PDFs
         for n in trange(n_fiducial_pdfs, desc="Fiducials [{}]".format(tqdm_desc_str)):
@@ -476,6 +481,9 @@ def get_calculated_cumulants_data(
                     )
 
                     fiducial_moments_z_R[n, i + R * n_cumulants : (i + 1) + R * n_cumulants] = moment
+
+                    if i == 0: # Variance
+                        fiducial_vars_z_R[n, i + R : (i + 1) + R] = moment
 
                 # Mean and normalisation of PDF
                 fiducial_moments_z_R_means[n, R] = np.sum(pdf * D_deltas[cut] * deltas[cut]) # delta_R
@@ -514,6 +522,9 @@ def get_calculated_cumulants_data(
                 if verbose:
                     if n % PRINT_FREQ == 0:
                         print("\r n={:05d}/{}".format(n, n_fiducial_pdfs), end="")
+
+        fiducial_vars_z_R = np.mean(fiducial_vars_z_R, axis=0)
+        assert fiducial_vars_z_R.shape == (n_scales,), "fiducial_vars_z_R.shape=={}".format(fiducial_vars_z_R.shape)
 
         if stack_mean:
             fiducial_moments_z_R = intersperse_means(fiducial_moments_z_R_means, fiducial_moments_z_R) 
@@ -685,6 +696,21 @@ def get_calculated_cumulants_data(
             )
         )
 
+        if FIDUCIAL_REDUCE:
+            logger.info("REDUCING CUMULANTS (assuming using m_0, m_1).")
+
+            assert stack_mean and use_normalisations, "Reduction index below here is wrong if this is the case!"
+
+            for r, r_i in enumerate(R_idx):
+
+                print(fiducial_moments_z_R.shape, fiducial_vars_z_R.shape, fiducial_moments_z_R[:, r * 5 : (r + 1) * 5].shape)
+
+                # Only divide skewness and kurtoses by mean fiducial variance (assuming norm/mean included)
+                # 5 'cumulants' including m_0, m_1
+                fiducial_moments_z_R[:, r * 5 : (r + 1) * 5][:, 3:] /= np.tile(fiducial_vars_z_R[r], (2,)) # Tile to [skew, kurtosis] shape
+                latin_moments_z_R[:, r * 5 : (r + 1) * 5][:, 3:] /= np.tile(fiducial_vars_z_R[r], (2,))
+                derivative_moments_z_R[:, :, r * 5 : (r + 1) * 5][:, :, 3:] /= np.tile(fiducial_vars_z_R[r], (2,))
+
         """
             Datasets
         """
@@ -692,6 +718,17 @@ def get_calculated_cumulants_data(
         # Fisher information in cumulants of bulk of the PDF
         n_fiducial_moments, data_dim_moments = fiducial_moments_z_R.shape
         C_moments = np.cov(fiducial_moments_z_R, rowvar=False)
+
+        corr_moments = jnp.corrcoef(fiducial_moments_z_R, rowvar=False)
+
+        filename = os.path.join(log_figs_dir, "corr_coeff_moments.png")
+        plt.figure()
+        plt.title("Correlation matrix (moments) [{}]".format(bulk_or_tails))
+        plt.imshow(corr_moments, cmap="coolwarm")
+        plt.colorbar()
+        plt.savefig(filename)
+        plt.close()
+        logger.debug("Saved correlation matrix (moments) figure at: \n\t{}".format(filename))
 
         # assert C_moments.T == C_moments, "Non-symmetric cumulant covariance."
 
@@ -755,6 +792,17 @@ def get_calculated_cumulants_data(
                 parameters=jnp.asarray(latin_parameters),
                 derivatives=jnp.asarray(derivative_pdfs_z_R_cut)  
             )
+            
+            corr_pdf = np.corrcoef(fiducial_pdfs_z_R_cut, rowvar=False) 
+
+            filename = os.path.join(log_figs_dir, "corr_coeff_pdfs.png")
+            plt.figure()
+            plt.title("Correlation matrix (PDFs) [{}]".format(bulk_or_tails))
+            plt.imshow(corr_pdf, cmap="coolwarm")
+            plt.colorbar()
+            plt.savefig(filename)
+            plt.close()
+            logger.debug("Saved correlation matrix (PDFs) figure at: \n\t{}".format(filename))
 
             if config.freeze_parameters:
                 pdf_dataset = freeze_out_parameters_dataset(pdf_dataset)

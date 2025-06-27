@@ -10,9 +10,11 @@ from jaxtyping import PRNGKeyArray, Array, Float, jaxtyped
 from beartype import beartype as typechecker 
 import numpy as np
 from ml_collections import ConfigDict
+import matplotlib.pyplot as plt
 import tensorflow_probability.substrates.jax.distributions as tfd
 from tqdm.auto import trange
 
+from configs.log import setup_module_logger, get_log_level
 from data.constants import get_quijote_parameters, get_save_and_load_dirs, get_target_idx
 from data.common import (
     Dataset,
@@ -29,6 +31,10 @@ from data.common import (
 
 typecheck = jaxtyped(typechecker=typechecker)
 
+logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
+
+USE_QUIJOTE_TAILS = True if os.environ.get("USE_QUIJOTE_TAILS", "").lower() in ("1", "true") else False
+FIDUCIAL_REDUCE = True if os.environ.get("FIDUCIAL_REDUCE", "").lower() in ("1", "true") else False
 
 """
     Data
@@ -110,6 +116,7 @@ def get_R_and_z_moments(
         return bar
 
     fiducial_pdfs_z_R = np.zeros((fiducial_pdfs.shape[1], n_scales * n_redshifts * n_cumulants))
+    fiducial_vars_z_R = np.zeros((fiducial_pdfs.shape[1], n_scales * n_redshifts))
     for n in _get_bar(fiducial_pdfs.shape[1]):
         for z, z_i in enumerate(z_idx):
             for r, r_i in enumerate(R_idx):
@@ -117,9 +124,13 @@ def get_R_and_z_moments(
                 _slice = z * n_scales + r # NOTE: These must be positions in new array
 
                 # Shape (3,), # Float[np.ndarray, "z n R d"]
-                simulation = fiducial_pdfs[z_i, n, r_i, order_idx] 
+                simulation = fiducial_pdfs[z_i, n, r_i, order_idx] # NOTE: list order_idx indexing works?
 
                 fiducial_pdfs_z_R[n, _slice * n_cumulants : (_slice + 1) * n_cumulants] = simulation
+
+                fiducial_vars_z_R[n, r] = simulation[0] # Just take variance 
+    
+    fiducial_vars_z_R = np.mean(fiducial_vars_z_R, axis=0)
 
     latin_pdfs_z_R = np.zeros((latin_pdfs.shape[1], n_scales * n_redshifts * n_cumulants))
     for n in _get_bar(latin_pdfs.shape[1]):
@@ -151,6 +162,16 @@ def get_R_and_z_moments(
             "Processed data shapes (fids., latins, derivs.):", 
             [_.shape for _ in [fiducial_pdfs_z_R, latin_pdfs_z_R, derivatives]]
         )
+
+    if FIDUCIAL_REDUCE:
+        logger.info("REDUCING CUMULANTS.")
+        for z, z_i in enumerate(z_idx):
+            for r, r_i in enumerate(R_idx):
+
+                # Only divide skewness and kurtoses by mean fiducial variance
+                fiducial_pdfs_z_R[:, r * n_cumulants : (r + 1) * n_cumulants][:, 1:] /= np.tile(fiducial_vars_z_R[r], (2,)) # Tile to [skew, kurtosis] shape
+                latin_pdfs_z_R[:, r * n_cumulants : (r + 1) * n_cumulants][:, 1:] /= np.tile(fiducial_vars_z_R[r], (2,))
+                derivatives_z_R[:, :, r * n_cumulants : (r + 1) * n_cumulants][:, :, 1:] /= np.tile(fiducial_vars_z_R[r], (2,))
 
     return fiducial_pdfs_z_R, latin_pdfs_z_R, derivatives_z_R
 
@@ -271,6 +292,17 @@ def get_cumulant_data(
         parameters=jnp.asarray(latin_moments_parameters),
         derivatives=jnp.asarray(derivatives)  
     )
+
+    corr_moments = jnp.corrcoef(fiducial_moments_z_R, rowvar=False)
+
+    filename = os.path.join(log_figs_dir, "corr_coeff_moments_tails_quijote.png")
+    plt.figure()
+    plt.title("Correlation matrix (moments) [tails, quijote]")
+    plt.imshow(corr_moments, cmap="coolwarm")
+    plt.colorbar()
+    plt.savefig(filename)
+    plt.close()
+    logger.debug("Saved correlation matrix (moments) figure at: \n\t{}".format(filename))
 
     if config.freeze_parameters:
         print("Freezing all but Om, s8")

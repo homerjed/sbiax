@@ -17,7 +17,7 @@ from sbiax.ndes import CNF, MAF, Scaler
 
 typecheck = jaxtyped(typechecker=typechecker)
 
-logger = setup_module_logger(__name__, level=get_log_level())
+logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
 DatasetClass = BulkCumulantsDataset | TailsCumulantsDataset | BulkPDFsDataset | CumulantsDataset
 

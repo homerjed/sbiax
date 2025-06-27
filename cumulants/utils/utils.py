@@ -19,10 +19,11 @@ from data.common import Dataset
 from data.pdfs import BulkCumulantsDataset, BulkPDFsDataset, TailsCumulantsDataset
 from data.cumulants import CumulantsDataset
 
-logger = setup_module_logger(__name__, level=get_log_level())
+logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
 DatasetType = CumulantsDataset | BulkCumulantsDataset | BulkPDFsDataset | TailsCumulantsDataset
 
+FORCE_RECOMPUTE_DATASET = True if os.environ.get("FORCE_RECOMPUTE_DATASET", "").lower() in ("1", "true") else False 
 USE_QUIJOTE_TAILS = True if os.environ.get("USE_QUIJOTE_TAILS", "").lower() in ("1", "true") else False
 
 
@@ -110,6 +111,59 @@ def get_datasets(args: argparse.Namespace) -> tuple[ConfigDict, Dataset, dict[st
     dataset = datasets[args.bulk_or_tails]
 
     return config, dataset, datasets
+
+
+def load_multi_z_cumulants_fisher_forecast(data_dir, args):
+    """
+        Load Fisher inverse matrix of cumulants dataset, over multiple redshifts, consistently with args
+        - load bulk and tails dataset Finvs
+    """
+
+    if USE_QUIJOTE_TAILS:
+        quijote_str = "_quijote"
+    else:
+        quijote_str = ""
+
+    parts = [
+        "_R" + "".join(map(str, args.scales)),
+        "_m" + "".join(map(str, args.order_idx)),
+        "_f" if args.freeze_parameters else "_nf"
+    ]
+    identifier_str = "".join(parts)
+
+    Finv_bulk_file_path = os.path.join(
+        data_dir, "Finv_bulk_all_z_{}.npy".format(identifier_str)
+    )
+    Finv_tails_file_path = os.path.join(
+        data_dir, "Finv_tails_all_z_{}.npy".format(identifier_str + quijote_str)
+    )
+
+    if not FORCE_RECOMPUTE_DATASET:
+        try:
+            Finv_bulk_all_z = np.load(Finv_bulk_file_path)
+            Finv_tails_all_z = np.load(Finv_tails_file_path)
+        except:
+
+            _, _, datasets = get_datasets(args) # Config and cumulants_dataset can be bulk ... etc
+            Finv_bulk_all_z = datasets["bulk"].data.Finv
+            Finv_tails_all_z = datasets["tails"].data.Finv
+
+            np.save(Finv_bulk_file_path, Finv_bulk_all_z)
+            np.save(Finv_tails_file_path, Finv_tails_all_z)
+        else:
+            _, _, datasets = get_datasets(args) # Config and cumulants_dataset can be bulk ... etc
+            Finv_bulk_all_z = datasets["bulk"].data.Finv
+            Finv_tails_all_z = datasets["tails"].data.Finv
+
+    # Don't save with Fisher information from Planck
+    # Finv_bulk_pdfs_all_z = add_planck_information_to_Finv(
+    #     Finv_bulk_pdfs_all_z, use_planck=args.use_planck
+    # )
+
+    logger.info("Finv bulk all z loaded from:\n\t{}".format(Finv_bulk_file_path))
+    logger.info("Finv tails all z loaded from:\n\t{}".format(Finv_tails_file_path))
+
+    return Finv_bulk_all_z, Finv_tails_all_z
 
 
 def plot_cumulants(args, config, cumulants, results_dir):
@@ -452,3 +506,4 @@ def replace_scalers(ensemble, *, config, X, P):
             [Scaler(X, P)] * sum(int(nde.use_scaling) for nde in config.ndes) 
         )
     return ensemble
+

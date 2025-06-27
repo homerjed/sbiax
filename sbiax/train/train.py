@@ -681,7 +681,8 @@ def train_ensemble(
             show_tqdm=show_tqdm
         )
 
-        ensemble.ndes[n] = nde
+        # ensemble.ndes[n] = nde
+        ensemble = eqx.tree_at(lambda e: e.ndes[n], ensemble, nde)
 
         stats.append(stats_n)
         ndes.append(nde)

@@ -41,7 +41,7 @@ from utils.utils import (
 
 jax.clear_caches()
 
-logger = setup_module_logger(__name__, level=get_log_level())
+logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
 
 """ 

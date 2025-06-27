@@ -13,7 +13,10 @@ def get_log_level(default="INFO"):
 
 def setup_module_logger(module_name: str, level=logging.INFO, log_dir=LOG_DIR):
 
+    log_figs_dir = os.path.join(log_dir, "figs/")
+
     os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(log_figs_dir, exist_ok=True)
 
     log_path = os.path.join(log_dir, f"{module_name}.log")
 
@@ -38,4 +41,4 @@ def setup_module_logger(module_name: str, level=logging.INFO, log_dir=LOG_DIR):
 
         logger.addHandler(file_handler)
 
-    return logger
+    return logger, log_figs_dir

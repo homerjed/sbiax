@@ -304,7 +304,8 @@ for marginalised in [True, False]:
         "frozen/" if multi_z_args.freeze_parameters else "nofrozen/", 
         "linearised/" if multi_z_args.linearised else "nonlinearised/", 
         "pretrain/" if multi_z_args.pre_train else "nopretrain/", 
-        "m{}/".format("".join(map(str, multi_z_args.order_idx)))
+        "m{}/".format("".join(map(str, multi_z_args.order_idx))),
+        "R{}/".format("".join(map(str, multi_z_args.scales)))
     )
     if not os.path.exists(sub_figs_dir):
         os.makedirs(sub_figs_dir, exist_ok=True)
