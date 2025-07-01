@@ -96,6 +96,7 @@ for bulk_or_tails in ["bulk", "tails"]:
         # Loop over datavector seeds?
         for s in trange(
             N_DATAVECTOR_SEEDS, 
+            colour="red" if bulk_or_tails == "tails" else "blue",
             desc="Posterior widths (SBI seed={})".format(_global_seed)
         ):
             # Attempt to load posterior 
@@ -136,8 +137,8 @@ for _global_seed in range(N_REPEATED_SBI_SEEDS):
     print("SEED", _global_seed)
     print("MEAN VARIANCE SIGMA_8 BULK:", np.sqrt(posterior_widths["bulk"][:, _global_seed, 4].mean(axis=0)))
     print("MEAN VARIANCE SIGMA_8 TAILS:", np.sqrt(posterior_widths["tails"][:, _global_seed, 4].mean(axis=0)))
-    print("MEAN VARIANCE SIGMA_8 BULK:", np.sqrt(np.diag(Finvs["bulk"]))[4])
-    print("MEAN VARIANCE SIGMA_8 TAILS:", np.sqrt(np.diag(Finvs["tails"]))[4])
+    # print("MEAN FISHER VARIANCE SIGMA_8 BULK:", np.sqrt(np.diag(Finvs["bulk"]))[4])
+    # print("MEAN FISHER VARIANCE SIGMA_8 TAILS:", np.sqrt(np.diag(Finvs["tails"]))[4])
  
 """
     Plotting
@@ -193,9 +194,6 @@ for i in range(n_p):
             jnp.all(posterior_widths["tails"][:, _global_seed, i] == 0.)
         ): 
             continue
-        
-        # if i == 4:
-        #     print("sigma_8 posterior var.:", posterior_widths["bulk"][:, _global_seed, i])
 
         _ = ax.hist(
             posterior_widths["bulk"][:, _global_seed, i], 
@@ -237,7 +235,7 @@ for i in range(n_p):
     ax.axvline(
         np.diag(Finv_bulk_pdfs_all_z)[i], 
         color="green", 
-        linestyle="--", 
+        linestyle=":", 
         linewidth=2, 
         label=r"$F^{{-1}}[{}]$ (PDF[bulk])".format(parameter_strings[i][1:-1])
     )
@@ -399,7 +397,7 @@ if not exp_dict["freeze_parameters"]:
         ax.axvline(
             vertical_lines[i], 
             color="green", 
-            linestyle="--", 
+            linestyle=":", 
             linewidth=2, 
             label=r"$F^{{-1}}[{}]$ (PDF[bulk])".format(parameter_strings[i][1:-1])
         )

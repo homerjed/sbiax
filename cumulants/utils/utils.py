@@ -178,9 +178,9 @@ def plot_cumulants(args, config, cumulants, results_dir):
     n_scales = len(config.scales)
     n_cumulants_plot = 3
     if args.bulk_or_tails == "bulk":
-        if config.stack_bulk_means:
+        if config.stack_means:
             n_cumulants_plot += 1
-        if config.stack_bulk_norms:
+        if config.use_normalisations:
             n_cumulants_plot += 1
 
     fig, axs = plt.subplots(

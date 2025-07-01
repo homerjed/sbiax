@@ -42,7 +42,6 @@ typecheck = jaxtyped(typechecker=typechecker)
 logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
 FORCE_RECOMPUTE_DATASET = True if os.environ.get("FORCE_RECOMPUTE_DATASET", "").lower() in ("1", "true") else False 
-REDUCED_CUMULANTS = True if os.environ.get("REDUCED_CUMULANTS", "").lower() in ("1", "true") else False 
 USE_QUIJOTE_TAILS = True if os.environ.get("USE_QUIJOTE_TAILS", "").lower() in ("1", "true") else False
 FIDUCIAL_REDUCE = True if os.environ.get("FIDUCIAL_REDUCE", "").lower() in ("1", "true") else False
 
@@ -98,9 +97,9 @@ def get_calculated_cumulants_data(
     *, 
     pdfs: bool = False, # Use PDFs or cumulants for the bulk
     verbose: bool = False, 
-    use_mean: bool = False,
-    use_bulk_norms: bool = True, # Stack means of bulk of the PDF at each scale with the other cumulants
-    stack_bulk_means: bool = True,
+    use_means: bool = False,
+    use_normalisations: bool = True, # Stack means of bulk of the PDF at each scale with the other cumulants
+    stack_means: bool = True,
     full_shape: bool = False,
     results_dir: Optional[str] = None
 ) -> Dataset:
@@ -112,7 +111,7 @@ def get_calculated_cumulants_data(
     """
 
     logger.info("Getting calculated cumulants for dataset={}".format(config.dataset_name))
-    logger.info("Using bulk means..." if use_mean else "Not using bulk means...")
+    logger.info("Using bulk means..." if use_means else "Not using bulk means...")
 
     data_dir, *_ = get_save_and_load_dirs()
 
@@ -136,9 +135,9 @@ def get_calculated_cumulants_data(
     p_value_max                  = config.p_value_max 
 
     cumulants                    = True                    # Use cumulants over moments (NOTE: check not calculating reduced-cumulants, Quijote uses cumulants)
-    use_mean                     = use_mean                # Use <delta> in calculation of cumulants from moments 
-    stack_mean                   = stack_bulk_means        # Stack bulk mean do bulk datavector For full shape <delta> is very close to zero but <rho> approximately one
-    use_normalisations           = use_bulk_norms          # Stack M_0 normalisation of pdf into datavector ahead of mean M_1 
+    use_means                    = use_means               # Use <delta> in calculation of cumulants from moments 
+    stack_means                  = stack_means             # Stack bulk mean do bulk datavector For full shape <delta> is very close to zero but <rho> approximately one
+    use_normalisations           = use_normalisations      # Stack M_0 normalisation of pdf into datavector ahead of mean M_1 
     normalise                    = False #not use_normalisations  # Divide moments by M_0, don't do this if concatenating M_0 (NOTE: in quijote vs calculation comparison this is ignored in the bulk)
     central_moments              = True                    # Calculate central moments or not (NOTE: 4th cumulant not the same as 4th central moment, but Bernardeau formulae use non-central moments)
 
@@ -164,18 +163,20 @@ def get_calculated_cumulants_data(
     # Name for dataset to load / save once created
     dataset_identifier_str = "".join(
         [
+            # Datavector, model and specification
             "_R" + "".join(map(str, config.scales)),
             "_m" + "".join(map(str, config.order_idx)),
             "_z" + str(config.redshift),
             "_f" if config.freeze_parameters else "_nf",
+            "_linearised" if config.linearised else "_nonlinear",
+            "_reduced" if FIDUCIAL_REDUCE else "", # Reduction k_n -> S_n with fiducial variance
+            # PDFs dataset
             "_pdfs" if pdfs else "", 
-            "_with_means" if use_mean else "",
+            # Bulk calcuations 
+            "_with_means" if use_means else "",
             "_central" if central_moments else "",
             "_with_norms" if use_normalisations else "",
-            "_with_means_stacked" if stack_mean else "",
-            "_reduced" if FIDUCIAL_REDUCE else ""
-            # "_full_shape" if full_shape else "", # NOTE: pointless; bulk or tails instead
-            # "_linearised" if config.linearised else "_nonlinear" # NOTE: pointless? linearised after calculation
+            "_with_means_stacked" if stack_means else "",
         ]
     )
 
@@ -498,7 +499,7 @@ def get_calculated_cumulants_data(
 
                     #     cumulant = moments_to_cumulants(
                     #         fiducial_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants], 
-                    #         _delta_=_delta_ if use_mean else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(()) 
+                    #         _delta_=_delta_ if use_means else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(()) 
                     #     )
 
                     # else:
@@ -526,7 +527,7 @@ def get_calculated_cumulants_data(
         fiducial_vars_z_R = np.mean(fiducial_vars_z_R, axis=0)
         assert fiducial_vars_z_R.shape == (n_scales,), "fiducial_vars_z_R.shape=={}".format(fiducial_vars_z_R.shape)
 
-        if stack_mean:
+        if stack_means:
             fiducial_moments_z_R = intersperse_means(fiducial_moments_z_R_means, fiducial_moments_z_R) 
 
         if use_normalisations:
@@ -568,7 +569,7 @@ def get_calculated_cumulants_data(
                     # if full_shape:
                     #     cumulant = moments_to_cumulants(
                     #         latin_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants], 
-                    #         _delta_=_delta_ if use_mean else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(())
+                    #         _delta_=_delta_ if use_means else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(())
                     #     )
                     # else:
                     #     cumulant = _pdf_to_cumulants_bulk(
@@ -590,7 +591,7 @@ def get_calculated_cumulants_data(
                     if n % PRINT_FREQ == 0:
                         print("\r n={:05d}/{}".format(n, n_latin_pdfs), end="")
 
-        if stack_mean:
+        if stack_means:
             latin_moments_z_R = intersperse_means(latin_moments_z_R_means, latin_moments_z_R)
 
         if use_normalisations:
@@ -646,7 +647,7 @@ def get_calculated_cumulants_data(
                             # if full_shape:
                             #     cumulant = moments_to_cumulants(
                             #         derivative_moments_z_R[n, p, p_or_m, R * n_cumulants : (R + 1) * n_cumulants], 
-                            #         _delta_=_delta_ if use_mean else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(())
+                            #         _delta_=_delta_ if use_means else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(())
                             #     )
                             # else:
                             #     cumulant = _pdf_to_cumulants_bulk(
@@ -668,7 +669,7 @@ def get_calculated_cumulants_data(
                     if n % PRINT_FREQ == 0:
                         print("\r n={:05d}/{}".format(n, n_derivatives), end="")
 
-        if stack_mean:
+        if stack_means:
             derivative_moments_z_R = intersperse_means(
                 derivative_moments_z_R_means, derivative_moments_z_R
             )
@@ -699,7 +700,7 @@ def get_calculated_cumulants_data(
         if FIDUCIAL_REDUCE:
             logger.info("REDUCING CUMULANTS (assuming using m_0, m_1).")
 
-            assert stack_mean and use_normalisations, "Reduction index below here is wrong if this is the case!"
+            assert stack_means and use_normalisations, "Reduction index below here is wrong if this is the case!"
 
             for r, r_i in enumerate(R_idx):
 
@@ -707,9 +708,10 @@ def get_calculated_cumulants_data(
 
                 # Only divide skewness and kurtoses by mean fiducial variance (assuming norm/mean included)
                 # 5 'cumulants' including m_0, m_1
-                fiducial_moments_z_R[:, r * 5 : (r + 1) * 5][:, 3:] /= np.tile(fiducial_vars_z_R[r], (2,)) # Tile to [skew, kurtosis] shape
-                latin_moments_z_R[:, r * 5 : (r + 1) * 5][:, 3:] /= np.tile(fiducial_vars_z_R[r], (2,))
-                derivative_moments_z_R[:, :, r * 5 : (r + 1) * 5][:, :, 3:] /= np.tile(fiducial_vars_z_R[r], (2,))
+                _vars = np.asarray([fiducial_vars_z_R[r] ** 2., fiducial_vars_z_R[r] ** 3.]) # np.tile(fiducial_vars_z_R[r], (2,)) # Tile to [skew, kurtosis] shape
+                fiducial_moments_z_R[:, r * 5 : (r + 1) * 5][:, 3:] /= _vars
+                latin_moments_z_R[:, r * 5 : (r + 1) * 5][:, 3:] /= _vars
+                derivative_moments_z_R[:, :, r * 5 : (r + 1) * 5][:, :, 3:] /= _vars
 
         """
             Datasets
@@ -738,7 +740,7 @@ def get_calculated_cumulants_data(
 
         # assert np.all(np.linalg.eigvals(C_moments) > 0)
 
-        H = (n_fiducial_moments - data_dim_moments - 2.) / (n_fiducial_moments - 1.)
+        H = hartlap(n_s=n_fiducial_moments, n_d=data_dim_moments)
         Cinv_moments = H * np.linalg.inv(C_moments)
         dmu_moments = np.mean(derivative_moments_z_R, axis=0)
         F_moments = np.linalg.multi_dot([dmu_moments, Cinv_moments, dmu_moments.T])
@@ -771,7 +773,7 @@ def get_calculated_cumulants_data(
             # Fisher information in bulk of the PDF
             _, data_dim_pdfs = fiducial_pdfs_z_R_cut.shape 
             C_pdf = np.cov(fiducial_pdfs_z_R_cut, rowvar=False) 
-            H = (n_fiducial_pdfs - data_dim_pdfs - 2.) / (n_fiducial_pdfs - 1.)
+            H = hartlap(n_s=n_fiducial_pdfs, n_d=data_dim_pdfs) 
             Cinv_pdf = H * np.linalg.inv(C_pdf)
             dmu_pdfs = np.mean(derivative_pdfs_z_R_cut, axis=0)
             F_pdf = jnp.linalg.multi_dot([dmu_pdfs, Cinv_pdf, dmu_pdfs.T])
@@ -901,9 +903,9 @@ class BulkCumulantsDataset:
         self.data = get_calculated_cumulants_data(
             config, 
             pdfs=pdfs,
-            use_mean=config.use_bulk_means,
-            use_bulk_norms=config.stack_bulk_norms,
-            stack_bulk_means=config.stack_bulk_means,
+            use_means=config.use_means,
+            use_normalisations=config.use_normalisations,
+            stack_means=config.stack_means,
             full_shape=False,
             verbose=verbose, 
             results_dir=results_dir
@@ -994,9 +996,9 @@ class TailsCumulantsDataset:
         self.data = get_calculated_cumulants_data(
             config, 
             pdfs=pdfs,
-            use_mean=config.use_bulk_means,
-            use_bulk_norms=config.stack_bulk_norms,
-            stack_bulk_means=config.stack_bulk_means,
+            use_means=config.use_means,
+            use_normalisations=config.use_normalisations,
+            stack_means=config.stack_means,
             full_shape=True, # Implies full-shape calculation
             verbose=verbose, 
             results_dir=results_dir

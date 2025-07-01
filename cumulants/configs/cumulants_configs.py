@@ -112,7 +112,7 @@ def get_config_ndes(config):
     # Set the NDE architecture and training parameters for a config
 
     # CNF
-    config.cnf = cnf = ConfigDict()
+    cnf = ConfigDict()
     cnf.model_type       = "cnf"
     cnf.width_size       = DEFAULT_CNF_ARCH["width_size"]
     cnf.depth            = DEFAULT_CNF_ARCH["depth"]
@@ -125,7 +125,7 @@ def get_config_ndes(config):
     cnf.use_scaling      = DEFAULT_CNF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
     # MAF
-    config.maf = maf = ConfigDict()
+    maf = ConfigDict()
     maf.model_type       = "maf" # = model.__class__.__name__
     maf.width_size       = DEFAULT_MAF_ARCH["width_size"]
     maf.n_layers         = DEFAULT_MAF_ARCH["n_layers"]
@@ -138,14 +138,15 @@ def get_config_ndes(config):
     config.n_ndes        = len(config.ndes)
 
     # Optimisation (pre-train) hyperparameters (same for all NDEs...)
-    config.pretrain = pretrain = ConfigDict()
-    pretrain.start_step  = 0
-    pretrain.n_epochs    = 10_000
-    pretrain.n_batch     = 100 
-    pretrain.patience    = 10
-    pretrain.lr          = 1e-3
-    pretrain.opt         = "adam" 
-    pretrain.opt_kwargs  = {}
+    if config.pre_train: # (Assumes config.ndes defined after default config setup)
+        config.pretrain = pretrain = ConfigDict()
+        pretrain.start_step  = 0
+        pretrain.n_epochs    = 10_000
+        pretrain.n_batch     = 100 
+        pretrain.patience    = 10
+        pretrain.lr          = 1e-3
+        pretrain.opt         = "adam" 
+        pretrain.opt_kwargs  = {}
 
     # Optimisation hyperparameters (same for all NDEs...)
     config.train = train = ConfigDict()
@@ -192,7 +193,8 @@ def default_cumulants_configuration(
     n_linear_sims: Optional[int] = None,
     pre_train: bool = False,
     use_planck: bool = False
-):
+) -> ConfigDict:
+
     config.redshift           = redshift
     config.scales             = scales
     config.order_idx          = order_idx # Maximum index is 2
@@ -219,9 +221,9 @@ def default_cut_configuration(config, bulk_or_tails):
         config.p_value_min    = 0.03
         config.p_value_max    = 0.90
 
-    config.use_bulk_means     = False # Calculate central moments of the bulk or not
-    config.stack_bulk_means   = True # Stack means of bulk of the PDF at each scale with the other cumulants
-    config.stack_bulk_norms   = True # Stack norms of bulk of the PDF at each scale with the other cumulants
+    config.use_means            = False # Calculate central moments of the bulk or not
+    config.stack_means          = True # Stack means of bulk of the PDF at each scale with the other cumulants
+    config.use_normalisations   = True # Stack norms of bulk of the PDF at each scale with the other cumulants
     config.fiducial_based_normalisation = config.p_value_max - config.p_value_min
 
     return config 
@@ -396,7 +398,8 @@ def bulk_pdf_config(
     pre_train: bool = False,
     use_planck: bool = False
 ) -> ConfigDict:
-    return bulk_cumulants_config(
+
+    config = bulk_cumulants_config(
         seed=seed,
         redshift=redshift,
         linearised=linearised,
@@ -408,3 +411,5 @@ def bulk_pdf_config(
         pre_train=pre_train,
         use_planck=use_planck
     )
+
+    return config

@@ -11,16 +11,13 @@ from jaxtyping import PRNGKeyArray, Array, Float, Int, jaxtyped
 import equinox as eqx
 import optax
 from beartype import beartype as typechecker 
-import numpy as np
 from scipy.stats import qmc
 from ml_collections import ConfigDict
 import matplotlib.pyplot as plt
 import tensorflow_probability.substrates.jax.distributions as tfd
-from tqdm.auto import trange
 
 from configs.log import setup_module_logger, get_log_level
 from data.constants import get_quijote_parameters, get_target_idx, get_F_planck, get_Finv_planck, LOWER, UPPER, ALPHA
-from compression.nn import fit_nn, fit_nn_lbfgs
 
 typecheck = jaxtyped(typechecker=typechecker)
 
@@ -383,6 +380,8 @@ def get_linear_compressor(
     alpha = dataset.alpha
     F_planck = get_F_planck()
 
+    logger.info("Using MAP linear compression" if config.use_planck else "Using MLE linear compression")
+
     @typecheck
     def mle(
         d: Float[Array, "d"], 
@@ -438,64 +437,414 @@ def get_linear_compressor(
     return partial(compressor, mu=mu, dmu=dmu)
 
 
-@typecheck
-def get_nn_compressor(
-    key: PRNGKeyArray, 
-    dataset: Dataset, 
-    data_preprocess_fn: Optional[Callable] = None, 
-    *, 
-    lbfgs: bool = False, 
-    results_dir: str, 
-    net: Optional[eqx.Module] = None
-) -> tuple[eqx.Module, Callable]:
+if 0:
+    import jax
+    import jax.numpy as jnp
+    from jax.scipy.linalg import svd
+
+
+    class PCA:
+        """
+        Principal Component Analysis (PCA) for dimensionality reduction.
+
+        Attributes:
+            num_components (int): Number of principal components to keep.
+            mean (jax.Array, optional): Mean of each feature in the training data.
+            principal_components (jax.Array, optional): Principal components (eigenvectors) of the training data.
+            explained_variance (jax.Array, optional): Explained variance of each principal component.
+        """
+
+        def __init__(self, num_components: int):
+            self.num_components = num_components
+            self.mean = None
+            self.principal_components = None
+            self.explained_variance = None
+
+        def fit(self, X: jax.Array):
+            n, m = X.shape
+
+            if self.mean is None:
+                self.mean = X.mean(axis=0)
+
+            X_centred = X - self.mean
+            S, self.principal_components = svd(X_centred, full_matrices=True)[1:]
+
+            self.explained_variance = jnp.square(S) / jnp.sum(jnp.square(S))
+
+        def transform(self, X: jax.Array):
+            if self.principal_components is None:
+                raise RuntimeError("Must fit before transforming.")
+
+            X_centred = X - X.mean(axis=0)
+            return jnp.dot(X_centred, self.principal_components[: self.num_components].T)
+
+        def fit_transform(self, X: jax.Array):
+            if self.mean is None:
+                self.mean = X.mean(axis=0)
+
+            X_centred = X - self.mean
+
+            self.principal_components = svd(X_centred, full_matrices=True)[2]
+
+            return jnp.dot(X_centred, self.principal_components[: self.num_components].T)
+
+        def inverse_transform(self, X_transformed: jax.Array):
+            if self.principal_components is None:
+                raise RuntimeError("Must fit before transforming.")
+
+            return (
+                jnp.dot(X_transformed, self.principal_components[: self.num_components])
+                + self.mean
+            )
+
+
+    from typing import Tuple, Optional, Sequence
+    from functools import partial
+    import jax
+    import jax.numpy as jnp
+    import jax.random as jr
+    from jax.sharding import NamedSharding, PositionalSharding
+    import equinox as eqx
+    from optimistix import minimise, BFGS, LevenbergMarquardt, rms_norm
+    from jaxtyping import Key, Array, Float, Scalar, jaxtyped
+    from beartype import beartype as typechecker
+    import optax
+    import numpy as np 
+    from tqdm.auto import trange
+
     """
-        Train neural network compression function
-        - Optionally use parameter covariance for chi2 loss
+        Tools for compression with neural networks.
+        - train a user-defined `eqx.Module` network that compresses a datavector
+        to a model-dimensional summary, by minimising a MSE loss.
     """
-    net_key, train_key = jr.split(key)
 
-    if data_preprocess_fn is None:
-        data_preprocess_fn = lambda x: x
+    typecheck = jaxtyped(typechecker=typechecker)
 
-    if net is None:
-        net = eqx.nn.MLP(
-            dataset.data.shape[-1], 
-            dataset.parameters.shape[-1], 
-            width_size=32, 
-            depth=3, 
-            activation=jax.nn.tanh,
-            key=net_key
+
+    def loss(
+        model: eqx.Module, 
+        x: Float[Array, "b x"], 
+        y: Float[Array, "b y"], 
+        *,
+        precision: Optional[Float[Array, "y y"]] = None
+    ) -> Scalar:
+        def fn(x, y):
+            y_ = model(x)
+            dy = jnp.subtract(y_, y)
+            if precision is not None:
+                l = jnp.linalg.multi_dot([dy, precision, dy.T]) # NOTE: which transpose?!
+            else:
+                l = jnp.square(dy)
+            return l
+        return jnp.mean(jax.vmap(fn)(x, y))
+
+
+    @eqx.filter_jit
+    def evaluate(
+        model: eqx.Module, 
+        x: Float[Array, "b x"], 
+        y: Float[Array, "b y"],
+        *, 
+        precision: Optional[Float[Array, "y y"]] = None,
+        replicated_sharding: Optional[PositionalSharding] = None
+    ) -> Scalar:
+        if replicated_sharding is not None:
+            model = eqx.filter_shard(model, replicated_sharding)
+        return loss(model, x, y, precision=precision)
+
+
+    @typecheck
+    @eqx.filter_jit
+    def make_step(
+        model: eqx.Module, 
+        opt_state: optax.OptState,
+        x: Float[Array, "b x"], 
+        y: Float[Array, "b y"],
+        opt: optax.GradientTransformation, 
+        *, 
+        precision: Optional[Float[Array, "y y"]] = None,
+        replicated_sharding: Optional[PositionalSharding]
+    ) -> Tuple[eqx.Module, optax.OptState, Scalar]:
+
+        if replicated_sharding is not None:
+            model, opt_state = eqx.filter_shard(
+                (model, opt_state), replicated_sharding
+            )
+
+        grad_fn = eqx.filter_value_and_grad(partial(loss, precision=precision))
+
+        loss_value, grads = grad_fn(model, x, y)
+
+        updates, opt_state = opt.update(grads, opt_state, model)
+        model = eqx.apply_updates(model, updates)
+
+        if replicated_sharding is not None:
+            model, opt_state = eqx.filter_shard(
+                (model, opt_state), replicated_sharding
+            )
+
+        return model, opt_state, loss_value
+
+
+    def get_batch(
+        D: Float[Array, "n x"], 
+        Y: Float[Array, "n y"], 
+        n: int, 
+        key: Key
+    ) -> Tuple[Float[Array, "b x"], Float[Array, "b y"]]:
+        idx = jr.choice(key, jnp.arange(D.shape[0]), (n,))
+        return D[idx], Y[idx]
+
+
+    @typecheck
+    def fit_nn(
+        key: Key[jnp.ndarray, "..."], 
+        model: eqx.Module, 
+        train_data: Tuple[Float[Array, "n x"], Float[Array, "n y"]], 
+        opt: optax.GradientTransformation, 
+        n_batch: int, 
+        patience: Optional[int], 
+        n_steps: int = 10_000, 
+        valid_fraction: int = 0.9, 
+        valid_data: Sequence[Array] = None,
+        batch_dataset: bool = True,
+        use_tqdm: bool = False,
+        *,
+        precision: Optional[Float[Array, "y y"]] = None,
+        sharding: Optional[NamedSharding] = None,
+        replicated_sharding: Optional[PositionalSharding] = None,
+    ) -> Tuple[eqx.Module, Float[np.ndarray, "l 2"]]:
+        """
+        Trains a neural network model with early stopping.
+
+        Args:
+            key: A `PRNGKeyArray`.
+            model: The neural network model to be trained, represented as an `eqx.Module`.
+            D: The input data matrix (`Array`), where rows are data points and columns are features.
+            Y: The target values (`Array`) corresponding to the input data.
+            opt: The optimizer to be used for gradient updates, defined as an `optax.GradientTransformation`.
+            n_batch: The number of data points per mini-batch for each training step (`int`).
+            patience: The number of steps to continue without improvement on the validation loss 
+                before early stopping is triggered (`int`).
+            n_steps: The maximum number of training steps to perform (`int`, optional). Default is 100,000.
+            valid_fraction: The fraction of the data to use for training, with the remainder
+                used for validation (`float`, optional). Default is 0.9 (90% training, 10% validation).
+
+        Returns:
+            Tuple[`eqx.Module`, `Array`]: 
+                - The trained `model` after the optimization process.
+                - A 2D array of shape (n_steps, 2), where the first column contains the training loss at each 
+                step, and the second column contains the validation loss.
+        
+        Notes:
+            1. The data `D` and targets `Y` are split into training and validation sets based on the 
+            `valid_fraction` parameter.
+            4. Early stopping occurs if the validation loss does not improve within a specified 
+            number of steps (`patience`).
+            5. The function returns the trained model and the recorded training/validation loss history.
+        """
+        D, Y = train_data
+
+        n_s, _ = D.shape
+
+        opt_state = opt.init(eqx.filter(model, eqx.is_array))
+
+        if valid_data is not None:
+            Xt, Yt = train_data
+            Xv, Yv = valid_data
+        else:
+            Xt, Xv = jnp.split(D, [int(valid_fraction * n_s)]) 
+            Yt, Yv = jnp.split(Y, [int(valid_fraction * n_s)])
+
+        if use_tqdm: 
+            steps = trange(n_steps, desc="Training NN", colour="blue")
+        else: 
+            steps = trange(n_steps)
+
+        L = np.zeros((n_steps, 2))
+        for step in steps:
+            key_t, key_v = jr.split(jr.fold_in(key, step))
+
+            if batch_dataset:
+                x, y = get_batch(Xt, Yt, n=n_batch, key=key_t) # Xt, Yt
+            else:
+                x, y = Xt, Yt
+            
+            if sharding is not None:
+                x, y = eqx.filter_shard((x, y), sharding)
+
+            model, opt_state, train_loss = make_step(
+                model, 
+                opt_state, 
+                x, 
+                y, 
+                opt=opt, 
+                precision=precision, 
+                replicated_sharding=replicated_sharding
+            )
+
+            if batch_dataset:
+                x, y = get_batch(Xv, Yv, n=n_batch, key=key_v)
+            else:
+                x, y = Xv, Yv
+
+            if sharding is not None:
+                x, y = eqx.filter_shard((x, y), sharding)
+
+            valid_loss = evaluate(
+                model, x, y, precision=precision, replicated_sharding=replicated_sharding
+            )
+
+            L[step] = train_loss, valid_loss
+            steps.set_postfix_str(
+                "train={:.3E}, valid={:.3E}".format(train_loss.item(), valid_loss.item())
+            )
+
+            if patience is not None:
+                if (step > 0) and (step - np.argmin(L[:step, 1]) > patience):
+                    steps.set_description_str("Stopped at {}".format(step))
+                    break
+
+        return model, L[:step]
+
+
+    """
+        L-BFGS
+    """
+
+    @typecheck
+    @eqx.filter_jit(donate="all-except-first")
+    def make_step_lbfgs(
+        net: eqx.Module, 
+        opt_state: optax.OptState, 
+        X: Float[Array, "n d"], 
+        P: Float[Array, "n p"], 
+        *,
+        opt: optax.GradientTransformation,
+        precision: Optional[Float[Array, "p p"]] = None, 
+        replicated_sharding: Optional[jax.sharding.NamedSharding] = None
+    ) -> tuple[eqx.Module, optax.OptState, Scalar]:
+        f = partial(loss, x=X, y=P, precision=precision)
+        value_and_grad_fn = optax.value_and_grad_from_state(f)
+        l, grad = value_and_grad_fn(net, state=opt_state)
+        updates, opt_state = opt.update(
+            grad, opt_state, net, value=l, grad=grad, value_fn=f 
+        )
+        net = eqx.apply_updates(net, updates)
+        return net, opt_state, l 
+
+
+    def fit_nn_lbfgs(
+        key: Key[jnp.ndarray, "..."], 
+        model: eqx.Module, 
+        train_data: Tuple[Float[Array, "n x"], Float[Array, "n y"]], 
+        valid_fraction: int = 0.9, 
+        valid_data: Sequence[Array] = None,
+        batch_dataset: bool = True,
+        *,
+        precision: Optional[Float[Array, "y y"]] = None,
+        sharding: Optional[NamedSharding] = None,
+        replicated_sharding: Optional[PositionalSharding] = None,
+    ) -> Tuple[eqx.Module, Float[np.ndarray, "l 2"]]:
+
+        D, Y = train_data
+
+        y0, static = eqx.partition(model, eqx.is_array)
+
+        # Standardise before PCA (don't get tricked by high variance due to units)
+        # X = (X - jnp.mean(X, axis=0)) / jnp.std(X, axis=0) # NOTE: already standardised 
+
+        # Fit whitening-PCA to compressed simulations
+        # pca = PCA(num_components=D.shape[-1]) 
+        # D = (D - jnp.mean(D, axis=0)) / jnp.std(D, axis=0)
+        # pca.fit(D) # Fit on fiducial data?
+        # D = pca.transform(D)
+
+        @eqx.filter_jit
+        def f(y, args):
+            # Dataset to fit network to
+            D, Y = args
+            # Combine iteration parameters and architecture
+            model = eqx.combine(y, static)
+            return loss(model, D, Y, precision=precision)
+
+        # BFGS optimisation
+        res = minimise(
+            f,
+            BFGS(rtol=1e-6, atol=1e-6, norm=rms_norm),
+            y0=y0,
+            max_steps=1_000_000,
+            args=(D, Y)
         )
 
-    def preprocess_fn(x): 
-        # Preprocess with covariance?
-        return (jnp.asarray(x) - jnp.mean(dataset.data, axis=0)) / jnp.std(dataset.data, axis=0)
+        # Put solution parameters into model
+        model = eqx.combine(res.value, static)
 
-    if lbfgs:
-        net, losses = fit_nn_lbfgs(
-            train_key, 
-            net, 
-            (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
-            # precision=jnp.linalg.inv(dataset.Finv) # In reality this varies with parameters
-        )
-    else:
-        net, losses = fit_nn(
-            train_key, 
-            net, 
-            (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
-            opt=optax.adam(1e-3), 
-            precision=jnp.linalg.inv(dataset.Finv), # In reality this varies with parameters
-            n_batch=500, 
-            patience=1000,
-            n_steps=50_000
-        )
+        L = np.zeros((1, 2))
 
-    plt.figure()
-    plt.loglog(losses)
-    plt.savefig(os.path.join(results_dir, "losses_nn.png"))
-    plt.close()
+        # _model = lambda d: pca.transform(model(d))
 
-    return net, preprocess_fn
+        return _model, L
+
+
+    @typecheck
+    def get_nn_compressor(
+        key: PRNGKeyArray, 
+        dataset: Dataset, 
+        data_preprocess_fn: Optional[Callable] = None, 
+        *, 
+        lbfgs: bool = False, 
+        results_dir: str, 
+        net: Optional[eqx.Module] = None
+    ) -> tuple[eqx.Module, Callable]:
+        """
+            Train neural network compression function
+            - Optionally use parameter covariance for chi2 loss
+        """
+        net_key, train_key = jr.split(key)
+
+        if data_preprocess_fn is None:
+            data_preprocess_fn = lambda x: x
+
+        if net is None:
+            net = eqx.nn.MLP(
+                dataset.data.shape[-1], 
+                dataset.parameters.shape[-1], 
+                width_size=32, 
+                depth=3, 
+                activation=jax.nn.tanh,
+                key=net_key
+            )
+
+        def preprocess_fn(x): 
+            # Preprocess with covariance?
+            return (jnp.asarray(x) - jnp.mean(dataset.data, axis=0)) / jnp.std(dataset.data, axis=0)
+
+        if lbfgs:
+            net, losses = fit_nn_lbfgs(
+                train_key, 
+                net, 
+                (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
+                # precision=jnp.linalg.inv(dataset.Finv) # In reality this varies with parameters
+            )
+        else:
+            net, losses = fit_nn(
+                train_key, 
+                net, 
+                (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
+                opt=optax.adam(1e-3), 
+                precision=jnp.linalg.inv(dataset.Finv), # In reality this varies with parameters
+                n_batch=500, 
+                patience=1000,
+                n_steps=50_000
+            )
+
+        plt.figure()
+        plt.loglog(losses)
+        plt.savefig(os.path.join(results_dir, "losses_nn.png"))
+        plt.close()
+
+        return net, preprocess_fn
 
 
 def get_compression_fn(key, config, dataset, *, results_dir):
@@ -505,16 +854,16 @@ def get_compression_fn(key, config, dataset, *, results_dir):
 
     assert config.compression in ["linear", "nn", "nn-lbfgs"]
 
-    if config.compression == "nn" or config.compression == "nn-lbfgs":
+    # if config.compression == "nn" or config.compression == "nn-lbfgs":
 
-        net, preprocess_fn = get_nn_compressor(
-            key, 
-            dataset, 
-            lbfgs=config.compression == "nn-lbfgs", 
-            results_dir=results_dir
-        )
+    #     net, preprocess_fn = get_nn_compressor(
+    #         key, 
+    #         dataset, 
+    #         lbfgs=config.compression == "nn-lbfgs", 
+    #         results_dir=results_dir
+    #     )
 
-        compressor = lambda d, p: net(preprocess_fn(d)) # Ignore parameter kwarg!
+    #     compressor = lambda d, p: net(preprocess_fn(d)) # Ignore parameter kwarg!
 
     if config.compression == "linear":
         compressor = get_linear_compressor(config, dataset)

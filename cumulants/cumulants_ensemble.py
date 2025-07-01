@@ -52,7 +52,7 @@ class Ensemble(eqx.Module):
     """
 
     sbi_type: Literal["nle", "npe"]
-    ndes: Tuple[eqx.Module]
+    ndes: Sequence[eqx.Module]
     n_ndes: int
     weights: Float[Array, "n"]
 
@@ -82,7 +82,7 @@ class Ensemble(eqx.Module):
             theta: Float[Array, "p"], key: Optional[PRNGKeyArray] = None
         ) -> Scalar: 
             if self.sbi_type == "nle":
-                l = nde.log_prob(x=data, y=theta, key=key) + prior.prior.log_prob(theta)
+                l = nde.log_prob(x=data, y=theta, key=key) + prior.log_prob(theta)
             else:
                 l = nde.log_prob(x=theta, y=data, key=key)
             return l
@@ -264,7 +264,6 @@ class MultiEnsemble(eqx.Module):
                 self.ensembles
             )
             L = jnp.sum(jnp.asarray(L))
-            # L = jax.scipy.special.logsumexp(jnp.asarray(L)) # NOTE: unnecessary; not exp's here (no weights) 
 
             if self.sbi_type == "nle":
                 L = L + _prior.log_prob(theta) 

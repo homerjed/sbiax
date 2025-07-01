@@ -164,6 +164,14 @@ if args.seed == 0:
     plt.close()
 
     plt.figure()
+    im = plt.imshow(dataset.C)
+    plt.colorbar(im)
+    plt.savefig(
+        os.path.join(results_dir, "covariance_matrix_cumulants_{}.png".format(args.bulk_or_tails))
+    )
+    plt.close()
+
+    plt.figure()
     im = plt.imshow(dataset.Cinv)
     plt.colorbar(im)
     plt.savefig(

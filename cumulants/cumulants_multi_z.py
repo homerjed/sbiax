@@ -137,11 +137,14 @@ def get_z_config_and_datavector(
     sbi_args.compression       = compression
     sbi_args.n_linear_sims     = n_linear_sims
     sbi_args.pre_train         = pre_train
+    # for key, value in hyperparameters.items():
+    #     if hasattr(config, key):
+    #         setattr(config, key, value)
 
     # SBI configuration, main dataset and all datasets for given redshift
     config_z, cumulants_dataset, datasets = get_datasets(sbi_args) # Config and cumulants_dataset can be bulk ... etc
 
-    logger.info("BULK/TAILS:".format(bulk_or_tails))
+    logger.info("BULK/TAILS: {}".format(bulk_or_tails))
     logger.info("CONFIG:\n{}".format(config_z))
 
     # Sample datavector(s) at the fiducial parameters
@@ -172,6 +175,7 @@ def get_z_config_and_datavector(
     logger.info("Loaded ensemble from:\n\t{}".format(ensemble_path))
     logger.info("Ensemble weights:\n\t{}".format(ensemble.weights))
 
+    # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
     # Debugging plots
     get_filename = lambda name: os.path.join(log_figs_dir, name)
 
@@ -224,6 +228,8 @@ def get_z_config_and_datavector(
     # plt.yscale("log")
     plt.savefig(get_filename("kurtoses_hist_{}_{}.png".format(redshift, bulk_or_tails)))
     plt.close()
+
+    # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
     return (
         ensemble, 
@@ -559,8 +565,9 @@ if __name__ == "__main__":
 
             # Block diagonal covariance plot
             plt.figure()
-            plt.imshow(block_diag(*covariances))
-            plt.savefig("block_diag_covariance.png")
+            plt.imshow(block_diag(*covariances), cmap="coolwarm")
+            plt.colorbar()
+            plt.savefig(os.path.join(log_figs_dir, "block_diag_covariance.png"))
             plt.close()
 
         print("Sampling posterior {} (all redshifts, datavectors)".format(n_posterior))
