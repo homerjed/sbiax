@@ -76,7 +76,7 @@ HP_OPT_OPT_MAF = dict(
     start_step       = 0,
     n_epochs         = 10_000,
     n_batch          = 80, #100,
-    patience         = 70, #200,
+    patience         = 300, #70,
     lr               = 0.000489390761268084, #1e-3,
     opt              = "adam",
     opt_kwargs       = {}
@@ -97,7 +97,7 @@ DEFAULT_MAF_ARCH = HP_OPT_MAF_ARCH
 DEFAULT_OPT_MAF = HP_OPT_OPT_MAF 
 
 DEFAULT_CNF_ARCH = DEFAULT_CNF_ARCH # HP_OPT_CNF_ARCH 
-DEFAULT_OPT_CNF = DEFAULT_OPT # HP_OPT_OPT_CNF 
+DEFAULT_OPT_CNF = HP_OPT_OPT_CNF # HP_OPT_OPT_CNF 
 
 # Number of density estimators in the ensemble
 N_NDES = default(int(DEFAULT_N_NDES), 1)
@@ -106,6 +106,11 @@ N_NDES = default(int(DEFAULT_N_NDES), 1)
 def get_default_nde(cnf, maf):
     _default = {"CNF": cnf, "MAF": maf}[DEFAULT_NDE_TYPE] if DEFAULT_NDE_TYPE is not None else None
     return default(_default, maf)
+
+
+def get_default_nde_opt():
+    _default = {"CNF": DEFAULT_OPT_CNF, "MAF": DEFAULT_OPT_MAF}[DEFAULT_NDE_TYPE] if DEFAULT_NDE_TYPE is not None else DEFAULT_OPT 
+    return _default
 
 
 def get_config_ndes(config):
@@ -149,13 +154,14 @@ def get_config_ndes(config):
         pretrain.opt_kwargs  = {}
 
     # Optimisation hyperparameters (same for all NDEs...)
+    _CONFIG_DEFAULT_OPT = get_default_nde_opt()
     config.train = train = ConfigDict()
     train.start_step     = 0
     train.n_epochs       = 10_000
-    train.n_batch        = DEFAULT_OPT["n_batch"] # 100 
-    train.patience       = DEFAULT_OPT["patience"] # 200
-    train.lr             = DEFAULT_OPT["lr"] # 1e-3
-    train.opt            = DEFAULT_OPT["opt"] # "adam" 
+    train.n_batch        = _CONFIG_DEFAULT_OPT["n_batch"]
+    train.patience       = _CONFIG_DEFAULT_OPT["patience"]
+    train.lr             = _CONFIG_DEFAULT_OPT["lr"]
+    train.opt            = _CONFIG_DEFAULT_OPT["opt"]
     train.opt_kwargs     = {}
 
     return config
@@ -172,11 +178,11 @@ def default_posterior_sampling(config, no_config=False):
 
     # Posterior sampling
     if linearised:
-        config.n_steps        = 100
-        config.n_walkers      = 2000
+        config.n_steps        = 500
+        config.n_walkers      = 4000
     else:
-        config.n_steps        = 100
-        config.n_walkers      = 2000
+        config.n_steps        = 500
+        config.n_walkers      = 4000
     config.burn               = int(0.1 * config.n_steps)
 
     return config

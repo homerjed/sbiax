@@ -237,7 +237,7 @@ def get_cumulant_data(
             "_f" if config.freeze_parameters else "_nf",
             "_linearised" if config.linearised else "_nonlinear",
             "_reduced" if FIDUCIAL_REDUCE else "", # Reduction k_n -> S_n with fiducial variance
-            "quijote" # E.g. not calculated from PDFs
+            "_quijote" # E.g. not calculated from PDFs
             # PDFs dataset
             # "_pdfs" if pdfs else "", 
             # Bulk calcuations 

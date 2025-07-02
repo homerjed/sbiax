@@ -28,11 +28,15 @@ USE_QUIJOTE_TAILS = True if os.environ.get("USE_QUIJOTE_TAILS", "").lower() in (
 
 
 def finite_samples_log_prob(samples_log_prob):
+    n_bad = jnp.logical_or(
+        jnp.isnan(samples_log_prob), jnp.isneginf(samples_log_prob)
+    ).sum()
+    print("CHAIN HAS {}/{} bad samples:".format(n_bad, samples_log_prob.size))
     samples_log_prob = jnp.where(
         jnp.logical_or(
-            jnp.isnan(samples_log_prob), jnp.isneginf(samples_log_prob)
+            jnp.isnan(samples_log_prob), 
+            jnp.isinf(samples_log_prob)
         ),
-        # jnp.isnan(samples_log_prob), 
         -1e32,
         samples_log_prob
     )
@@ -106,9 +110,12 @@ def get_datasets(args: argparse.Namespace) -> tuple[ConfigDict, Dataset, dict[st
             configs[dataset_type], results_dir=results_dir
         )
 
+
     # Config and dataset being used in the experiment
     config = configs[args.bulk_or_tails]
     dataset = datasets[args.bulk_or_tails]
+
+    logger.info("MAIN DATASET:{} (requested: {})".format(dataset.data.name, args.bulk_or_tails))
 
     return config, dataset, datasets
 

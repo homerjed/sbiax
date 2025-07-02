@@ -164,9 +164,11 @@ def get_z_config_and_datavector(
         )
     )
     print("cov max:", jnp.max(cumulants_dataset.data.C))
-    plt.imshow(jnp.log(cumulants_dataset.data.C), cmap="coolwarm")
+    # Compute the standard deviations
+    stddev = np.sqrt(np.diag(cumulants_dataset.data.C))
+    plt.imshow(cumulants_dataset.data.C / np.outer(stddev, stddev), cmap="coolwarm")
     plt.colorbar()
-    plt.savefig(get_filename("multi_z_covariance_{}_{}.png".format(redshift, bulk_or_tails)))
+    plt.savefig(get_filename("multi_z_corr_{}_{}.png".format(redshift, bulk_or_tails)))
     plt.close()
 
     plt.figure()

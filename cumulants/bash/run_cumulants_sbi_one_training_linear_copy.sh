@@ -20,7 +20,7 @@ RESULTS_DIR="results/${1:-"results/"}"
 SINGLE_RUN="${2:-false}" # Run all experiments once for a single figure one
 ONLY_RUN_FIGURES="${3:-false}" # Only run figure_one.py jobs
 
-RUN_LINEARISED=false
+RUN_LINEARISED=true
 RUN_FROZEN=false
 RUN_NONLINEAR=true
 
@@ -46,11 +46,11 @@ if [[ "$SINGLE_RUN" == "true" ]]; then
     RUN_FROZEN=false
 else
     echo "MULTIPLE SEEDS RUN."
-    N_SEEDS=50
+    N_SEEDS=20
     START_SEED=0
     N_SEEDS_GLOBAL=10   # Number of repeated trainings for SBI
     END_SEED=$(( $START_SEED + $N_SEEDS ))
-    N_PARALLEL=50
+    N_PARALLEL=100
 fi
 
 N_GB=8
@@ -182,8 +182,8 @@ $FREEZE_FLAG"
                             cat <<END
 #!/bin/bash
 #SBATCH --job-name=sbi_${global_seed}_${bt_flag}_${l_flag}_${f_flag}_z${z}
-#SBATCH --output=$OUT_DIR/sbi_${bt_flag}_${l_flag}_${f_flag}_z${z}_fixed_%j.out
-#SBATCH --error=$OUT_DIR/sbi_${bt_flag}_${l_flag}_${f_flag}_z${z}_fixed_%j.err
+#SBATCH --output=$OUT_DIR/${bt_flag}/${l_flag}/${f_flag}/z${z}/sbi_fixed_%j.out
+#SBATCH --error=$OUT_DIR/${bt_flag}/${l_flag}/${f_flag}/z${z}/sbi_fixed_%j.err
 #SBATCH --partition=cluster
 #SBATCH --time=$JOB_TIME
 #SBATCH --mem=${N_GB}GB
@@ -262,8 +262,8 @@ $FREEZE_FLAG"
                             cat <<END
 #!/bin/bash
 #SBATCH --job-name=m_z_${global_seed}_${bt_flag}_${l_flag}_${f_flag}
-#SBATCH --output=$OUT_DIR/m_z_${global_seed}_${bt_flag}_${l_flag}_${f_flag}_%a_%j.out
-#SBATCH --error=$OUT_DIR/m_z_${global_seed}_${bt_flag}_${l_flag}_${f_flag}_%a_%j.err
+#SBATCH --output=$OUT_DIR/${global_seed}/${bt_flag}/${l_flag}/${f_flag}/m_z_%a_%j.out
+#SBATCH --error=$OUT_DIR/${global_seed}/${bt_flag}/${l_flag}/${f_flag}/m_z_%a_%j.err
 #SBATCH --array=$JOB_ARRAY_STR
 #SBATCH --partition=cluster
 #SBATCH --time=$JOB_TIME
@@ -338,8 +338,8 @@ $FREEZE_FLAG"
                         cat <<END
 #!/bin/bash
 #SBATCH --job-name=figure_one
-#SBATCH --output=$OUT_DIR/figure_one_${global_seed}_${l_flag}_${f_flag}_%a_%j.out
-#SBATCH --error=$OUT_DIR/figure_one_${global_seed}_${l_flag}_${f_flag}_%a_%j.err
+#SBATCH --output=$OUT_DIR/${global_seed}/${l_flag}/${f_flag}/figure_one_%a_%j.out
+#SBATCH --error=$OUT_DIR/${global_seed}/${l_flag}/${f_flag}/figure_one_%a_%j.err
 #SBATCH --array=$JOB_ARRAY_STR
 #SBATCH --partition=cluster
 #SBATCH --time=$JOB_TIME
@@ -442,8 +442,8 @@ for order_idx_args in "${order_idxs[@]}"; do
     sbatch <<END
 #!/bin/bash
 #SBATCH --job-name=figure_two
-#SBATCH --output=$OUT_DIR/figure_two_${l_flag}_${f_flag}_%j.out
-#SBATCH --error=$OUT_DIR/figure_two_${l_flag}_${f_flag}_%j.err
+#SBATCH --output=$OUT_DIR/${l_flag}/${f_flag}/figure_two_%j.out
+#SBATCH --error=$OUT_DIR/${l_flag}/${f_flag}/figure_two_%j.err
 #SBATCH --partition=cluster
 #SBATCH --time=$JOB_TIME
 #SBATCH --mem=${N_GB}GB
@@ -474,8 +474,8 @@ python figure_two3.py \
 --n_datavectors $N_DATAVECTORS \
 --compression linear \
 --n_linear_sims $N_LINEAR_SIMS \
---order_idx "$order_idx_args" \
---scales "$scale_args" \
+--order_idx $order_idx_args \
+--scales $scale_args \
 $LINEARISED_FLAG \
 $PRETRAIN_FLAG \
 $USE_PLANCK_FLAG \

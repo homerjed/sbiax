@@ -207,6 +207,9 @@ def get_prior_from_args(args) -> tfd.Distribution:
             ALPHA, covariance_matrix=get_Finv_planck()
         )
     else:
+        # flat_limit = 1e4
+        # lower = jnp.ones((5,)) * -flat_limit
+        # upper = jnp.ones((5,)) * flat_limit
         prior = tfd.Blockwise(
             [tfd.Uniform(l, u) for l, u in zip(lower, upper)]
         )

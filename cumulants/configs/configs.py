@@ -222,6 +222,8 @@ def get_ndes_from_config(
     ndes = []
     for nde, key in zip(config.ndes, keys):
 
+        logger.info("Using NDE of type '{}'".format(nde.model_type))
+
         assert nde.model_type in ["maf", "cnf"], (
             "Invalid NDE model type (={})".format(nde.model_type)
         )

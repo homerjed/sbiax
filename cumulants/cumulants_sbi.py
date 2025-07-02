@@ -87,7 +87,7 @@ plot_cumulants(args, config, dataset.fiducial_data, results_dir=results_dir)
 
 ################################ Check fisher forecasts
 
-if args.seed == 0:
+if 1:
 
     c = ChainConsumer()
 
@@ -112,7 +112,7 @@ if args.seed == 0:
         color="#7600bc"
     )
     fig = c.plotter.plot()
-    plt.savefig(os.path.join(results_dir, "Fisher_tests.pdf"))
+    plt.savefig(os.path.join(log_figs_dir, "Fisher_tests.pdf"))
     plt.close()
 
     if not config.freeze_parameters:
@@ -151,7 +151,7 @@ if args.seed == 0:
             color="#7600bc"
         )
         fig = c.plotter.plot()
-        plt.savefig(os.path.join(results_dir, "Fisher_tests_marginalised.pdf"))
+        plt.savefig(os.path.join(log_figs_dir, "Fisher_tests_marginalised.pdf"))
         plt.close()
 
     plt.figure()
@@ -159,7 +159,7 @@ if args.seed == 0:
     im = plt.imshow(corr, cmap="coolwarm", vmin=-1., vmax=1.)
     plt.colorbar(im)
     plt.savefig(
-        os.path.join(results_dir, "correlation_matrix_cumulants_{}.png".format(args.bulk_or_tails))
+        os.path.join(log_figs_dir, "correlation_matrix_cumulants_{}.png".format(args.bulk_or_tails))
     )
     plt.close()
 
@@ -167,7 +167,7 @@ if args.seed == 0:
     im = plt.imshow(dataset.C)
     plt.colorbar(im)
     plt.savefig(
-        os.path.join(results_dir, "covariance_matrix_cumulants_{}.png".format(args.bulk_or_tails))
+        os.path.join(log_figs_dir, "covariance_matrix_cumulants_{}.png".format(args.bulk_or_tails))
     )
     plt.close()
 
@@ -175,11 +175,11 @@ if args.seed == 0:
     im = plt.imshow(dataset.Cinv)
     plt.colorbar(im)
     plt.savefig(
-        os.path.join(results_dir, "precision_matrix_cumulants_{}.png".format(args.bulk_or_tails))
+        os.path.join(log_figs_dir, "precision_matrix_cumulants_{}.png".format(args.bulk_or_tails))
     )
     plt.close()
 
-    print("Covariance condition number: {:.3E}".format(jnp.linalg.cond(dataset.C)))
+    logger.info("Covariance condition number: {:.3E}".format(jnp.linalg.cond(dataset.C)))
 
 ################################
 

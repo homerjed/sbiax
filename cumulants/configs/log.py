@@ -4,7 +4,7 @@ import os
 LOG_DIR = os.getenv("LOG_DIR", "logs/")
 
 
-def get_log_level(default="INFO"):
+def get_log_level(default="DEBUG"):
 
     level_str = os.getenv("LOG_LEVEL", default).upper()
 
@@ -19,6 +19,8 @@ def setup_module_logger(module_name: str, level=logging.INFO, log_dir=LOG_DIR):
     os.makedirs(log_figs_dir, exist_ok=True)
 
     log_path = os.path.join(log_dir, f"{module_name}.log")
+
+    print("LOG PATH:\n\t{}".format(log_path))
 
     try:
         if os.path.exists(log_path):
