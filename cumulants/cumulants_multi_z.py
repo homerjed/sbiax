@@ -93,8 +93,6 @@ def get_z_config_and_datavector(
     n_datavectors: int = 1,
     bulk_or_tails: Literal["tails", "bulk", "bulk_pdf"] = "tails",
     seed_datavector: Optional[int] = None, # Use fixed seed for config (ensemble, ...) and new seed for datavector
-    *,
-    verbose: bool = False
 ) -> tuple[
     Ensemble,
     Float[Array, "n p"],
@@ -479,8 +477,7 @@ if __name__ == "__main__":
                 pre_train=multi_z_args.pre_train,
                 bulk_or_tails=multi_z_args.bulk_or_tails,
                 freeze_parameters=multi_z_args.freeze_parameters,
-                seed_datavector=multi_z_args.seed_datavector,
-                verbose=multi_z_args.verbose
+                seed_datavector=multi_z_args.seed_datavector
             ) 
 
             # Add Fisher information from redshift (independent; Limber)

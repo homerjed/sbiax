@@ -82,6 +82,12 @@ def add_common_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction, 
         help="Use Planck prior."
     )
+    parser.add_argument(
+        "-ut", 
+        "--use-tqdm", 
+        action=argparse.BooleanOptionalAction, 
+        help="Show loading bar."
+    )
     return parser
 
 
@@ -94,8 +100,6 @@ def get_cumulants_sbi_args(multi_z: bool = False, using_notebook: bool = False) 
 
     parser.add_argument("-s", "--seed", type=int, help="Seed for random number generation.", default=0)
     parser.add_argument("-z", "--redshift", default=0.0, choices=[0.0, 0.5, 1.0], type=float, help="Redshift of simulations.")
-    parser.add_argument("-ut", "--use-tqdm", action=argparse.BooleanOptionalAction, help="Show loading bar.")
-    parser.add_argument("-v", "--verbose", action=argparse.BooleanOptionalAction, help="Say what's going on.")
 
     if multi_z:
         args, _ = parser.parse_known_args() 
@@ -139,7 +143,7 @@ def get_figure_one_args():
     parser = add_common_args(parser)
 
     parser.add_argument("-s", "--seed", type=int, default=0, help="Seed for random number generation.")
-    parser.add_argument("-s_d", "--seed_datavector", type=int, default=0, help="Seed for datavector.")
+    parser.add_argument("-sd", "--seed_datavector", type=int, default=0, help="Seed for datavector.")
     parser.add_argument("-n_d", "--n_datavectors", type=int, default=10, help="Number of datavectors per redshift.")
     parser.add_argument("-z", "--redshifts", default=[0.0, 0.5, 1.0], nargs="+", type=float, help="Redshifts.")
 

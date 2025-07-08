@@ -43,9 +43,7 @@ FIDUCIAL_REDUCE = True if os.environ.get("FIDUCIAL_REDUCE", "").lower() in ("1",
 
 
 @typecheck
-def get_raw_data(
-    data_dir: str, verbose: bool = False
-) -> tuple[
+def get_raw_data(data_dir: str) -> tuple[
     Float[np.ndarray, "z 15000 R d"],
     Float[np.ndarray, "z 2000 R d"],
     Float[np.ndarray, "2000 p"],
@@ -69,8 +67,7 @@ def get_raw_data(
         os.path.join(data_dir, "raw/cumulants_derivatives_plus_minus.npy") # (n, z, p, R, pm, d)
     )
 
-    if verbose:
-        print("Raw data shapes:", [_.shape for _ in [fiducial_pdfs, latin_pdfs, latin_pdfs_parameters, derivatives]])
+    logger.info("Raw data shapes:", [_.shape for _ in [fiducial_pdfs, latin_pdfs, latin_pdfs_parameters, derivatives]])
 
     return fiducial_pdfs, latin_pdfs, latin_pdfs_parameters, derivatives
 
@@ -83,8 +80,7 @@ def get_R_and_z_moments(
     latin_pdfs: Float[np.ndarray, "z 2000 R d"], 
     derivatives: Float[np.ndarray, "500 z 5 R d"], # Check redshift / parameter axes...
     *, 
-    order_idx: Optional[list[int]] = None,
-    verbose: bool = False
+    order_idx: Optional[list[int]] = None
 ) -> tuple[
     Float[np.ndarray, "15000 zRd"],
     Float[np.ndarray, "2000 zRd"],
@@ -107,10 +103,7 @@ def get_R_and_z_moments(
     logger.info("z_idx: {}, R_idx: {}, order_idx: {}".format(z_idx, R_idx, order_idx))
 
     def _get_bar(n_s):
-        if verbose:
-            bar = trange(n_s, desc="cumulants") 
-        else: 
-            bar = range(n_s)
+        bar = trange(n_s, desc="cumulants") 
         return bar
 
     fiducial_pdfs_z_R = np.zeros((fiducial_pdfs.shape[1], n_scales * n_redshifts * n_cumulants))
@@ -177,7 +170,7 @@ def get_R_and_z_moments(
 
 
 def get_cumulant_data(
-    config: ConfigDict, *, verbose: bool = False, results_dir: Optional[str] = None
+    config: ConfigDict, *, results_dir: Optional[str] = None
 ) -> Dataset:
 
     @typecheck
@@ -186,20 +179,18 @@ def get_cumulant_data(
         alpha: Float[np.ndarray, "p"], 
         dparams: Float[np.ndarray, "p"], 
         parameter_strings: list[str], 
-        parameter_derivative_names: list[list[str]], 
-        *, 
-        verbose: bool = False
+        parameter_derivative_names: list[list[str]]
     ) -> Float[np.ndarray, "500 z 5 R d"]:
 
         # (n, z, p, R, 2, d) -> (n, z, p, R, d)
         derivatives = derivatives_pm[..., 1, :] - derivatives_pm[..., 0, :] 
 
         for p in range(alpha.size):
-            if verbose:
-                print(
-                    "Parameter strings / dp / dp_name", 
+            logger.info(
+                "Parameter strings / dp / dp_name: {} {} {}".format( 
                     parameter_strings[p], dparams[p], parameter_derivative_names[p]
                 )
+            )
             derivatives[:, :, p, ...] = derivatives[:, :, p, ...] / dparams[p] # NOTE: OK before or after reducing cumulants
 
         assert derivatives.ndim == ALPHA.size, "{}".format(derivatives.shape)
@@ -260,7 +251,7 @@ def get_cumulant_data(
             latin_moments, 
             latin_moments_parameters,
             derivatives_pm
-        ) = get_raw_data(data_dir, verbose=verbose)
+        ) = get_raw_data(data_dir)
 
         # Euler derivative from plus minus statistics (NOTE: derivatives: Float[np.ndarray, "500 p z R 2 d"])
         derivatives = calculate_derivatives(
@@ -268,8 +259,7 @@ def get_cumulant_data(
             alpha, 
             dparams, 
             parameter_strings=parameter_strings, 
-            parameter_derivative_names=parameter_derivative_names, 
-            verbose=verbose
+            parameter_derivative_names=parameter_derivative_names
         )
 
         # Grab and stack by redshift and scales
@@ -283,8 +273,7 @@ def get_cumulant_data(
             fiducial_moments, 
             latin_moments, 
             derivatives=derivatives,
-            order_idx=config.order_idx,
-            verbose=verbose
+            order_idx=config.order_idx
         )
 
         n_s, n_d = fiducial_moments_z_R.shape 
@@ -377,16 +366,14 @@ def get_cumulant_data(
 
 
 @typecheck
-def get_data(config: ConfigDict, *, verbose: bool = False, results_dir: Optional[str] = None) -> Dataset:
+def get_data(config: ConfigDict, *, results_dir: Optional[str] = None) -> Dataset:
     """ 
         Get data for linearised-model data or full simulation data. 
         - Start with Quijote default data; linearise or nonlinearise 
           if required
     """
 
-    dataset: Dataset = get_cumulant_data(
-        config, verbose=verbose, results_dir=results_dir
-    )
+    dataset: Dataset = get_cumulant_data(config, results_dir=results_dir)
 
     if hasattr(config, "linearised"):
         if config.linearised:
@@ -483,13 +470,12 @@ class CumulantsDataset:
         self, 
         config: ConfigDict, 
         *, 
-        verbose: bool = False, 
         results_dir: Optional[str] = None
     ):
         self.config = config
 
         self.data = get_data(
-            config, verbose=verbose, results_dir=results_dir
+            config, results_dir=results_dir
         )
 
         self.prior = get_prior(config, self.data) # Possibly not equal to Quijote prior
@@ -545,7 +531,7 @@ class CumulantsDataset:
 
     # # Condition number regularisation
     # if config.covariance_epsilon is not None:
-    #     if verbose:
+    #     if :
     #         print("Covariance conditioning...")
 
     #     L = jnp.trace(C) / n_d * config.covariance_epsilon

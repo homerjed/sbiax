@@ -55,9 +55,7 @@ PRINT_FREQ = 500
 
 
 @typecheck
-def get_raw_data(
-    data_dir: str, verbose: bool = False
-) -> tuple[
+def get_raw_data(data_dir: str) -> tuple[
     Float[np.ndarray, "z 15000 R d"],
     Float[np.ndarray, "z 2000 R d"],
     Float[np.ndarray, "2000 p"],
@@ -98,7 +96,6 @@ def get_calculated_cumulants_data(
     config: ConfigDict, 
     *, 
     pdfs: bool = False, # Use PDFs or cumulants for the bulk
-    verbose: bool = False, 
     use_means: bool = False,
     use_normalisations: bool = True, # Stack means of bulk of the PDF at each scale with the other cumulants
     stack_means: bool = True,
@@ -203,7 +200,7 @@ def get_calculated_cumulants_data(
             derivatives,      # Float[np.ndarray, "500 z p R 2 d"]
             deltas,           # Float[np.ndarray, "d"]
             D_deltas          # Float[np.ndarray, "d"]
-        ) = get_raw_data(data_dir, verbose=verbose)
+        ) = get_raw_data(data_dir)
 
         # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
         # Convert from rho to delta for bin centres, edges and widths ONLY FOR BULKS>>!?
@@ -522,9 +519,8 @@ def get_calculated_cumulants_data(
 
                     fiducial_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants] = cumulant               
 
-                if verbose:
-                    if n % PRINT_FREQ == 0:
-                        print("\r n={:05d}/{}".format(n, n_fiducial_pdfs), end="")
+                    # if n % PRINT_FREQ == 0:
+                    #     print("\r n={:05d}/{}".format(n, n_fiducial_pdfs), end="")
 
         fiducial_vars_z_R = np.mean(fiducial_vars_z_R, axis=0)
         assert fiducial_vars_z_R.shape == (n_scales,), "fiducial_vars_z_R.shape=={}".format(fiducial_vars_z_R.shape)
@@ -589,9 +585,8 @@ def get_calculated_cumulants_data(
 
                     latin_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants] = cumulant
 
-                if verbose:
-                    if n % PRINT_FREQ == 0:
-                        print("\r n={:05d}/{}".format(n, n_latin_pdfs), end="")
+                # if n % PRINT_FREQ == 0:
+                #     print("\r n={:05d}/{}".format(n, n_latin_pdfs), end="")
 
         if stack_means:
             latin_moments_z_R = intersperse_means(latin_moments_z_R_means, latin_moments_z_R)
@@ -667,9 +662,8 @@ def get_calculated_cumulants_data(
 
                             derivative_moments_z_R[n, p, p_or_m, R * n_cumulants : (R + 1) * n_cumulants] = cumulant
 
-                if verbose:
-                    if n % PRINT_FREQ == 0:
-                        print("\r n={:05d}/{}".format(n, n_derivatives), end="")
+                # if n % PRINT_FREQ == 0:
+                #     print("\r n={:05d}/{}".format(n, n_derivatives), end="")
 
         if stack_means:
             derivative_moments_z_R = intersperse_means(
@@ -897,7 +891,6 @@ class BulkCumulantsDataset:
         config: ConfigDict, 
         *, 
         pdfs: bool = False,
-        verbose: bool = False, 
         results_dir: Optional[str] = None
     ):
         self.config = config
@@ -909,7 +902,6 @@ class BulkCumulantsDataset:
             use_normalisations=config.use_normalisations,
             stack_means=config.stack_means,
             full_shape=False,
-            verbose=verbose, 
             results_dir=results_dir
         )
 
@@ -990,7 +982,6 @@ class TailsCumulantsDataset:
         config: ConfigDict, 
         *, 
         pdfs: bool = False,
-        verbose: bool = False, 
         results_dir: Optional[str] = None
     ):
         self.config = config
@@ -1002,7 +993,6 @@ class TailsCumulantsDataset:
             use_normalisations=config.use_normalisations,
             stack_means=config.stack_means,
             full_shape=True, # Implies full-shape calculation
-            verbose=verbose, 
             results_dir=results_dir
         )
 
@@ -1075,15 +1065,9 @@ class BulkPDFsDataset(BulkCumulantsDataset):
         self,
         config: ConfigDict,
         *,
-        verbose: bool = False,
         results_dir: Optional[str] = None
     ):
-        super().__init__(
-            config,
-            pdfs=True,
-            verbose=verbose,
-            results_dir=results_dir
-        )
+        super().__init__(config, pdfs=True, results_dir=results_dir)
 
 
 def get_bulk_dataset(args, pdfs=False):
@@ -1106,7 +1090,7 @@ def get_bulk_dataset(args, pdfs=False):
     else:
         logger.info("Using cumulants dataset for bulk dataset.")
 
-    dataset = BulkCumulantsDataset(config, pdfs=pdfs, verbose=False)
+    dataset = BulkCumulantsDataset(config, pdfs=pdfs)
 
     return dataset.data
 
@@ -1131,7 +1115,7 @@ def get_multi_z_bulk_pdf_fisher_forecast(args):
 
         logger.info("Using PDF dataset for bulk dataset. z={}".format(redshift))
 
-        dataset = BulkCumulantsDataset(config, pdfs=True, verbose=False)
+        dataset = BulkCumulantsDataset(config, pdfs=True)
 
         F_z = np.linalg.inv(dataset.data.Finv)
         F = F + F_z
@@ -1186,7 +1170,7 @@ if __name__ == "__main__":
 
     config.use_bulk_means = True
 
-    dataset = BulkCumulantsDataset(config, verbose=True)
+    dataset = BulkCumulantsDataset(config)
 
     def mle(d):
         return dataset.alpha + jnp.linalg.multi_dot(

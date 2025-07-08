@@ -95,6 +95,7 @@ BASE_LOG_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/$RESULTS_DIR/logs/"
 mkdir -p "$BASE_LOG_DIR"
 
 LOG_LEVEL="DEBUG"
+USE_TQDM="--use-tqdm"
 
 if [ "$USE_PLANCK" == true ]; then 
     USE_PLANCK_FLAG="--use-planck"
