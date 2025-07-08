@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 import numpy as np
+import scipy.stats as ss
 from ml_collections import ConfigDict
 from chainconsumer import Chain, ChainConsumer, Truth
 
@@ -18,6 +19,7 @@ from configs.cumulants_configs import cumulants_config, bulk_cumulants_config, b
 from data.common import Dataset
 from data.pdfs import BulkCumulantsDataset, BulkPDFsDataset, TailsCumulantsDataset
 from data.cumulants import CumulantsDataset
+from data.constants import get_alpha_and_parameter_strings, LOWER, UPPER, get_target_idx
 
 logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
@@ -25,6 +27,26 @@ DatasetType = CumulantsDataset | BulkCumulantsDataset | BulkPDFsDataset | TailsC
 
 FORCE_RECOMPUTE_DATASET = True if os.environ.get("FORCE_RECOMPUTE_DATASET", "").lower() in ("1", "true") else False 
 USE_QUIJOTE_TAILS = True if os.environ.get("USE_QUIJOTE_TAILS", "").lower() in ("1", "true") else False
+
+
+def get_fisher_chain_df(alpha, Finv, parameter_strings=None, prior_clip=True):
+    if parameter_strings is None:
+        parameter_strings = get_alpha_and_parameter_strings()[1]
+
+    # Use samples log probs or not?
+    samples = np.random.multivariate_normal(alpha, Finv, size=(100_000,))
+    if prior_clip:
+        if alpha.size == 2:
+            target_idx = get_target_idx()
+            _lower, _upper = LOWER[target_idx], UPPER[target_idx]
+        else:
+            _lower, _upper = LOWER, UPPER
+        samples = np.clip(samples, _lower, _upper)
+
+    samples_log_prob = np.random.multivariate_normal(alpha, Finv, size=(100_000,))
+    df = make_df(samples, parameter_strings=parameter_strings)
+
+    return df
 
 
 def finite_samples_log_prob(samples_log_prob):
@@ -513,4 +535,3 @@ def replace_scalers(ensemble, *, config, X, P):
             [Scaler(X, P)] * sum(int(nde.use_scaling) for nde in config.ndes) 
         )
     return ensemble
-

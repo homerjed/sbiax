@@ -28,7 +28,7 @@ from data.constants import get_Finv_planck
 from data.common import Dataset, add_planck_information_to_Finv
 from cumulants_ensemble import Ensemble
 from affine import affine_sample
-from utils.utils import (
+from utils import (
     get_datasets,
     plot_cumulants,
     plot_moments, 
@@ -243,7 +243,7 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
 
     X_l = jax.vmap(compression_fn)(D_l, Y_l)
 
-    logger.info("Pre-training with", D_l.shape, X_l.shape, Y_l.shape)
+    logger.info("Pre-training with data: {} {} {}".format(D_l.shape, X_l.shape, Y_l.shape))
 
     plot_fisher_summaries(X_l, Y_l, dataset, results_dir)
 
@@ -320,6 +320,17 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
             columns=dataset.parameter_strings,
             name=r"$F_{\Sigma^{-1}}$",
             color="k",
+            linestyle=":",
+            shade_alpha=0.
+        )
+    )
+    c.add_chain(
+        Chain.from_covariance(
+            dataset.alpha,
+            add_planck_information_to_Finv(datasets["tails"].data.Finv, use_planck=args.use_planck), 
+            columns=dataset.parameter_strings,
+            name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[tails]"),
+            color="b",
             linestyle=":",
             shade_alpha=0.
         )

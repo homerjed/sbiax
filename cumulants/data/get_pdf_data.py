@@ -34,7 +34,6 @@ quijote_dir = get_raw_quijote_dir()
 
 
 # Chosen scales/redshifts
-resolution          = 1024
 n_bins_pdf          = 99
 n_fiducials         = 15_000
 n_latins            = 2000
@@ -44,6 +43,8 @@ n_params            = alpha.size
 n_redshifts         = len(redshifts)
 n_scales            = len(R_values)
 z_idx               = [redshifts.index(z) for z in redshifts] # Chosen scales/redshifts
+
+assert resolution in [1024, 512], "Invalid resolution: {}".format(resolution)
 
 """
     Get fiducials
@@ -58,13 +59,16 @@ for n in trange(n_fiducials, desc="Fiducials"):
 
             if resolution == 1024:
                 filename_ = f"PDF_m_{resolution}_{R}_z={redshift_strings[n_z]}.txt"
-            else:
-                filename_ = f"PDF_m_{R}_z={z}.txt"
+            if resolution == 512:
+                filename_ = f"PDF_m_{R}_z={redshift_strings[n_z]}.txt"
 
-            deltas, pdfs_z_R = np.loadtxt(
-                os.path.join(quijote_dir, "fiducial/", f"{n}/", filename_),
-                unpack=True
-            )
+            try:
+                deltas, pdfs_z_R = np.loadtxt(
+                    os.path.join(quijote_dir, "fiducial/", f"{n}/", filename_),
+                    unpack=True
+                )
+            except Exception as e:
+                print(e)
 
             ALL_FIDUCIAL_PDFS[n_z, n, n_R, :] = pdfs_z_R / D_deltas
 
@@ -76,7 +80,7 @@ for n in trange(n_fiducials, desc="Fiducials"):
             )
 
 np.save(
-    os.path.join(data_dir, f"ALL_FIDUCIAL_PDFS.npy"), 
+    os.path.join(data_dir, "raw/ALL_FIDUCIAL_PDFS_resolution={}.npy".format(resolution)), 
     ALL_FIDUCIAL_PDFS
 )
 
@@ -95,13 +99,16 @@ for n in trange(n_latins, desc="Latins"):
 
             if resolution == 1024:
                 filename_ = f"PDF_m_{resolution}_{R}_z={redshift_strings[n_z]}.txt"
-            else:
+            if resolution == 512:
                 filename_ = f"PDF_m_{R}_z={z}.txt"
 
-            delta, pdfs_z_R = np.loadtxt(
-                os.path.join(quijote_dir, "latin_hypercube/", f"{n}/", filename_),
-                unpack=True
-            )
+            try:
+                delta, pdfs_z_R = np.loadtxt(
+                    os.path.join(quijote_dir, "latin_hypercube/", f"{n}/", filename_),
+                    unpack=True
+                )
+            except Exception as e:
+                print(e)
 
             # Normalise PDFs (they measure p(delta_i) * D_delta_i)
             ALL_LATIN_PDFS[n_z, n, n_R, :] = pdfs_z_R / D_deltas
@@ -110,7 +117,7 @@ for n in trange(n_latins, desc="Latins"):
             print(f"\r latins: n={n:05d} z={z} R={R} t={t_mins:.2f} mins", end="")
 
 np.save(
-    os.path.join(data_dir, f"ALL_LATIN_PDFS.npy"), 
+    os.path.join(data_dir, "raw/ALL_LATIN_PDFS_resolution={}.npy".format(resolution)), 
     ALL_LATIN_PDFS
 )
 
@@ -146,7 +153,7 @@ for n_d in trange(n_derivatives, desc="Derivatives"):
                     try:
                         if resolution == 1024:
                             _filename = f"PDF_m_{resolution}_{R_value}_z={z_string}.txt"
-                        else: 
+                        if resolution == 512: 
                             _filename = f"PDF_m_{R_value}_z={z_string}.txt"
 
                         _filename = os.path.join(derivative_dir, _filename)
@@ -170,7 +177,7 @@ if len(bad_idx) > 0:
 
 # Derivatives: plus and minus, all scales and redshifts
 np.save(
-    os.path.join(data_dir, f"pdfs_derivatives_plus_minus.npy"), 
+    os.path.join(data_dir, "raw/pdfs_derivatives_plus_minus_resolution={}.npy".format(resolution)), 
     derivatives
 )
 print("Derivatives:", derivatives.shape)

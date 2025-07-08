@@ -1,4 +1,4 @@
-from typing import Tuple, Optional 
+from typing import Tuple, Optional, Literal
 from copy import deepcopy
 import os
 
@@ -256,7 +256,7 @@ def get_loaders(
     data_train: Tuple[Float[Array, "nt x"], Float[Array, "nt y"]], 
     data_valid: Tuple[Float[Array, "nv x"], Float[Array, "nv y"]], 
     *,
-    train_mode: str
+    train_mode: Literal["nle", "npe"]
 ) -> Tuple[_InMemoryDataLoader, _InMemoryDataLoader]:
 
     train_dl_key, valid_dl_key = jr.split(key)
@@ -279,7 +279,8 @@ def get_initial_stats() -> dict:
         best_epoch=0,           # Epoch of best valid loss
         stopping_count=0,       # Epochs since last improvement
         all_valid_loss=jnp.inf, # Validation loss on whole validation set 
-        best_nde=None           # Best NDE state
+        best_nde=None,          # Best NDE state
+        end_epoch=0
     )
     return stats
 
@@ -294,7 +295,7 @@ def train_nde(
     key: PRNGKeyArray, 
     # NDE
     model: eqx.Module,
-    train_mode: str,
+    train_mode: Literal["nle", "npe"],
     # Data
     train_data: Tuple[Float[Array, "n x"], Float[Array, "n y"]],
     test_data: Optional[Tuple[Float[Array, "n x"], Float[Array, "n y"]]] = None,
@@ -505,36 +506,6 @@ def train_nde(
                     # model = stats["best_nde"] # Use best model when quitting, from some better epoch
                     break
 
-    # Plot losses
-    epochs = np.arange(0, epoch)
-    train_losses = np.asarray(stats["train_losses"][:epoch])
-    valid_losses = np.asarray(stats["valid_losses"][:epoch])
-
-    plt.figure()
-    plt.title("NDE losses")
-    plt.plot(epochs, train_losses, label="train")
-    plt.plot(
-        epochs,
-        valid_losses, 
-        label="valid", 
-        color=plt.gca().lines[-1].get_color(),
-        linestyle=":"
-    )
-    plt.plot(
-        stats["best_epoch"], 
-        valid_losses[stats["best_epoch"]],
-        marker="x", 
-        color="red",
-        label="Best loss {:.3E}".format(stats["best_loss"]),
-        linestyle=""
-    )
-    plt.legend()
-    if results_dir is not None:
-        plt.savefig(os.path.join(results_dir, "losses.png"))
-        plt.close()
-    else:
-        plt.show()
-
     # Use test data for validation else just validation set
     if test_data is not None:
         X, Y = test_data 
@@ -551,6 +522,7 @@ def train_nde(
     )
 
     stats["all_valid_loss"] = all_valid_loss
+    stats["end_epoch"] = epoch
 
     return ema_model if use_ema else model, stats
 
@@ -583,11 +555,12 @@ def plot_losses(ensemble, filename, fisher=False):
         plt.show()
 
 
+@jaxtyped(typechecker=typechecker)
 def train_ensemble(
     key: PRNGKeyArray,
     # NDE
-    ensemble: Ensemble,
-    train_mode: str,
+    ensemble: eqx.Module, 
+    train_mode: Literal["nle", "npe"],
     # Data
     train_data: Tuple[Float[Array, "n x"], Float[Array, "n y"]],
     test_data: Optional[Tuple[Float[Array, "nt x"], Float[Array, "nt y"]]] = None,
@@ -610,7 +583,7 @@ def train_ensemble(
     # Progress bar
     tqdm_description: str = "Training",
     show_tqdm: bool = True,
-) -> Tuple[Ensemble, dict]:
+) -> Tuple[eqx.Module, list[dict]]:
     """
     Trains an ensemble of neural density estimator (NDE) models. 
     
@@ -648,6 +621,11 @@ def train_ensemble(
         4. Returns the trained ensemble and training statistics.
 
     """
+
+    assert hasattr(ensemble, "ndes"), (
+        "Attempting to train an ensemble without any NDEs."
+    )
+
     if trial is not None:
         assert len(ensemble.ndes) == 1, (
             "Can only optimise hyperparameters for single NDE ensembles."
@@ -681,11 +659,44 @@ def train_ensemble(
             show_tqdm=show_tqdm
         )
 
-        # ensemble.ndes[n] = nde
         ensemble = eqx.tree_at(lambda e: e.ndes[n], ensemble, nde)
 
         stats.append(stats_n)
         ndes.append(nde)
+
+        # Plot losses
+        epoch = stats_n["end_epoch"]
+        epochs = np.arange(0, epoch)
+        train_losses = np.asarray(stats_n["train_losses"][:epoch]) + 1e-8
+        valid_losses = np.asarray(stats_n["valid_losses"][:epoch]) + 1e-8 # For logs...
+
+        no_negatives = np.all(np.positive(train_losses)) and np.all(np.positive(valid_losses))
+        _plotter = plt.semilogy if no_negatives else plt.plot 
+
+        plt.figure()
+        plt.title("NDE losses")
+        _plotter(epochs, train_losses, label="train")
+        _plotter(
+            epochs,
+            valid_losses, 
+            label="valid", 
+            color=plt.gca().lines[-1].get_color(),
+            linestyle=":"
+        )
+        _plotter(
+            stats_n["best_epoch"], 
+            valid_losses[stats_n["best_epoch"]],
+            marker="x", 
+            color="red",
+            label="Best loss {:.3E}".format(stats_n["best_loss"]),
+            linestyle=""
+        )
+        plt.legend(frameon=False)
+        if results_dir is not None:
+            plt.savefig(os.path.join(results_dir, "losses_nde={}.png".format(n)))
+            plt.close()
+        else:
+            plt.show()
 
     # Calculate weights of NDEs in ensemble (higher log-likelihood is better)
     weights = ensemble.calculate_stacking_weights(

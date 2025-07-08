@@ -1,5 +1,4 @@
 import os
-from itertools import product
 
 import jax
 import jax.numpy as jnp
@@ -7,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm.auto import trange
 
+from configs.log import setup_module_logger, get_log_level
 from configs.args import get_cumulants_multi_z_args, get_figure_two_args
 from configs.configs import (
     get_base_results_dir, 
@@ -20,6 +20,8 @@ from data.constants import (
 )
 from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
 
+logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
+
 jax.clear_caches()
 
 N_DATAVECTOR_SEEDS = int(os.environ.get("N_DATAVECTOR_SEEDS", 200))
@@ -31,7 +33,7 @@ N_REPEATED_SBI_SEEDS = int(os.environ.get("N_REPEATED_SBI_SEEDS", 10))
     (for independent datavectors) for both linearised and non-linearised
     experiments.
 
-    -> figure_two3.py: plotting histograms for one exp_dict instead of 
+    -> figure_two.py: plotting histograms for one exp_dict instead of 
     all of them together
 """
 
@@ -69,8 +71,6 @@ exp_dict = dict(
     freeze_parameters=figure_two_args.freeze_parameters
 )
 
-print("EXP_DICT:\n", exp_dict)
-
 # Arguments for given multi-z posterior (edited for experimental setup being loaded)
 multi_z_args = get_cumulants_multi_z_args(figure_one=True)
 
@@ -78,11 +78,25 @@ multi_z_args = get_cumulants_multi_z_args(figure_one=True)
 for key in exp_dict:
     setattr(multi_z_args, key, exp_dict[key])
 
+print("EXP_DICT:\n", exp_dict)
+logger.info("EXP DICT: {}".format(exp_dict))
+
 n_p = target_idx.size if multi_z_args.freeze_parameters else alpha.size
+
+print("MULTI-Z ARGS:{}".format(vars(multi_z_args)))
+logger.info("MULTI-Z ARGS:{}".format(vars(multi_z_args)))
+
+print("FIGURE TWO ARGS:{}".format(vars(figure_two_args)))
+logger.info("FIGURE TWO ARGS:{}".format(vars(figure_two_args)))
+
 
 # Load Bulk PDF Fisher matrix just once NOTE: replace this with PDFs dataset NOTE: Scale PDF Fisher information by number of datavectors!
 Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, multi_z_args)
 Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z / multi_z_args.n_datavectors 
+
+"""
+    Get posterior widths; marginalise-index these for marginals histogram plot
+"""
 
 # Load all posteriors from multi-z, calculating widths, for bulk and tails (over all redshifts)
 posterior_widths = dict(
@@ -105,12 +119,17 @@ for bulk_or_tails in ["bulk", "tails"]:
                 multi_z_args.seed = _global_seed # Seed for SBI experiment
                 multi_z_args.seed_datavector = s # Seed for datavector 
                 multi_z_args.bulk_or_tails = bulk_or_tails
+                multi_z_args.redshifts = figure_two_args.redshifts
 
                 # Load posterior for seed and experiment
                 posterior_filename = get_multi_z_posterior_filename(multi_z_args)
+                print("POSTERIOR_FILENAME:", posterior_filename)
+
                 posterior = np.load(posterior_filename)
                     
                 widths = np.var(posterior["samples"], axis=0) # Shape (n_samples, parameters)
+
+                print(widths.shape)
 
                 # print(
                 #     "SBI seed: {}\ndatavector: {}\nvar (sigma8): {}".format(
@@ -124,7 +143,7 @@ for bulk_or_tails in ["bulk", "tails"]:
                 posterior_widths[bulk_or_tails][s, _global_seed, :] = widths
 
                 # Grab multi-z Fisher forecast, scaled by n_datavectors
-                Finvs[bulk_or_tails] = posterior["Finv"]
+                Finvs[bulk_or_tails] = posterior["Finv"] # This may be multi-z when it shouldn't be...
 
             except Exception as e:
                 print(
@@ -336,6 +355,7 @@ if not exp_dict["freeze_parameters"]:
     axes = np.atleast_1d(axes)
 
     for _i, i in enumerate(target_idx):
+        print("TARGET PARAMETER i: ", parameter_strings[i], i)
 
         ax = axes.ravel()[_i]
 
@@ -393,14 +413,21 @@ if not exp_dict["freeze_parameters"]:
                 density=True
             )
 
-        # Bulk Fisher information line
+        print(
+            "bulk", parameter_strings[i], np.diag(Finvs["bulk"])[i], posterior_widths["bulk"][:, _global_seed, i].mean(),
+            "tails", parameter_strings[i], np.diag(Finvs["tails"])[i], posterior_widths["tails"][:, _global_seed, i].mean(),
+            "pdf", parameter_strings[i], np.diag(Finv_bulk_pdfs_all_z)[i]
+        )
+
+        # Bulk PDFs Fisher information line
         ax.axvline(
-            vertical_lines[i], 
+            np.diag(Finv_bulk_pdfs_all_z)[i], 
             color="green", 
             linestyle=":", 
             linewidth=2, 
             label=r"$F^{{-1}}[{}]$ (PDF[bulk])".format(parameter_strings[i][1:-1])
         )
+        # Bulk Fisher information line
         ax.axvline(
             np.diag(Finvs["bulk"])[i], 
             color="blue", 
@@ -408,6 +435,7 @@ if not exp_dict["freeze_parameters"]:
             linewidth=2, 
             label=r"$F^{{-1}}[{}]$ ($k_n$[bulk])".format(parameter_strings[i][1:-1])
         )
+        # Tails Fisher information line
         ax.axvline(
             np.diag(Finvs["tails"])[i], 
             color="red", 

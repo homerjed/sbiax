@@ -3,7 +3,8 @@ from pathlib import Path
 import jax.numpy as jnp
 import numpy as np
 
-_RESULTS_DIR_ = os.environ.get("RESULTS_DIR", "") + "/"
+_RESULTS_DIR_ = os.environ.get("RESULTS_DIR", "results") + "/"
+DEFAULT_RESOLUTION = int(os.environ.get("DEFAULT_RESOLUTION", 1024))
 
 assert _RESULTS_DIR_ != "/", "RESULTS_DIR={} IS NOT ALLOWED.".format(_RESULTS_DIR_)
 
@@ -38,12 +39,14 @@ def get_base_results_dir():
 def get_base_posteriors_dir():
     return POSTERIORS_DIR
 
-
-ALL_RADII = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
+if DEFAULT_RESOLUTION == 1024:
+    ALL_RADII = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
+else:
+    ALL_RADII = [10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
 ALL_REDSHIFTS = [0., 0.5, 1., 2., 3.]
 REDSHIFT_STRINGS = ["0", "0.5", "1", "2", "3"] # Quijote filename strings
 
-RESOLUTION = 1024
+RESOLUTION = DEFAULT_RESOLUTION
 
 PARAMETER_STRINGS = [
     r"$\Omega_m$", r"$\Omega_b$", r"$h_m$", r"$n_s$", r"$\sigma_8$"
@@ -82,7 +85,9 @@ D_DELTAS = DELTA_BIN_EDGES[1:] - DELTA_BIN_EDGES[:-1]
 
 
 def get_target_idx():
-    return jnp.array([0, 4]) # Om, s8; ignoring h, n_s, Ob
+    idx = jnp.array([0, 4]) # Om, s8; ignoring h, n_s, Ob
+    print("TARGET_IDX:", [PARAMETER_STRINGS[_] for _ in idx])
+    return idx
 
 
 def get_quijote_parameters():

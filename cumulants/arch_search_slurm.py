@@ -35,7 +35,7 @@ from configs.args import get_arch_search_args, get_cumulants_sbi_args
 from data.constants import get_base_results_dir
 from data.cumulants import Dataset, get_linearised_data
 from affine import affine_sample
-from utils.utils import (
+from utils import (
     get_datasets,
     plot_fisher_summaries, 
     replace_scalers,

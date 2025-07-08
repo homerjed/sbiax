@@ -44,6 +44,7 @@ logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 FORCE_RECOMPUTE_DATASET = True if os.environ.get("FORCE_RECOMPUTE_DATASET", "").lower() in ("1", "true") else False 
 USE_QUIJOTE_TAILS = True if os.environ.get("USE_QUIJOTE_TAILS", "").lower() in ("1", "true") else False
 FIDUCIAL_REDUCE = True if os.environ.get("FIDUCIAL_REDUCE", "").lower() in ("1", "true") else False
+DEFAULT_RESOLUTION = int(os.environ.get("DEFAULT_RESOLUTION", 1024))
 
 PRINT_FREQ = 500
 
@@ -68,22 +69,23 @@ def get_raw_data(
         Load raw files from Quijote for cumulants and their derivatives
     """
 
-    fiducials = np.load(os.path.join(data_dir, "raw/ALL_FIDUCIAL_PDFS.npy"))
+    fiducials = np.load(os.path.join(data_dir, "raw/ALL_FIDUCIAL_PDFS_resolution={}.npy".format(DEFAULT_RESOLUTION)))
 
-    latins = np.load(os.path.join(data_dir, "raw/ALL_LATIN_PDFS.npy"))
+    latins = np.load(os.path.join(data_dir, "raw/ALL_LATIN_PDFS_resolution={}.npy".format(DEFAULT_RESOLUTION)))
 
     latin_parameters = np.loadtxt(os.path.join(data_dir, "raw/latin_hypercube_params.txt"))
 
     # Load normalised derivatives (n, p, z, R, pm, d) = (500, 5, 5, 7, 2, 99)
     derivatives = np.load(
-        os.path.join(data_dir, f"raw/pdfs_derivatives_plus_minus.npy")
+        os.path.join(data_dir, "raw/pdfs_derivatives_plus_minus_resolution={}.npy".format(DEFAULT_RESOLUTION))
     )
 
     deltas = np.load(os.path.join(data_dir, "raw/deltas.npy"))
 
     DELTA_BIN_EDGES = np.geomspace(1e-2, 1e2, num=100) # 1911.11158 Section 4.1, NOTE: This is in rho
     D_DELTAS = DELTA_BIN_EDGES[1:] - DELTA_BIN_EDGES[:-1] 
-    
+
+    logger.debug("Resolution: {}".format(DEFAULT_RESOLUTION)) 
     logger.debug("Fiducials: {}".format(fiducials.shape))
     logger.debug("Latins: {}".format(latins.shape))
     logger.debug("Latins (parameters): {}".format(latin_parameters.shape))
@@ -887,7 +889,7 @@ class BulkCumulantsDataset:
     config: ConfigDict
     data: Dataset
     prior: tfd.Distribution
-    compression_fn: Callable
+    compression_fn: Callable[[Array, Array], Array]
     results_dir: str
 
     def __init__(
@@ -1113,7 +1115,7 @@ def get_multi_z_bulk_pdf_fisher_forecast(args):
     # Get bulk PDF dataset for multiple redshifts
 
     F = np.zeros(())
-    for redshift in [0.0, 0.5, 1.0]:
+    for redshift in args.redshifts: #[0.0, 0.5, 1.0]:
 
         config = bulk_cumulants_config(
             seed=args.seed, 
@@ -1146,6 +1148,7 @@ def load_multi_z_bulk_pdf_fisher_forecast(data_dir, args):
     identifier_str = "".join(
         [
             "_R" + "".join(map(str, args.scales)),
+            "_z" + "".join(map(str, args.redshifts)),
             "_f" if args.freeze_parameters else "_nf",
             "_pdfs"
         ]

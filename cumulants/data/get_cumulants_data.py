@@ -86,7 +86,7 @@ for n in trange(n_fiducials, desc="Fiducials"):
         ALL_FIDUCIAL_CUMULANTS[n_z, n, :, :] = cumulants_n[:, n_moments_start:]
         
 np.save(
-    os.path.join(data_dir, "ALL_FIDUCIAL_CUMULANTS.npy"), 
+    os.path.join(data_dir, "raw/ALL_FIDUCIAL_CUMULANTS.npy"), 
     ALL_FIDUCIAL_CUMULANTS
 )
 print("\nDONE.")
@@ -122,7 +122,7 @@ for n in trange(n_latins, desc="Latins"):
         ALL_LATIN_CUMULANTS[n_z, n, :, :] = cumulants_n[:, n_moments_start:]
 
 np.save(
-    os.path.join(data_dir, "ALL_LATIN_CUMULANTS.npy"), 
+    os.path.join(data_dir, "raw/ALL_LATIN_CUMULANTS.npy"), 
     ALL_LATIN_CUMULANTS
 )
 print("\nDONE.")
@@ -174,7 +174,7 @@ if len(bad_idx) > 0:
 
 # Derivatives: plus and minus, all scales and redshifts
 np.save(
-    os.path.join(data_dir, "cumulants_derivatives_plus_minus.npy"), 
+    os.path.join(data_dir, "raw/cumulants_derivatives_plus_minus.npy"), 
     derivatives
 )
 print("Derivatives:", derivatives.shape)

@@ -19,7 +19,9 @@ from data.constants import (
     get_quijote_parameters, 
     get_save_and_load_dirs,
     get_target_idx,
-    get_Finv_planck
+    get_Finv_planck,
+    LOWER,
+    UPPER
 )
 from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
 
@@ -142,6 +144,7 @@ multi_z_args.seed              = figure_one_args.seed
 multi_z_args.seed_datavector   = figure_one_args.seed_datavector
 multi_z_args.n_datavectors     = figure_one_args.n_datavectors
 multi_z_args.scales            = figure_one_args.scales
+multi_z_args.redshifts         = figure_one_args.redshifts
 multi_z_args.linearised        = figure_one_args.linearised 
 multi_z_args.pre_train         = figure_one_args.pre_train
 multi_z_args.order_idx         = figure_one_args.order_idx
@@ -229,9 +232,17 @@ for marginalised in [True, False]:
             )
         )
 
+        def maybe_clip(samples):
+            if multi_z_args.linearised:
+                if marginalised:
+                    samples = np.clip(samples, LOWER[target_idx], UPPER[target_idx])
+                else:
+                    samples = np.clip(samples, LOWER, UPPER)
+            return samples
+
         # Posterior from SBI on bulk or tails
         posterior_df = make_df(
-            _posterior_object.samples, 
+            maybe_clip(_posterior_object.samples), 
             _posterior_object.samples_log_prob, 
             parameter_strings=_parameter_strings
         )
@@ -314,8 +325,8 @@ for marginalised in [True, False]:
         sub_figs_dir, 
         "figure_one_{}{}{}.pdf".format(
             multi_z_args.seed, 
-            "_marginalised" if marginalised else "",
-            ("_" + str(multi_z_args.seed_datavector)) if multi_z_args.seed_datavector is not None else ""
+            ("_" + str(multi_z_args.seed_datavector)) if multi_z_args.seed_datavector is not None else "",
+            "_marginalised" if marginalised else ""
         )
     )
 

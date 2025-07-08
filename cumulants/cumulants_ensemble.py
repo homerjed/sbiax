@@ -20,24 +20,6 @@ def default(v, d):
     return v if exists(v) else d
 
 
-@typecheck
-def reduce_weighted_logsumexp(
-    x: Float[Array, "n"], weights: Float[Array, "n"], axis: Optional[int] = None
-) -> Scalar:
-    """ Stable computation of log(sum(weights * exp(x))) """
-
-    assert jnp.all(weights > 0.), "All weights must be positive: weights={}".format(weights)
-
-    # Shift for numerical stability
-    x_max = jnp.max(x, axis=axis, keepdims=True)
-    x_shifted = x - x_max
-
-    weighted_exp = weights * jnp.exp(x_shifted)
-    sum_weighted_exp = jnp.sum(weighted_exp, axis=axis)
-
-    return jnp.log(sum_weighted_exp) + jnp.squeeze(x_max, axis=axis)
-
-
 def default_weights(
     weights: Float[Array, "n"], 
     ndes: list[eqx.Module]
@@ -78,14 +60,18 @@ class Ensemble(eqx.Module):
         """ 
             Get log-probability function for NDE at given observation.
         """
+
         def _nde_log_prob_fn(
             theta: Float[Array, "p"], key: Optional[PRNGKeyArray] = None
         ) -> Scalar: 
+
             if self.sbi_type == "nle":
                 l = nde.log_prob(x=data, y=theta, key=key) + prior.log_prob(theta)
             else:
                 l = nde.log_prob(x=theta, y=data, key=key)
+
             return l
+
         return _nde_log_prob_fn
 
     @typecheck

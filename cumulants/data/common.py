@@ -152,27 +152,15 @@ def get_prior(config: ConfigDict, dataset: Dataset) -> tfd.Distribution:
 
     assert jnp.all((upper - lower) > 0.)
 
-    # print("FORCING FLAT PRIOR")
-    # lower = jnp.ones((dataset.alpha.size,)) * -1e4
-    # upper = jnp.ones((dataset.alpha.size,)) * 1e4
+    print("FORCING FLAT PRIOR")
+    logger.info("FORCING FLAT PRIOR")
+    flat_limit = 1e4
+    lower = jnp.ones((dataset.alpha.size,)) * -flat_limit
+    upper = jnp.ones((dataset.alpha.size,)) * flat_limit
 
     # print("FORCING QUIJOTE PRIOR")
     # lower = jnp.asarray(dataset.lower) # Avoid tfp warning
     # upper = jnp.asarray(dataset.upper)
-
-    # parameter_distributions = []
-    # for p in range(5):
-    #     if p in [1, 3]: # O_b and n_s
-    #         if p == 1:
-    #             dist = tfd.Normal(dataset.alpha[1], 0.052 / 100. / (dataset.alpha[2] ** 2.))
-    #         if p == 3:
-    #             dist = tfd.Normal(dataset.alpha[3], 0.0041)
-    #         parameter_distributions.append(dist)
-    #     else:
-    #         parameter_distributions.append(
-    #             tfd.Uniform(dataset.lower[p], dataset.upper[p])
-    #         )
-    # prior = tfd.Blockwise(parameter_distributions)
 
     if config.use_planck:
         prior = tfd.MultivariateNormalFullCovariance(
@@ -200,6 +188,12 @@ def get_prior_from_args(args) -> tfd.Distribution:
         lower = jnp.asarray(LOWER) # Avoid tfp warning
         upper = jnp.asarray(UPPER)
 
+    print("FORCING FLAT PRIOR")
+    logger.info("FORCING FLAT PRIOR")
+    flat_limit = 1e4
+    lower = jnp.ones((5,)) * -flat_limit
+    upper = jnp.ones((5,)) * flat_limit
+
     assert jnp.all((upper - lower) > 0.)
 
     if args.use_planck:
@@ -207,9 +201,6 @@ def get_prior_from_args(args) -> tfd.Distribution:
             ALPHA, covariance_matrix=get_Finv_planck()
         )
     else:
-        # flat_limit = 1e4
-        # lower = jnp.ones((5,)) * -flat_limit
-        # upper = jnp.ones((5,)) * flat_limit
         prior = tfd.Blockwise(
             [tfd.Uniform(l, u) for l, u in zip(lower, upper)]
         )

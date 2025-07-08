@@ -21,18 +21,20 @@ SINGLE_RUN="${2:-false}" # Run all experiments once for a single figure one
 ONLY_RUN_FIGURES="${3:-false}" # Only run figure_one.py jobs
 
 RUN_LINEARISED=true
-RUN_FROZEN=false
 RUN_NONLINEAR=true
 
+RUN_FROZEN=false
 USE_PLANCK=false
 
-DEFAULT_NDE_TYPE="MAF"
+DEFAULT_NDE_TYPE="CNF"
 DEFAULT_N_NDES=1
 
 FORCE_NOISELESS_DATAVECTOR=false
-USE_QUIJOTE_TAILS=true # Use tails datavectors measured, not calculated, from Quijote
+USE_QUIJOTE_TAILS=false # Use tails datavectors measured, not calculated, from Quijote
 FIDUCIAL_REDUCE=true # Reduce cumulants with fiducial variances
 USE_SCALERS=true # Not implemented yet
+
+DEFAULT_RESOLUTION=1024
 
 # Running a test single run or not
 if [[ "$SINGLE_RUN" == "true" ]]; then
@@ -46,10 +48,10 @@ if [[ "$SINGLE_RUN" == "true" ]]; then
     RUN_FROZEN=false
 else
     echo "MULTIPLE SEEDS RUN."
-    N_SEEDS=20
+    N_SEEDS=40
     START_SEED=0
     N_SEEDS_GLOBAL=10   # Number of repeated trainings for SBI
-    END_SEED=$(( $START_SEED + $N_SEEDS ))
+    END_SEED=$(( $START_SEED + $N_SEEDS - 1 ))
     N_PARALLEL=100
 fi
 
@@ -59,7 +61,7 @@ JOB_TIME="02:00:00"
 MAIL_TYPE="begin,end,fail"
 JOB_ARRAY_STR="$START_SEED-$END_SEED%$N_PARALLEL"
 
-N_DATAVECTORS=10        # Number of independent datavectors to sample posteriors with    
+N_DATAVECTORS=1       # Number of independent datavectors to sample posteriors with    
 N_LINEAR_SIMS=2000      # Number of linear simulations to use for training / pre-training
 
 order_idxs=(
@@ -70,6 +72,12 @@ order_idxs=(
 scales_sets=(
     # "15.0 20.0 25.0 30.0 35.0"
     "5.0 10.0 15.0 20.0 25.0 30.0 35.0"
+)
+
+all_redshifts=(
+    0.0 
+    0.5 
+    1.0
 )
 
 # SBATCH out directory
@@ -93,6 +101,103 @@ if [ "$USE_PLANCK" == true ]; then
 else
     USE_PLANCK_FLAG="--no-use-planck"
 fi
+
+# Run cumulants-from-quijote if using high resolution
+data_deps=()
+
+if [[ "$USE_QUIJOTE_TAILS" == "true" ]]; then
+    cumulants_data_log_dir=$(get_log_dir \
+        $BASE_LOG_DIR \
+        "cumulants_data" 
+    )
+
+    cumulants_cmd="\
+    #!/bin/bash
+    #SBATCH --job-name=cumulants_data
+    #SBATCH --output=$OUT_DIR/cumulants_data.out
+    #SBATCH --error=$OUT_DIR/cumulants_data.err
+    #SBATCH --partition=cluster
+    #SBATCH --time=$JOB_TIME
+    #SBATCH --mem=${N_GB}GB
+    #SBATCH --cpus-per-task=$N_CPU
+    #SBATCH --mail-user=jed.homer@physik.lmu.de
+    #SBATCH --mail-type=$MAIL_TYPE
+
+    cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/data/
+    source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
+
+    mkdir -p "$cumulants_data_log_dir"
+
+    export N_DATAVECTOR_SEEDS=$N_SEEDS 
+    export N_REPEATED_SBI_SEEDS=$N_SEEDS_GLOBAL 
+    export LOG_DIR="${cumulants_data_log_dir}/"
+    export LOG_LEVEL="$LOG_LEVEL"
+    export RESULTS_DIR="$RESULTS_DIR"
+    export DEFAULT_NDE_TYPE="$DEFAULT_NDE_TYPE"
+    export DEFAULT_N_NDES="$DEFAULT_N_NDES"
+    export FORCE_NOISELESS_DATAVECTOR="$FORCE_NOISELESS_DATAVECTOR"
+    export USE_QUIJOTE_TAILS="$USE_QUIJOTE_TAILS"
+    export FIDUCIAL_REDUCE="$FIDUCIAL_REDUCE"
+    export DEFAULT_RESOLUTION="$DEFAULT_RESOLUTION"
+
+    echo \"Running cumulants data script\"
+
+    python get_cumulants_data.py
+    "
+
+    echo "Running cumulants data scripts"
+
+    data_job_id=$(echo "$cumulants_cmd" | sbatch | awk '{print $4}')
+    data_deps+=("$data_job_id")
+else
+    echo "Not running cumulants data scripts"
+fi
+
+# Always run PDFs
+pdfs_data_log_dir=$(get_log_dir \
+    $BASE_LOG_DIR \
+    "pdfs_data"
+)
+
+pdfs_cmd="\
+#!/bin/bash
+#SBATCH --job-name=pdfs_data
+#SBATCH --output=$OUT_DIR/pdfs_data.out
+#SBATCH --error=$OUT_DIR/pdfs_data.err
+#SBATCH --partition=cluster
+#SBATCH --time=$JOB_TIME
+#SBATCH --mem=${N_GB}GB
+#SBATCH --cpus-per-task=$N_CPU
+#SBATCH --mail-user=jed.homer@physik.lmu.de
+#SBATCH --mail-type=$MAIL_TYPE
+
+cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/data/
+source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
+
+mkdir -p "$pdfs_data_log_dir"
+
+export N_DATAVECTOR_SEEDS=$N_SEEDS 
+export N_REPEATED_SBI_SEEDS=$N_SEEDS_GLOBAL 
+export LOG_DIR="${pdfs_data_log_dir}/"
+export LOG_LEVEL="$LOG_LEVEL"
+export RESULTS_DIR="$RESULTS_DIR"
+export DEFAULT_NDE_TYPE="$DEFAULT_NDE_TYPE"
+export DEFAULT_N_NDES="$DEFAULT_N_NDES"
+export FORCE_NOISELESS_DATAVECTOR="$FORCE_NOISELESS_DATAVECTOR"
+export USE_QUIJOTE_TAILS="$USE_QUIJOTE_TAILS"
+export FIDUCIAL_REDUCE="$FIDUCIAL_REDUCE"
+export DEFAULT_RESOLUTION="$DEFAULT_RESOLUTION"
+
+echo \"Running PDFs data script\"
+
+python get_pdf_data.py
+"
+
+echo "Running PDF data scripts"
+
+data_job_id=$(echo "$pdfs_cmd" | sbatch | awk '{print $4}')
+data_deps+=("$data_job_id")
+data_dep_string=$(IFS=':'; echo "${data_deps[*]}")
 
 for global_seed in $(seq 0 $N_SEEDS_GLOBAL); do
 for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
@@ -144,7 +249,8 @@ for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
 
                     # SBI job IDs that must all run for cumulants_multi_z.py to run for bulk/tails, linearised/no-linearised, freeze/no-freeze
                     sbi_job_ids=()
-                    for z in 0.0 0.5 1.0; do
+                    # for z in all_redshifts; do
+                    for z in "${all_redshifts[@]}"; do
 
                         echo ">>Running SBI with z=$z, bulk/tails=$bt, cumulants=$order_idx_args, pretrain=$PRETRAIN_FLAG, linearised=$LINEARISED_FLAG, freeze=$FREEZE_FLAG"
 
@@ -190,6 +296,7 @@ $FREEZE_FLAG"
 #SBATCH --cpus-per-task=$N_CPU
 #SBATCH --mail-user=jed.homer@physik.lmu.de
 #SBATCH --mail-type=$MAIL_TYPE
+#SBATCH --dependency=afterok:$data_dep_string
 
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
@@ -204,6 +311,7 @@ export DEFAULT_N_NDES="$DEFAULT_N_NDES"
 export FORCE_NOISELESS_DATAVECTOR="$FORCE_NOISELESS_DATAVECTOR"
 export USE_QUIJOTE_TAILS="$USE_QUIJOTE_TAILS"
 export FIDUCIAL_REDUCE="$FIDUCIAL_REDUCE"
+export DEFAULT_RESOLUTION="$DEFAULT_RESOLUTION"
 
 echo "Running sbi script with seed $global_seed and redshift $z"
 $sbi_cmd
@@ -229,6 +337,7 @@ END
 
                         order_idx_str=$(echo "$order_idx_args" | tr -d ' ')
                         scale_str=$(echo "$scale_args" | tr -d ' ')
+                        redshifts_str="${all_redshifts[*]}"
 
                         multi_z_log_dir=$(get_log_dir \
                             $BASE_LOG_DIR \
@@ -253,6 +362,7 @@ $PRETRAIN_FLAG \
 --order_idx "$order_idx_args" \
 --scales "$scale_args" \
 --bulk_or_tails $bt \
+--redshifts $redshifts_str \
 $USE_PLANCK_FLAG \
 $FREEZE_FLAG"
 
@@ -271,7 +381,7 @@ $FREEZE_FLAG"
 #SBATCH --cpus-per-task=$N_CPU
 #SBATCH --mail-user=jed.homer@physik.lmu.de
 #SBATCH --mail-type=$MAIL_TYPE
-#SBATCH --dependency=afterok:$sbi_deps
+#SBATCH --dependency=afterok:$data_dep_string:$sbi_deps
 
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
@@ -286,6 +396,7 @@ export DEFAULT_N_NDES="$DEFAULT_N_NDES"
 export FORCE_NOISELESS_DATAVECTOR="$FORCE_NOISELESS_DATAVECTOR"
 export USE_QUIJOTE_TAILS="$USE_QUIJOTE_TAILS"
 export FIDUCIAL_REDUCE="$FIDUCIAL_REDUCE"
+export DEFAULT_RESOLUTION="$DEFAULT_RESOLUTION"
 
 echo "Running final multi-z script"
 $multi_z_cmd
@@ -330,6 +441,7 @@ $LINEARISED_FLAG \
 $PRETRAIN_FLAG \
 --order_idx "$order_idx_args" \
 --scales "$scale_args" \
+--redshifts $redshifts_str \
 $USE_PLANCK_FLAG \
 $FREEZE_FLAG"
 
@@ -347,7 +459,7 @@ $FREEZE_FLAG"
 #SBATCH --cpus-per-task=$N_CPU
 #SBATCH --mail-user=jed.homer@physik.lmu.de
 #SBATCH --mail-type=$MAIL_TYPE
-#SBATCH --dependency=afterok:$sbi_deps:$multi_z_deps
+#SBATCH --dependency=afterok:$data_dep_string:$sbi_deps:$multi_z_deps
 
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
@@ -362,6 +474,7 @@ export DEFAULT_N_NDES="$DEFAULT_N_NDES"
 export FORCE_NOISELESS_DATAVECTOR="$FORCE_NOISELESS_DATAVECTOR"
 export USE_QUIJOTE_TAILS="$USE_QUIJOTE_TAILS"
 export FIDUCIAL_REDUCE="$FIDUCIAL_REDUCE"
+export DEFAULT_RESOLUTION="$DEFAULT_RESOLUTION"
 
 echo "Running final figure one script"
 $figure_cmd
@@ -450,7 +563,7 @@ for order_idx_args in "${order_idxs[@]}"; do
 #SBATCH --cpus-per-task=$N_CPU
 #SBATCH --mail-user=jed.homer@physik.lmu.de
 #SBATCH --mail-type=$MAIL_TYPE
-#SBATCH --dependency=afterok:$sbi_deps:$multi_z_deps:$figure_one_deps
+#SBATCH --dependency=afterok:$data_dep_string:$sbi_deps:$multi_z_deps:$figure_one_deps
 
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
@@ -466,16 +579,18 @@ export DEFAULT_NDE_TYPE="$DEFAULT_NDE_TYPE"
 export DEFAULT_N_NDES="$DEFAULT_N_NDES"
 export FORCE_NOISELESS_DATAVECTOR="$FORCE_NOISELESS_DATAVECTOR"
 export USE_QUIJOTE_TAILS="$USE_QUIJOTE_TAILS"
-export FIDUCIAL_REDUCE E="$FIDUCIAL_REDUCE"
+export FIDUCIAL_REDUCE="$FIDUCIAL_REDUCE"
+export DEFAULT_RESOLUTION="$DEFAULT_RESOLUTION"
 
 echo "Running final figure two script"
 
-python figure_two3.py \
+python figure_two.py \
 --n_datavectors $N_DATAVECTORS \
 --compression linear \
 --n_linear_sims $N_LINEAR_SIMS \
 --order_idx $order_idx_args \
 --scales $scale_args \
+--redshifts $redshifts_str \
 $LINEARISED_FLAG \
 $PRETRAIN_FLAG \
 $USE_PLANCK_FLAG \
