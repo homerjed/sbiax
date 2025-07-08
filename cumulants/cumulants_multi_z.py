@@ -1,5 +1,4 @@
 from typing import Optional, Literal, Callable
-import logging
 import time
 import os
 
@@ -16,7 +15,6 @@ import matplotlib.pyplot as plt
 from tqdm.auto import trange
 from chainconsumer import ChainConsumer, Chain
 import tensorflow_probability.substrates.jax.distributions as tfd
-from tensorflow_probability.substrates.jax.distributions import Distribution
 
 from sbiax.inference import nuts_sample
 from sbiax.utils import make_df, marker
@@ -29,9 +27,8 @@ from configs.configs import (
     get_ndes_from_config
 )
 from configs.args import get_cumulants_sbi_args, get_cumulants_multi_z_args
-from data.common import linearised_model, add_planck_information_to_Finv, get_prior_from_args
+from data.common import add_planck_information_to_Finv, get_prior_from_args
 from data.constants import get_base_posteriors_dir, get_save_and_load_dirs, get_target_idx, get_F_planck, get_alpha_and_parameter_strings, LOWER, UPPER
-from data.cumulants import get_parameter_strings
 from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
 from cumulants_ensemble import Ensemble, MultiEnsemble
 from affine import affine_sample
