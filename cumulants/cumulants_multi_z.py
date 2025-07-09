@@ -28,7 +28,16 @@ from configs.configs import (
 )
 from configs.args import get_cumulants_sbi_args, get_cumulants_multi_z_args
 from data.common import add_planck_information_to_Finv, get_prior_from_args
-from data.constants import get_base_posteriors_dir, get_save_and_load_dirs, get_target_idx, get_F_planck, get_alpha_and_parameter_strings, LOWER, UPPER
+from data.constants import (
+    get_base_posteriors_dir, 
+    get_save_and_load_dirs, 
+    get_target_idx, 
+    get_F_planck, 
+    get_alpha_and_parameter_strings, 
+    get_cumulant_names,
+    LOWER, 
+    UPPER
+)
 from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
 from cumulants_ensemble import Ensemble, MultiEnsemble
 from affine import affine_sample
@@ -41,12 +50,6 @@ logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 CompressionFn = Callable[[Float[Array, "d"], Float[Array, "p"]], Float[Array, "p"]]
 
 jax.clear_caches()
-
-cumulant_names = [
-    r"$\langle \delta^2 \rangle_c$", 
-    r"$\langle \delta^3 \rangle_c$",
-    r"$\langle \delta^4 \rangle_c$"
-] # ["var.", "skew.", "kurt."]
 
 ix = get_target_idx()
 
@@ -701,7 +704,7 @@ if __name__ == "__main__":
     print("Sampling posterior (all redshifts, datavectors)")
 
     # Sample the multiple-redshift-ensemble posterior
-    key_sample, key_state = jr.split(jr.fold_in(key))
+    key_sample, key_state = jr.split(jr.key(int(time.time())))
 
     # Sample posterior across multiple redshifts
     log_prob_fn = multi_ensemble.get_multi_ensemble_log_prob_fn(x_s)
@@ -1129,7 +1132,7 @@ if __name__ == "__main__":
                 multi_z_args.n_linear_sims if multi_z_args.linearised else 2000, 
                 multi_z_args.n_linear_sims if multi_z_args.pre_train else None,
                 "[{}]".format(", ".join(map(str, multi_z_args.scales))),
-                "[{}]".format(", ".join(map(str, [cumulant_names[_] for _ in multi_z_args.order_idx])))
+                "[{}]".format(", ".join(map(str, [get_cumulant_names()[_] for _ in multi_z_args.order_idx])))
             ),
         multialignment='center'
     )
@@ -1195,7 +1198,7 @@ if __name__ == "__main__":
                 multi_z_args.n_linear_sims if multi_z_args.linearised else 2000, 
                 multi_z_args.n_linear_sims if multi_z_args.pre_train else None,
                 "[{}]".format(", ".join(map(str, multi_z_args.scales))),
-                "[{}]".format(", ".join(map(str, [cumulant_names[_] for _ in multi_z_args.order_idx])))
+                "[{}]".format(", ".join(map(str, [get_cumulant_names()[_] for _ in multi_z_args.order_idx])))
             ),
         multialignment='center'
     )

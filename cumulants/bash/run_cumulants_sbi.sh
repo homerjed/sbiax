@@ -48,7 +48,7 @@ if [[ "$SINGLE_RUN" == "true" ]]; then
     RUN_FROZEN=false
 else
     echo "MULTIPLE SEEDS RUN."
-    N_SEEDS=40
+    N_SEEDS=30
     START_SEED=0
     N_SEEDS_GLOBAL=10   # Number of repeated trainings for SBI
     END_SEED=$(( $START_SEED + $N_SEEDS - 1 ))
@@ -61,7 +61,7 @@ JOB_TIME="02:00:00"
 MAIL_TYPE="begin,end,fail"
 JOB_ARRAY_STR="$START_SEED-$END_SEED%$N_PARALLEL"
 
-N_DATAVECTORS=1       # Number of independent datavectors to sample posteriors with    
+N_DATAVECTORS=10       # Number of independent datavectors to sample posteriors with    
 N_LINEAR_SIMS=2000      # Number of linear simulations to use for training / pre-training
 
 order_idxs=(
@@ -76,8 +76,8 @@ scales_sets=(
 
 all_redshifts=(
     0.0 
-    0.5 
-    1.0
+    # 0.5 
+    # 1.0
 )
 
 # SBATCH out directory

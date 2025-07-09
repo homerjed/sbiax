@@ -39,6 +39,21 @@ def get_base_results_dir():
 def get_base_posteriors_dir():
     return POSTERIORS_DIR
 
+
+def get_cumulant_names(include_m0_m1=False):
+    cumulant_names = [
+        r"$\langle \delta^2 \rangle_c$", 
+        r"$\langle \delta^3 \rangle_c$",
+        r"$\langle \delta^4 \rangle_c$"
+    ]
+    if include_m0_m1:
+        cumulant_names = [
+            r"$\langle \delta^0 \rangle_c$",
+            r"$\langle \delta^1 \rangle_c$"
+        ] + cumulant_names
+    return cumulant_names
+
+
 if DEFAULT_RESOLUTION == 1024:
     ALL_RADII = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
 else:

@@ -6,7 +6,6 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 import numpy as np
-import scipy.stats as ss
 from ml_collections import ConfigDict
 from chainconsumer import Chain, ChainConsumer, Truth
 
@@ -30,20 +29,26 @@ USE_QUIJOTE_TAILS = True if os.environ.get("USE_QUIJOTE_TAILS", "").lower() in (
 
 
 def get_fisher_chain_df(alpha, Finv, parameter_strings=None, prior_clip=True):
+
     if parameter_strings is None:
         parameter_strings = get_alpha_and_parameter_strings()[1]
 
     # Use samples log probs or not?
     samples = np.random.multivariate_normal(alpha, Finv, size=(100_000,))
+
     if prior_clip:
         if alpha.size == 2:
             target_idx = get_target_idx()
+
             _lower, _upper = LOWER[target_idx], UPPER[target_idx]
         else:
             _lower, _upper = LOWER, UPPER
-        samples = np.clip(samples, _lower, _upper)
 
-    samples_log_prob = np.random.multivariate_normal(alpha, Finv, size=(100_000,))
+        # samples = np.clip(samples, _lower, _upper)
+        mask = np.all((samples >= _lower) & (samples <= _upper), axis=1)
+        samples = samples[mask]
+
+    # samples_log_prob = np.random.multivariate_normal(alpha, Finv, size=(100_000,))
     df = make_df(samples, parameter_strings=parameter_strings)
 
     return df
@@ -184,11 +189,6 @@ def load_multi_z_cumulants_fisher_forecast(data_dir, args):
             Finv_bulk_all_z = datasets["bulk"].data.Finv
             Finv_tails_all_z = datasets["tails"].data.Finv
 
-    # Don't save with Fisher information from Planck
-    # Finv_bulk_pdfs_all_z = add_planck_information_to_Finv(
-    #     Finv_bulk_pdfs_all_z, use_planck=args.use_planck
-    # )
-
     logger.info("Finv bulk all z loaded from:\n\t{}".format(Finv_bulk_file_path))
     logger.info("Finv tails all z loaded from:\n\t{}".format(Finv_tails_file_path))
 
@@ -246,6 +246,7 @@ def plot_cumulants(args, config, cumulants, results_dir):
                 )
             )
             ax.set_xlim(-7., 7.)
+
     plt.savefig(
         os.path.join(results_dir, "cumulants_test.png"), 
         bbox_inches="tight"

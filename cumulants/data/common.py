@@ -316,7 +316,7 @@ def get_linearised_data(
 
     logger.info("... linearised data {} {}".format(D.shape, Y.shape))
 
-    return D, Y 
+    return D, Y # NOTE: only replacing latin hypercube
 
 
 @typecheck

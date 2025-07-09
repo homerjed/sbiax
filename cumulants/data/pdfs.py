@@ -811,7 +811,7 @@ def get_calculated_cumulants_data(
 
         # NOTE: whether PDFs or cumulants convert to linearised dataset if so required...
         if config.linearised:
-            logger.info("Using linearised dataset...")
+            logger.info("Using linearised dataset [replacing only hypercube]...")
 
             D, Y = get_linearised_data(config, return_dataset) 
 
