@@ -18,6 +18,7 @@ import tensorflow_probability.substrates.jax.distributions as tfd
 
 from configs.log import setup_module_logger, get_log_level
 from data.constants import get_quijote_parameters, get_target_idx, get_F_planck, get_Finv_planck, LOWER, UPPER, ALPHA
+# from data.common import get_nn_compressor
 
 typecheck = jaxtyped(typechecker=typechecker)
 
@@ -28,6 +29,10 @@ FORCE_NOISELESS_DATAVECTOR = True if os.environ.get("FORCE_NOISELESS_DATAVECTOR"
 """
     Objects common to the PDF and cumulant datasets
 """
+
+def exists(v):
+    return v is not None
+
 
 def add_planck_information_to_Finv(Finv, use_planck=False):
     # Add Fisher information from Planck to any Finv matrix
@@ -431,7 +436,7 @@ def get_linear_compressor(
     return partial(compressor, mu=mu, dmu=dmu)
 
 
-if 0:
+if 1:
     import jax
     import jax.numpy as jnp
     from jax.scipy.linalg import svd
@@ -519,18 +524,26 @@ if 0:
         model: eqx.Module, 
         x: Float[Array, "b x"], 
         y: Float[Array, "b y"], 
+        key: PRNGKeyArray,
         *,
         precision: Optional[Float[Array, "y y"]] = None
     ) -> Scalar:
-        def fn(x, y):
-            y_ = model(x)
+
+        if precision is None:
+            precision = jnp.eye(y.shape[-1])
+
+        def fn(x, y, key):
+            y_ = model(x, key=key)
+
             dy = jnp.subtract(y_, y)
-            if precision is not None:
-                l = jnp.linalg.multi_dot([dy, precision, dy.T]) # NOTE: which transpose?!
-            else:
-                l = jnp.square(dy)
+
+            l = jnp.linalg.multi_dot([dy, precision, dy.T])
+
             return l
-        return jnp.mean(jax.vmap(fn)(x, y))
+
+        keys = jr.split(key, len(x))
+
+        return jnp.mean(jax.vmap(fn)(x, y, keys))
 
 
     @eqx.filter_jit
@@ -538,13 +551,15 @@ if 0:
         model: eqx.Module, 
         x: Float[Array, "b x"], 
         y: Float[Array, "b y"],
+        key: PRNGKeyArray,
         *, 
         precision: Optional[Float[Array, "y y"]] = None,
         replicated_sharding: Optional[PositionalSharding] = None
     ) -> Scalar:
+        model = eqx.nn.inference_mode(model, True)
         if replicated_sharding is not None:
             model = eqx.filter_shard(model, replicated_sharding)
-        return loss(model, x, y, precision=precision)
+        return loss(model, x, y, key=key, precision=precision)
 
 
     @typecheck
@@ -554,11 +569,14 @@ if 0:
         opt_state: optax.OptState,
         x: Float[Array, "b x"], 
         y: Float[Array, "b y"],
+        key: PRNGKeyArray,
         opt: optax.GradientTransformation, 
         *, 
         precision: Optional[Float[Array, "y y"]] = None,
         replicated_sharding: Optional[PositionalSharding]
     ) -> Tuple[eqx.Module, optax.OptState, Scalar]:
+
+        model = eqx.nn.inference_mode(model, False)
 
         if replicated_sharding is not None:
             model, opt_state = eqx.filter_shard(
@@ -567,7 +585,7 @@ if 0:
 
         grad_fn = eqx.filter_value_and_grad(partial(loss, precision=precision))
 
-        loss_value, grads = grad_fn(model, x, y)
+        loss_value, grads = grad_fn(model, x, y, key)
 
         updates, opt_state = opt.update(grads, opt_state, model)
         model = eqx.apply_updates(model, updates)
@@ -592,18 +610,18 @@ if 0:
 
     @typecheck
     def fit_nn(
-        key: Key[jnp.ndarray, "..."], 
+        key: PRNGKeyArray,
         model: eqx.Module, 
         train_data: Tuple[Float[Array, "n x"], Float[Array, "n y"]], 
         opt: optax.GradientTransformation, 
-        n_batch: int, 
+        n_batch: Optional[int], 
         patience: Optional[int], 
-        n_steps: int = 10_000, 
-        valid_fraction: int = 0.9, 
-        valid_data: Sequence[Array] = None,
-        batch_dataset: bool = True,
-        use_tqdm: bool = False,
+        n_steps: int = 100_000, 
+        valid_fraction: float = 0.1, 
+        valid_data: Optional[Sequence[Array]] = None,
+        use_tqdm: bool = True,
         *,
+        description: str = "Training NN",
         precision: Optional[Float[Array, "y y"]] = None,
         sharding: Optional[NamedSharding] = None,
         replicated_sharding: Optional[PositionalSharding] = None,
@@ -637,6 +655,10 @@ if 0:
             number of steps (`patience`).
             5. The function returns the trained model and the recorded training/validation loss history.
         """
+
+        if exists(precision):
+            logger.info("Using Fisher precision for NN.")
+
         D, Y = train_data
 
         n_s, _ = D.shape
@@ -647,20 +669,21 @@ if 0:
             Xt, Yt = train_data
             Xv, Yv = valid_data
         else:
-            Xt, Xv = jnp.split(D, [int(valid_fraction * n_s)]) 
-            Yt, Yv = jnp.split(Y, [int(valid_fraction * n_s)])
+            n_train = D.shape[0]
+            Xt, Xv = jnp.split(D, [n_train - int(valid_fraction * n_s)]) 
+            Yt, Yv = jnp.split(Y, [n_train - int(valid_fraction * n_s)])
 
         if use_tqdm: 
-            steps = trange(n_steps, desc="Training NN", colour="blue")
+            steps = trange(n_steps, desc=description, colour="magenta")
         else: 
-            steps = trange(n_steps)
+            steps = range(n_steps)
 
         L = np.zeros((n_steps, 2))
         for step in steps:
             key_t, key_v = jr.split(jr.fold_in(key, step))
 
-            if batch_dataset:
-                x, y = get_batch(Xt, Yt, n=n_batch, key=key_t) # Xt, Yt
+            if exists(n_batch):
+                x, y = get_batch(Xt, Yt, n=n_batch, key=key_t) 
             else:
                 x, y = Xt, Yt
             
@@ -672,12 +695,13 @@ if 0:
                 opt_state, 
                 x, 
                 y, 
+                key_t,
                 opt=opt, 
                 precision=precision, 
                 replicated_sharding=replicated_sharding
             )
 
-            if batch_dataset:
+            if exists(n_batch):
                 x, y = get_batch(Xv, Yv, n=n_batch, key=key_v)
             else:
                 x, y = Xv, Yv
@@ -686,17 +710,19 @@ if 0:
                 x, y = eqx.filter_shard((x, y), sharding)
 
             valid_loss = evaluate(
-                model, x, y, precision=precision, replicated_sharding=replicated_sharding
+                model, x, y, key_v, precision=precision, replicated_sharding=replicated_sharding
             )
 
             L[step] = train_loss, valid_loss
-            steps.set_postfix_str(
-                "train={:.3E}, valid={:.3E}".format(train_loss.item(), valid_loss.item())
-            )
+            if use_tqdm:
+                steps.set_postfix_str(
+                    "t={:.3E}, v={:.3E}".format(train_loss.item(), valid_loss.item())
+                )
 
             if patience is not None:
                 if (step > 0) and (step - np.argmin(L[:step, 1]) > patience):
-                    steps.set_description_str("Stopped at {}".format(step))
+                    if use_tqdm:
+                        steps.set_description_str("Stopped at {}".format(step))
                     break
 
         return model, L[:step]
@@ -732,7 +758,7 @@ if 0:
         key: Key[jnp.ndarray, "..."], 
         model: eqx.Module, 
         train_data: Tuple[Float[Array, "n x"], Float[Array, "n y"]], 
-        valid_fraction: int = 0.9, 
+        valid_fraction: float = 0.1, 
         valid_data: Sequence[Array] = None,
         batch_dataset: bool = True,
         *,
@@ -744,7 +770,7 @@ if 0:
         D, Y = train_data
 
         y0, static = eqx.partition(model, eqx.is_array)
-
+        
         # Standardise before PCA (don't get tricked by high variance due to units)
         # X = (X - jnp.mean(X, axis=0)) / jnp.std(X, axis=0) # NOTE: already standardised 
 
@@ -753,6 +779,8 @@ if 0:
         # D = (D - jnp.mean(D, axis=0)) / jnp.std(D, axis=0)
         # pca.fit(D) # Fit on fiducial data?
         # D = pca.transform(D)
+
+        # D, preprocess_fn = get_preprocess_fn(D, use_pca=config.use_pca)
 
         @eqx.filter_jit
         def f(y, args):
@@ -776,70 +804,178 @@ if 0:
 
         L = np.zeros((1, 2))
 
-        # _model = lambda d: pca.transform(model(d))
+        # model = lambda d: pca.transform(model(d))
 
-        return _model, L
+        return model, L
 
 
     @typecheck
     def get_nn_compressor(
         key: PRNGKeyArray, 
+        config: ConfigDict,
         dataset: Dataset, 
-        data_preprocess_fn: Optional[Callable] = None, 
         *, 
         lbfgs: bool = False, 
         results_dir: str, 
         net: Optional[eqx.Module] = None
-    ) -> tuple[eqx.Module, Callable]:
+    ) -> tuple[eqx.Module, Callable, Callable]:
         """
             Train neural network compression function
             - Optionally use parameter covariance for chi2 loss
         """
-        net_key, train_key = jr.split(key)
 
-        if data_preprocess_fn is None:
-            data_preprocess_fn = lambda x: x
 
-        if net is None:
-            net = eqx.nn.MLP(
+        class ExtraMLP(eqx.nn.MLP):
+            dropouts: list[eqx.nn.Dropout]
+            layernorms: list[eqx.nn.LayerNorm]
+
+            def __init__(self, *args, p: float, key: PRNGKeyArray, **kwargs):
+                super().__init__(*args, **kwargs, key=key)
+                dropouts = []
+                layernorms = []
+                for layer in self.layers[:-1]:
+                    dropouts.append(eqx.nn.Dropout(p=p))
+                    layernorms.append(eqx.nn.LayerNorm(layer.weight.shape[0]))
+                self.dropouts = dropouts + [eqx.nn.Identity()] # Hacky safe-zip
+                self.layernorms = layernorms + [eqx.nn.Identity()] # Hacky safe-zip
+
+            def __call__(self, x, key=None):
+                for i, (layer, dropout, norm) in enumerate(
+                    zip(self.layers, self.dropouts, self.layernorms)
+                ):
+                    x = layer(x)
+                    x = norm(x)
+                    x = dropout(x, key=key)
+                    if i != len(self.layers) - 1:
+                        x = self.activation(x) # Don't activate last layer
+                if self.final_activation is not None:
+                    x = self.final_activation(x) # ...unless it is required
+                return x
+
+
+        @eqx.filter_vmap
+        def make_ensemble(key):
+            return eqx.nn.MLP(
+            # return ExtraMLP(
                 dataset.data.shape[-1], 
                 dataset.parameters.shape[-1], 
-                width_size=32, 
-                depth=3, 
-                activation=jax.nn.tanh,
-                key=net_key
+                width_size=config.nn.width_size, 
+                depth=config.nn.depth, 
+                use_final_bias=config.nn.use_final_bias,
+                # p=0.3,
+                activation=getattr(jax.nn, config.nn.activation),
+                key=key
             )
 
-        def preprocess_fn(x): 
-            # Preprocess with covariance?
-            return (jnp.asarray(x) - jnp.mean(dataset.data, axis=0)) / jnp.std(dataset.data, axis=0)
+
+        @eqx.filter_vmap(in_axes=(eqx.if_array(0), None, None))
+        def evaluate_ensemble(model, x, key=None):
+            return model(x, key=key)
+
+
+        class Ensemble(eqx.Module):
+            ensemble: eqx.Module
+
+            def __init__(self, ensemble):
+                self.ensemble = ensemble
+
+            def __call__(self, x, key=None):
+                x = evaluate_ensemble(self.ensemble, x, key)
+                return jnp.mean(x, axis=0)
+
+
+        def get_preprocess_fn(D, use_pca):
+            """ 
+                Pre-process data, using PCA or not, returning the pre-processing transform 
+                for use downstream with measurements.
+                - Data is pre-processed here!
+            """ 
+
+            mu_D = dataset.data.mean(axis=0) #jnp.mean(dataset.fiducial_data, axis=0)
+            std_D = dataset.data.mean(axis=0) #jnp.std(dataset.fiducial_data, axis=0)
+            D = (D - mu_D) / std_D
+
+            # eigvals, eigvecs = jnp.linalg.eigh(
+            #     # jnp.cov(D - mu_D, rowvar=False)
+            #     jnp.cov(dataset.fiducial_data - mu_D, rowvar=False)
+            #     # dataset.C) 
+            # )
+            # D = ((D - mu_D) @ eigvecs) / np.sqrt(eigvals + 1e-8)
+
+            if use_pca:
+                pca = PCA(num_components=D.shape[-1]) 
+                pca.fit(dataset.data.fiducial_data) # Fit on fiducial data?
+
+            def preprocess_fn(d):
+                d = jnp.asarray(d)
+                if use_pca:
+                    d = pca.transform(d)
+                # return ((d - mu_D) @ eigvecs) / np.sqrt(eigvals + 1e-10) 
+                return (d - mu_D) / std_D
+
+            return D, preprocess_fn
+
+
+        description = "Fitting NN [{}]".format(dataset.name)
+
+        net_key, train_key = jr.split(key)
+
+        keys = jr.split(net_key, config.nn.n_ensemble)
+
+        net = Ensemble(make_ensemble(keys))
+
+        D, preprocess_fn = get_preprocess_fn(dataset.data, use_pca=config.nn.use_pca)
+
+        def preprocess_fn_p(p):
+            # Scale parameters into loss / out of net
+            # return (p - dataset.alpha) / np.diag(dataset.Finv)
+            return (p - dataset.parameters.mean(axis=0)) / dataset.parameters.std(axis=0)
+
+        def postprocess_fn_p(p):
+            # Scale parameters into loss / out of net
+            # return (p - dataset.alpha) / np.diag(dataset.Finv)
+            return p * dataset.parameters.std(axis=0) + dataset.parameters.mean(axis=0)
+
+        train_data = (D, preprocess_fn_p(dataset.parameters))
+
+        precision = None #jnp.linalg.inv(dataset.Finv) # In reality this varies with parameters
 
         if lbfgs:
             net, losses = fit_nn_lbfgs(
                 train_key, 
                 net, 
-                (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
-                # precision=jnp.linalg.inv(dataset.Finv) # In reality this varies with parameters
+                train_data=train_data,
+                precision=precision
             )
         else:
+            opt = getattr(optax, config.nn.train.opt)(config.nn.train.lr)
+
             net, losses = fit_nn(
                 train_key, 
                 net, 
-                (preprocess_fn(data_preprocess_fn(dataset.data)), dataset.parameters), 
-                opt=optax.adam(1e-3), 
-                precision=jnp.linalg.inv(dataset.Finv), # In reality this varies with parameters
-                n_batch=500, 
-                patience=1000,
-                n_steps=50_000
+                opt=opt, 
+                train_data=train_data,
+                precision=precision, 
+                n_batch=config.nn.train.n_batch,
+                n_steps=config.nn.train.n_steps,
+                patience=config.nn.train.patience,
+                valid_fraction=config.nn.train.valid_fraction,
+                description=description
             )
 
         plt.figure()
-        plt.loglog(losses)
+        plt.loglog(losses, color="red" if dataset.name == "tails" else "blue")
         plt.savefig(os.path.join(results_dir, "losses_nn.png"))
         plt.close()
 
-        return net, preprocess_fn
+        net = eqx.nn.inference_mode(net, True)
 
+        eqx.tree_serialise_leaves(
+            os.path.join(results_dir, "nn.eqx"), net
+        )
+
+        return net, preprocess_fn, postprocess_fn_p
+ 
 
 def get_compression_fn(key, config, dataset, *, results_dir):
     """ 
@@ -848,20 +984,21 @@ def get_compression_fn(key, config, dataset, *, results_dir):
 
     assert config.compression in ["linear", "nn", "nn-lbfgs"]
 
-    # if config.compression == "nn" or config.compression == "nn-lbfgs":
+    if config.compression == "nn" or config.compression == "nn-lbfgs":
 
-    #     net, preprocess_fn = get_nn_compressor(
-    #         key, 
-    #         dataset, 
-    #         lbfgs=config.compression == "nn-lbfgs", 
-    #         results_dir=results_dir
-    #     )
+        net, preprocess_fn, postprocess_fn = get_nn_compressor(
+            key, 
+            config,
+            dataset, 
+            lbfgs=config.compression == "nn-lbfgs", 
+            results_dir=results_dir
+        )
 
-    #     compressor = lambda d, p: net(preprocess_fn(d)) # Ignore parameter kwarg!
+        compression_fn = lambda d, p: postprocess_fn(net(preprocess_fn(d))) # Ignore parameter kwarg for NN
 
     if config.compression == "linear":
         compressor = get_linear_compressor(config, dataset)
 
-    compression_fn = lambda d, p: compressor(d, p)
+        compression_fn = lambda d, p: compressor(d, p)
 
     return compression_fn 

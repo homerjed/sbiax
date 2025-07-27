@@ -188,7 +188,7 @@ if 1:
 """
 
 # Compress simulations
-compression_fn = cumulants_dataset.compression_fn
+compression_fn = cumulants_dataset.get_compression_fn()
 
 X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
 
@@ -289,7 +289,7 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
         n_steps=config.n_steps + config.burn, 
         burn=config.burn, 
         current_state=state,
-        description="Sampling",
+        description="Sampling (pre-train)",
         show_tqdm=args.use_tqdm
     )
 
@@ -375,7 +375,7 @@ if ((not config.linearised) and config.pre_train and (config.n_linear_sims is no
         color="#7600bc"
     )
     fig = c.plotter.plot()
-    plt.savefig(os.path.join(results_dir, "posterior_affine_pretrain.pdf"))
+    plt.savefig(os.path.join(results_dir, "posterior_affine_pretrain.png"))
     plt.savefig(os.path.join(posteriors_dir, "posterior_affine_pretrain.pdf"))
     plt.close()
 
@@ -439,7 +439,7 @@ if 1:
             n_steps=config.n_steps + config.burn, 
             burn=config.burn, 
             current_state=state,
-            description="Sampling",
+            description="Sampling (linearised)" if config.linearised else "Sampling (non-linear)",
             show_tqdm=args.use_tqdm
         )
 
@@ -536,7 +536,7 @@ if 1:
             ),
             multialignment='center'
         )
-        plt.savefig(os.path.join(results_dir, "posterior_affine.pdf"))
+        plt.savefig(os.path.join(results_dir, "posterior_affine.png"))
         plt.savefig(os.path.join(posteriors_dir, "posterior_affine.pdf"))
         plt.close()
 
@@ -619,7 +619,7 @@ if 1:
             ),
             multialignment='center'
         )
-        plt.savefig(os.path.join(results_dir, "posterior_affine_marginalised.pdf"))
+        plt.savefig(os.path.join(results_dir, "posterior_affine_marginalised.png"))
         plt.savefig(os.path.join(posteriors_dir, "posterior_affine_marginalised.pdf"))
         plt.close()
     except Exception as e:
@@ -628,7 +628,7 @@ if 1:
         print("~" * 50)
 
     """
-        Non-linearised measurement, linearised likelihood
+        Non-linearised measurement, linearised likelihood or vice versa?
     """
 
     # Generates linearised (or not) datavector at fiducial parameters
@@ -665,7 +665,7 @@ if 1:
         n_steps=config.n_steps + config.burn, 
         burn=config.burn, 
         current_state=state,
-        description="Sampling",
+        description="Sampling ({})".format(_ext),
         show_tqdm=args.use_tqdm
     )
 
@@ -762,7 +762,7 @@ if 1:
         ),
         multialignment='center'
     )
-    plt.savefig(os.path.join(results_dir, "posterior_affine_{}.pdf".format(_ext)))
+    plt.savefig(os.path.join(results_dir, "posterior_affine_{}.png".format(_ext)))
     plt.savefig(os.path.join(posteriors_dir, "posterior_affine_{}.pdf".format(_ext)))
     plt.close()
 
@@ -845,9 +845,137 @@ if 1:
         ),
         multialignment='center'
     )
-    plt.savefig(os.path.join(results_dir, "posterior_affine_marginalised_{}.pdf".format(_ext)))
+    plt.savefig(os.path.join(results_dir, "posterior_affine_marginalised_{}.png".format(_ext)))
     plt.savefig(os.path.join(posteriors_dir, "posterior_affine_marginalised_{}.pdf".format(_ext)))
     plt.close()
+
+
+    jax.clear_caches()
+
+    if len(ensemble.ndes) > 1: 
+
+        for nde in ensemble.ndes:
+
+            log_prob_fn = ensemble.nde_log_prob_fn(nde, data=x_, prior=parameter_prior)
+
+            state = jr.multivariate_normal(
+                key_state, 
+                dataset.alpha, 
+                add_planck_information_to_Finv(dataset.Finv, use_planck=args.use_planck), 
+                (2 * config.n_walkers,)
+            )
+            # state = parameter_prior.sample(seed=key_state, sample_shape=(2 * config.n_walkers,))
+
+            samples, weights = affine_sample(
+                key_sample, 
+                log_prob=log_prob_fn,
+                n_walkers=config.n_walkers, 
+                n_steps=config.n_steps + config.burn, 
+                burn=config.burn, 
+                current_state=state,
+                description="Sampling (NDE={})".format(ensemble.ndes.index(nde)),
+                show_tqdm=args.use_tqdm
+            )
+
+            alpha_log_prob = log_prob_fn(dataset.alpha)
+            samples_log_prob = jax.vmap(log_prob_fn)(samples)
+            samples_log_prob = finite_samples_log_prob(samples_log_prob) 
+
+            logger.debug("samples: {} {}".format(samples.min(), samples.max()))
+            logger.debug("probs: {} {}".format(samples_log_prob.min(), samples_log_prob.max()))
+
+            posterior_df = make_df(
+                samples, 
+                samples_log_prob, 
+                parameter_strings=dataset.parameter_strings
+            )
+
+            np.savez(
+                os.path.join(results_dir, "posterior.npz"), 
+                alpha=dataset.alpha,
+                samples=samples,
+                samples_log_prob=samples_log_prob,
+                datavector=datavector,
+                summary=x_
+            )
+
+            c = ChainConsumer()
+            c.add_chain(
+                Chain.from_covariance(
+                    dataset.alpha,
+                    add_planck_information_to_Finv(
+                        datasets["tails"].data.Finv, use_planck=args.use_planck
+                    ),
+                    columns=dataset.parameter_strings,
+                    name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[tails]"),
+                    color="r",
+                    linestyle=":",
+                    shade_alpha=0.
+                )
+            )
+            c.add_chain(
+                Chain.from_covariance(
+                    dataset.alpha,
+                    add_planck_information_to_Finv(
+                        datasets["bulk"].data.Finv, use_planck=args.use_planck
+                    ),
+                    columns=dataset.parameter_strings,
+                    name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[bulk]"),
+                    color="b",
+                    linestyle=":",
+                    shade_alpha=0.
+                )
+            )
+            c.add_chain(
+                Chain.from_covariance(
+                    dataset.alpha,
+                    add_planck_information_to_Finv(
+                        datasets["bulk_pdf"].data.Finv, use_planck=args.use_planck
+                    ),
+                    columns=dataset.parameter_strings,
+                    name=r"$F_{\Sigma^{-1}}$" + " {}".format("PDF[bulk]"),
+                    color="g",
+                    linestyle=":",
+                    shade_alpha=0.
+                )
+            )
+            c.add_chain(
+                Chain(
+                    samples=posterior_df, 
+                    name="SBI[{}]".format(args.bulk_or_tails), 
+                    color="r" if args.bulk_or_tails == "tails" else "b"
+                )
+            )
+            c.add_marker(
+                location=marker(x_, parameter_strings=dataset.parameter_strings),
+                name=r"$\hat{x}$", 
+                color="r" if args.bulk_or_tails == "tails" else "b"
+            )
+            c.add_marker(
+                location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
+                name=r"$\alpha$", 
+                color="k"
+            )
+            fig = c.plotter.plot()
+            fig.suptitle(
+                (
+                    r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
+                    + " z={}".format(config.redshift) + "\n"
+                    + (" linearised" if config.linearised else " Quijote") + ("[bulk]" if args.bulk_or_tails == "bulk" else "[tails]") + "\n"
+                    + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
+                    + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
+                    + r"$k_n$ = [{}]".format(
+                        ", ".join([get_cumulant_names()[_] for _ in config.order_idx])
+                    )
+                ),
+                multialignment='center'
+            )
+            plt.savefig(os.path.join(results_dir, "posterior_affine_nde={}.png".format(ensemble.ndes.index(nde))))
+            plt.savefig(os.path.join(posteriors_dir, "posterior_affine_nde={}.pdf".format(ensemble.ndes.index(nde))))
+            plt.close()
+
+
+
 
 if 0:
     try:

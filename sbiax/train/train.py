@@ -181,7 +181,7 @@ def partition_and_preprocess_data(
 ) -> Tuple[
     Tuple[Float[Array, "nt x"], Float[Array, "nt y"]], 
     Tuple[Float[Array, "nv x"], Float[Array, "nv y"]], 
-    Tuple[int, int]
+    Tuple[Optional[int], Optional[int]]
 ]:
     """
     Partitions the dataset into training and validation sets, and computes the number of batches.
@@ -488,7 +488,7 @@ def train_nde(
 
             if better_loss:
                 stats["best_loss"] = stats["valid_losses"][-1]
-                stats["best_nde"] = deepcopy(model) # Save model with best loss, not just the one at the end of training
+                stats["best_nde"] = deepcopy(ema_model if use_ema else model) # Save model with best loss, not just the one at the end of training
                 stats["best_epoch"] = epoch - 1 # NOTE: check this
                 stats["stopping_count"] = 0
             else:
@@ -675,20 +675,25 @@ def train_ensemble(
 
         plt.figure()
         plt.title("NDE losses")
-        _plotter(epochs, train_losses, label="train")
+        _plotter(
+            epochs, 
+            -train_losses, 
+            color="m",
+            label="train"
+        )
         _plotter(
             epochs,
-            valid_losses, 
+            -valid_losses, 
             label="valid", 
             color=plt.gca().lines[-1].get_color(),
             linestyle=":"
         )
         _plotter(
             stats_n["best_epoch"], 
-            valid_losses[stats_n["best_epoch"]],
+            -valid_losses[stats_n["best_epoch"]],
             marker="x", 
             color="red",
-            label="Best loss {:.3E}".format(stats_n["best_loss"]),
+            label="Best loss {:.3E}".format(-stats_n["best_loss"]),
             linestyle=""
         )
         plt.legend(frameon=False)

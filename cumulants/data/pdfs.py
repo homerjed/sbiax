@@ -362,6 +362,8 @@ def get_calculated_cumulants_data(
             # deltas = mean_bins_lin[cut]
             # ddeltas = bin_widths[cut]
 
+            print("pdfs:", cut_pdf.shape, deltas.shape, ddeltas.shape)
+
             cut_pdf = cut_pdf / fiducial_based_normalisation
 
             _delta_ = np.sum(ddeltas * cut_pdf * deltas)
@@ -448,6 +450,12 @@ def get_calculated_cumulants_data(
         """
 
         cuts = get_cuts_from_fiducial_mean_pdf()
+
+        for scale, cut in zip(config.scales, cuts):
+            # Minimum / maximum bins and their deltas
+            print("redshift, R: {}, {}".format(config.redshift, scale), deltas[cut.min()], deltas[cut.max()])
+    
+        print(cuts)
 
         orders = [2, 3, 4] # Variance, skewness and kurtosis
         cut_dim = sum([cut.size for cut in cuts])
@@ -883,7 +891,7 @@ class BulkCumulantsDataset:
     config: ConfigDict
     data: Dataset
     prior: tfd.Distribution
-    compression_fn: Callable[[Array, Array], Array]
+    compression_fn: Optional[Callable[[Array, Array], Array]]
     results_dir: str
 
     def __init__(
@@ -907,10 +915,11 @@ class BulkCumulantsDataset:
 
         self.prior = get_prior(config, self.data) # Possibly not equal to Quijote prior
 
-        key = jr.key(config.seed)
-        self.compression_fn = get_compression_fn(
-            key, self.config, self.data, results_dir=results_dir
-        )
+        # key = jr.key(config.seed)
+        # self.compression_fn = get_compression_fn(
+        #     key, self.config, self.data, results_dir=results_dir
+        # )
+        self.compression_fn = None
 
         self.results_dir = results_dir
 
@@ -942,6 +951,14 @@ class BulkCumulantsDataset:
         return P
 
     def get_compression_fn(self):
+        if self.compression_fn is None:
+            key = jr.key(self.config.seed)
+            fn = get_compression_fn(
+                key, self.config, self.data, results_dir=self.results_dir
+            )
+            assert callable(fn), "Compression function returned is not callable"
+            self.compression_fn = fn
+        assert self.compression_fn is not None
         return self.compression_fn
 
     def get_datavector(self, key: PRNGKeyArray, n: int = 1) -> Float[Array, "... d"]:
@@ -974,7 +991,7 @@ class TailsCumulantsDataset:
     config: ConfigDict
     data: Dataset
     prior: tfd.Distribution
-    compression_fn: Callable
+    compression_fn: Optional[Callable[[Array, Array], Array]]
     results_dir: str
 
     def __init__(
@@ -998,10 +1015,11 @@ class TailsCumulantsDataset:
 
         self.prior = get_prior(config, self.data) # Possibly not equal to Quijote prior
 
-        key = jr.key(config.seed)
-        self.compression_fn = get_compression_fn(
-            key, self.config, self.data, results_dir=results_dir
-        )
+        # key = jr.key(config.seed)
+        # self.compression_fn = get_compression_fn(
+        #     key, self.config, self.data, results_dir=results_dir
+        # )
+        self.compression_fn = None
 
         self.results_dir = results_dir
 
@@ -1033,6 +1051,13 @@ class TailsCumulantsDataset:
         return P
 
     def get_compression_fn(self):
+        if self.compression_fn is None:
+            key = jr.key(self.config.seed)
+            fn = get_compression_fn(
+                key, self.config, self.data, results_dir=self.results_dir
+            )
+            assert callable(fn), "Compression function returned is not callable"
+            self.compression_fn = fn
         return self.compression_fn
 
     def get_datavector(self, key: PRNGKeyArray, n: int = 1) -> Float[Array, "... d"]:

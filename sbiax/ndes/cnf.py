@@ -70,6 +70,19 @@ def _log_prob_approx(
     # Trace estimator
     (z_dfdy,) = f_vjp(z)
     logp = jnp.sum(z_dfdy * z)
+
+    # # Expectation over multiple eps
+    # if eps.ndim == len((1,) + tuple(data_shape)):
+    #     (eps_dfdy,) = jax.vmap(f_vjp)(eps.reshape(len(eps), -1))
+    #     # Expectation would be mean over this for all eps
+    #     logps = jax.vmap(
+    #         lambda eps_dfdy, eps: jnp.sum(eps_dfdy * eps.flatten())
+    #     )(eps_dfdy, eps)
+    #     logp = logps.mean(axis=0)
+    # else:
+    #     (eps_dfdy,) = f_vjp(eps.flatten())
+    #     logp = jnp.sum(eps_dfdy * eps.flatten())
+
     return f, logp
 
 
@@ -283,6 +296,45 @@ class ConcatSquash(eqx.Module):
         v = self.dropout1(self.lin1(x) * jax.nn.sigmoid(self.lin2(ty)), key=keys[0])
         u = self.dropout2(self.lin3(ty), key=keys[1])
         return v + u
+
+
+class TimeConditionedResBlock(eqx.Module):
+    in_features: int
+    out_features: int
+    hidden_features: int
+    fc1: eqx.nn.Linear
+    fc2: eqx.nn.Linear
+    # t_proj: eqx.nn.Linear
+    # activation: callable = jax.nn.tanh
+
+    def __init__(self, in_features, hidden_features, key):
+        k1, k2, k3 = jr.split(key, 3)
+        self.fc1 = eqx.nn.Linear(in_features, hidden_features, key=k1)
+        self.fc2 = eqx.nn.Linear(hidden_features, in_features, key=k2)
+        # self.t_proj = eqx.nn.Linear(1, hidden_features, key=k3)
+        self.in_features = in_features
+        self.out_features = in_features
+        self.hidden_features = hidden_features
+
+    def __call__(self, y, t_embed):
+        # t_embed = self.t_proj(t)
+        h = jax.nn.tanh(self.fc1(y) + t_embed)
+        out = self.fc2(h)
+        return y + out  # residual connection
+
+class BlockResNet(eqx.Module):
+    blocks: list
+
+    def __init__(self, num_blocks, in_features, hidden_features, key):
+        keys = jr.split(key, num_blocks)
+        self.blocks = [
+            TimeConditionedResBlock(in_features, hidden_features, k) for k in keys
+        ]
+
+    def __call__(self, y, t):
+        for block in self.blocks:
+            y = block(y, t)
+        return y
 
 
 class CNF(eqx.Module):
@@ -568,6 +620,11 @@ class CNF(eqx.Module):
             eps = None
         else:
             eps = jr.normal(key_eps, (self.x_dim,))
+            # if n_eps is not None:
+            #     eps_shape = (n_eps,) + x.shape 
+            # else:
+            #     eps_shape = x.shape
+            # eps = jr.normal(key_eps, eps_shape)
 
         # Add Hutchinson estimator noise samples
         args = (eps,) + args

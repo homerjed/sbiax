@@ -152,7 +152,7 @@ def get_z_config_and_datavector(
         datavectors = datavectors[jnp.newaxis, :] # Add axis for vmapping...
 
     # Compressed datavectors at fiducial parameters
-    x_ = jax.vmap(cumulants_dataset.compression_fn, in_axes=(0, None))(datavectors, cumulants_dataset.data.alpha) 
+    x_ = jax.vmap(cumulants_dataset.get_compression_fn(), in_axes=(0, None))(datavectors, cumulants_dataset.data.alpha) 
 
     # Get NDEs
     ndes = get_ndes_from_config(
@@ -236,7 +236,7 @@ def get_z_config_and_datavector(
 
         logger.debug("datavector {} \n {}".format(datavector.shape, datavector))
 
-        _x_ = jax.vmap(cumulants_dataset.compression_fn, in_axes=(0, None))(datavector, cumulants_dataset.data.alpha)
+        _x_ = jax.vmap(cumulants_dataset.get_compression_fn(), in_axes=(0, None))(datavector, cumulants_dataset.data.alpha)
 
         logger.debug("compressed datavector {} \n {} {}".format(x_.shape, _x_, cumulants_dataset.data.alpha))
 
@@ -950,7 +950,7 @@ if __name__ == "__main__":
                     multi_z_args.n_linear_sims if multi_z_args.linearised else 2000, 
                     multi_z_args.n_linear_sims if multi_z_args.pre_train else None,
                     "[{}]".format(", ".join(map(str, multi_z_args.scales))),
-                    "[{}]".format(", ".join(map(str, [cumulant_names[_] for _ in multi_z_args.order_idx])))
+                    "[{}]".format(", ".join(map(str, [get_cumulant_names()[_] for _ in multi_z_args.order_idx])))
                 ),
             multialignment='center'
         )

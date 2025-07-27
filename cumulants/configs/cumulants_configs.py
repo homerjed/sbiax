@@ -51,10 +51,10 @@ DEFAULT_CNF_ARCH = dict(
 HP_OPT_CNF_ARCH = dict(
     model_type       = "cnf",
     width_size       = 32,
-    depth            = 0,
+    depth            = 0, #2, # 0
     activation       = "tanh",
     dropout_rate     = 0.,
-    dt               = 0.12,
+    dt               = 0.1, #0.12,
     t1               = 1.,
     solver           = "Heun",
     exact_log_prob   = True,
@@ -78,15 +78,15 @@ HP_OPT_OPT_MAF = dict(
     n_batch          = 80, #100,
     patience         = 300, #70,
     lr               = 0.000489390761268084, #1e-3,
-    opt              = "adam",
-    opt_kwargs       = {}
+    opt              = "adamw",
+    opt_kwargs       = {"weight_decay": 1e-4}
 )
 
 HP_OPT_OPT_CNF = dict(
     start_step       = 0,
     n_epochs         = 10_000,
     n_batch          = 70, 
-    patience         = 250, #190, 
+    patience         = 500, #250, #190, 
     lr               = 0.00013408396337403455,
     opt              = "lion",
     opt_kwargs       = {}
@@ -189,6 +189,44 @@ def default_posterior_sampling(config, no_config=False):
     return config
 
 
+def get_config_nn(config: ConfigDict, bulk_or_tails: str) -> ConfigDict:
+
+    config.nn = nn = ConfigDict()
+    nn.train = train = ConfigDict()
+
+    if bulk_or_tails == "bulk":
+        nn.width_size        = 256 # 32
+        nn.depth             = 2 # 3
+        nn.activation        = "tanh"
+        nn.use_final_bias    = False
+        nn.n_ensemble        = 1 
+        nn.use_pca           = False
+
+        train.opt            = "adamw"
+        train.lr             = 1e-3
+        train.n_batch        = None # Batch dataset or not
+        train.patience       = 6_000 # 3000
+        train.n_steps        = 200_000
+        train.valid_fraction = 0.1
+
+    if bulk_or_tails == "tails":
+        nn.width_size        = 256 # 32
+        nn.depth             = 2 # 3
+        nn.activation        = "tanh"
+        nn.use_final_bias    = False
+        nn.n_ensemble        = 1 
+        nn.use_pca           = False
+
+        train.opt            = "adamw"
+        train.lr             = 1e-3
+        train.n_batch        = None # Batch dataset or not
+        train.patience       = 8_000 # 3000
+        train.n_steps        = 200_000
+        train.valid_fraction = 0.1
+    
+    return config
+
+
 def default_cumulants_configuration(
     config,
     redshift: float = 0., 
@@ -269,6 +307,9 @@ def cumulants_config(
         pre_train=pre_train
     )
 
+    if compression in ["nn", "nn-lbfgs"]:
+        config = get_config_nn(config, bulk_or_tails="tails")
+
     config = default_cut_configuration(config, bulk_or_tails="tails")
 
     config.use_planck         = use_planck
@@ -321,6 +362,9 @@ def arch_search_cumulants_config( # Copy of the above config for architecture se
         pre_train=pre_train
     )
 
+    if compression in ["nn", "nn-lbfgs"]:
+        config = get_config_nn(config, bulk_or_tails="tails")
+
     config = default_cut_configuration(config, bulk_or_tails="tails")
 
     config.use_planck         = use_planck
@@ -372,6 +416,9 @@ def bulk_cumulants_config(
         n_linear_sims=n_linear_sims,
         pre_train=pre_train
     )
+
+    if compression in ["nn", "nn-lbfgs"]:
+        config = get_config_nn(config, bulk_or_tails="bulk")
 
     config = default_cut_configuration(config, bulk_or_tails="bulk")
 

@@ -1,11 +1,14 @@
 import os 
+import time
 import argparse
 from typing import Literal, Callable
 import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
+import jax.random as jr
 import equinox as eqx
 import numpy as np
+from scipy.stats import chi2
 from ml_collections import ConfigDict
 from chainconsumer import Chain, ChainConsumer, Truth
 
@@ -91,10 +94,12 @@ def get_dataset_and_config(
     if bulk_or_tails == "tails":
         if USE_QUIJOTE_TAILS:
             logger.info("NOTE:\n\tusing Quijote data for full-shape dataset.")
+            print("NOTE:\n\tusing Quijote data for full-shape dataset.")
 
             dataset_constructor = CumulantsDataset
         else:
             logger.info("NOTE:\n\tusing calculations for full-shape dataset.")
+            print("NOTE:\n\tusing calculations for full-shape dataset.")
 
             dataset_constructor = TailsCumulantsDataset 
 
@@ -141,6 +146,86 @@ def get_datasets(args: argparse.Namespace) -> tuple[ConfigDict, Dataset, dict[st
     # Config and dataset being used in the experiment
     config = configs[args.bulk_or_tails]
     dataset = datasets[args.bulk_or_tails]
+
+    # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+    fig, axs = plt.subplots(1, 3, figsize=(12., 4.))
+
+    for ax, _dataset in zip(axs, datasets.values()):
+
+        color = dict(bulk="b", tails="r", bulk_pdf="g")[_dataset.data.name]
+
+        empirical_mean = np.mean(_dataset.data.fiducial_data, axis=0)
+
+        k = _dataset.data.fiducial_data.shape[-1]
+
+        # Compute Mahalanobis distances squared (chi2 values)
+        mahalanobis_sq = np.array([
+            (x - empirical_mean) @ _dataset.data.Cinv @ (x - empirical_mean)
+            for x in _dataset.data.fiducial_data
+        ])
+
+        # Plot histogram of measured chi2 values
+        bins = np.linspace(0., np.max(mahalanobis_sq), 50)
+        ax.hist(
+            mahalanobis_sq, 
+            bins=bins, 
+            density=True, 
+            alpha=0.3, 
+            # histtype="step",
+            color=color,
+            label=_dataset.data.name
+        )
+
+        key = jr.key(int(time.time()))
+        linearised_data = jr.multivariate_normal(
+            key, 
+            empirical_mean, 
+            _dataset.data.C, 
+            shape=(len(_dataset.data.fiducial_data),)
+        )
+    
+        # Compute Mahalanobis distances squared (chi2 values)
+        mahalanobis_sq = np.array([
+            (x - empirical_mean) @ _dataset.data.Cinv @ (x - empirical_mean)
+            for x in linearised_data
+        ])
+
+        # Plot histogram of measured chi2 values
+        bins = np.linspace(0., np.max(mahalanobis_sq), 50)
+        ax.hist(
+            mahalanobis_sq, 
+            bins=bins, 
+            density=True, 
+            # alpha=0.3, 
+            histtype="step",
+            color="k",
+            label=_dataset.data.name + " [linearised]"
+        )
+
+        ax.axvline(k, linestyle="--", color="k", label="d.o.f.={}".format(k))
+
+        # Plot theoretical chi2 PDF
+        x = np.linspace(0., np.max(mahalanobis_sq), 1000)
+        ax.plot(
+            x, 
+            chi2.pdf(x, df=k),
+            color + '--', 
+            label=r"$\chi^2$ (d.o.f.={})".format(k)
+        )
+
+        ax.legend(frameon=False)
+
+    linearised_str = "linearised" if config.linearised else "non-linear"
+
+    plt.suptitle(r"$\chi^2$ [{}]".format(linearised_str))
+    plt.tight_layout()
+    plt.savefig(os.path.join(log_figs_dir, "chi2_tests_{}.png".format(linearised_str)))
+    plt.close()
+
+    print("SAVED Chi2 at:", os.path.join(log_figs_dir, "chi2_tests_{}.png".format(linearised_str)))
+
+    # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
     logger.info("MAIN DATASET:{} (requested: {})".format(dataset.data.name, args.bulk_or_tails))
 
@@ -338,7 +423,7 @@ def plot_summaries(X, P, dataset, results_dir=None):
         Chain(
             samples=make_df(P, parameter_strings=dataset.parameter_strings), 
             name="Params", 
-            color="blue", 
+            color="k", 
             plot_cloud=True, 
             plot_contour=False
         )
@@ -347,7 +432,7 @@ def plot_summaries(X, P, dataset, results_dir=None):
         Chain(
             samples=make_df(X, parameter_strings=dataset.parameter_strings), 
             name="Summaries", 
-            color="red", 
+            color="red" if dataset.name == "tails" else "blue", 
             plot_cloud=True, 
             plot_contour=False
         )
@@ -366,18 +451,24 @@ def plot_summaries(X, P, dataset, results_dir=None):
     # c.set_plot_config(plot_config)
     fig = c.plotter.plot()
     if results_dir is not None:
-        plt.savefig(os.path.join(results_dir, "params.pdf")) 
+        plt.savefig(os.path.join(results_dir, "params.png")) 
         plt.close()
     else:
         plt.show()
 
     # Scatter plot
     fig, axs = plt.subplots(1, dataset.alpha.size, figsize=(2. + 2. * dataset.alpha.size, 2.5))
+    l = np.linspace(-2., 2., 1000)
     for p, ax in enumerate(axs):
-        ax.scatter(dataset.parameters[:, p], X[:, p], s=0.1)
+        Finv_std = jnp.sqrt(dataset.Finv[p, p])
+
+        ax.scatter(dataset.parameters[:, p], X[:, p], s=0.1, color="red" if dataset.name == "tails" else "blue")
         ax.axline((0, 0), slope=1., color="k", linestyle="--")
+        ax.fill_between(l, l - Finv_std, l + Finv_std, color="gray", alpha=0.3, label=r"±$F^{-1}_{\pi}")
+
         ax.set_xlim(dataset.lower[p], dataset.upper[p])
         ax.set_ylim(dataset.lower[p], dataset.upper[p])
+
         ax.set_xlabel(dataset.parameter_strings[p])
         ax.set_ylabel(dataset.parameter_strings[p] + "'")
 
@@ -446,7 +537,30 @@ def plot_summaries_fiducial(X, X_, alpha, dataset, results_dir=None, Finv=None):
     # c.set_plot_config(plot_config)
     fig = c.plotter.plot()
     if results_dir is not None:
-        plt.savefig(os.path.join(results_dir, "fiducial_params.pdf")) 
+        plt.savefig(os.path.join(results_dir, "fiducial_params.png")) 
+        plt.close()
+    else:
+        plt.show()
+
+    # Scatter plot
+    fig, axs = plt.subplots(1, dataset.alpha.size, figsize=(2. + 2. * dataset.alpha.size, 2.5))
+    tiled_alpha = np.tile(alpha[np.newaxis, :], (len(X), 1))
+    l = np.linspace(-2., 2., 1000)
+    for p, ax in enumerate(axs):
+        Finv_std = jnp.sqrt(dataset.Finv[p, p])
+
+        ax.scatter(tiled_alpha[:, p], X[:, p], s=0.1, color="red" if dataset.name == "tails" else "blue")
+        ax.axline((0, 0), slope=1., color="k", linestyle="--")
+        ax.fill_between(l, l - Finv_std, l + Finv_std, color="gray", alpha=0.3, label=r"±$F^{-1}_{\pi}")
+
+        ax.set_xlim(dataset.lower[p], dataset.upper[p])
+        ax.set_ylim(dataset.lower[p], dataset.upper[p])
+
+        ax.set_xlabel(dataset.parameter_strings[p])
+        ax.set_ylabel(dataset.parameter_strings[p] + "'")
+
+    if results_dir is not None:
+        plt.savefig(os.path.join(results_dir, "scatter_fiducial.png"))
         plt.close()
     else:
         plt.show()
@@ -505,7 +619,7 @@ def plot_fisher_summaries(X, P, dataset, results_dir=None):
         Truth(location=dict(zip(dataset.parameter_strings, dataset.alpha)), name=r"$\pi^0$")
     )
     fig = c.plotter.plot()
-    plt.savefig(os.path.join(results_dir, "fisher_params.pdf"))
+    plt.savefig(os.path.join(results_dir, "fisher_params.png"))
     plt.close()
 
     fig, axs = plt.subplots(1, dataset.alpha.size, figsize=(2. * dataset.alpha.size, 2.))

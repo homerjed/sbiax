@@ -27,7 +27,7 @@ RUN_FROZEN=false
 USE_PLANCK=false
 
 DEFAULT_NDE_TYPE="CNF"
-DEFAULT_N_NDES=1
+DEFAULT_N_NDES=3
 
 FORCE_NOISELESS_DATAVECTOR=false
 USE_QUIJOTE_TAILS=false # Use tails datavectors measured, not calculated, from Quijote
@@ -35,6 +35,8 @@ FIDUCIAL_REDUCE=true # Reduce cumulants with fiducial variances
 USE_SCALERS=true # Not implemented yet
 
 DEFAULT_RESOLUTION=1024
+
+COMPRESSION="nn"
 
 # Running a test single run or not
 if [[ "$SINGLE_RUN" == "true" ]]; then
@@ -48,7 +50,7 @@ if [[ "$SINGLE_RUN" == "true" ]]; then
     RUN_FROZEN=false
 else
     echo "MULTIPLE SEEDS RUN."
-    N_SEEDS=30
+    N_SEEDS=50
     START_SEED=0
     N_SEEDS_GLOBAL=10   # Number of repeated trainings for SBI
     END_SEED=$(( $START_SEED + $N_SEEDS - 1 ))
@@ -273,7 +275,7 @@ for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
                         sbi_cmd="\
 python cumulants_sbi.py \
 --seed $global_seed \
---compression linear \
+--compression $COMPRESSION \
 $LINEARISED_FLAG \
 $PRETRAIN_FLAG \
 --n_linear_sims $N_LINEAR_SIMS \
@@ -356,7 +358,7 @@ python cumulants_multi_z.py \
 --seed $global_seed \
 --seed_datavector \$SLURM_ARRAY_TASK_ID \
 --n_datavectors $N_DATAVECTORS \
---compression linear \
+--compression $COMPRESSION \
 $LINEARISED_FLAG \
 $PRETRAIN_FLAG \
 --n_linear_sims $N_LINEAR_SIMS \
@@ -437,7 +439,7 @@ python figure_one.py \
 --seed_datavector \$SLURM_ARRAY_TASK_ID \
 --n_datavectors $N_DATAVECTORS \
 --n_linear_sims $N_LINEAR_SIMS \
---compression linear \
+--compression $COMPRESSION \
 $LINEARISED_FLAG \
 $PRETRAIN_FLAG \
 --order_idx "$order_idx_args" \
@@ -587,7 +589,7 @@ echo "Running final figure two script"
 
 python figure_two.py \
 --n_datavectors $N_DATAVECTORS \
---compression linear \
+--compression $COMPRESSION \
 --n_linear_sims $N_LINEAR_SIMS \
 --order_idx $order_idx_args \
 --scales $scale_args \
