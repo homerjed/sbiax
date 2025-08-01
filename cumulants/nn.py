@@ -1,16 +1,10 @@
-from typing import Tuple, Optional, Sequence, Callable
+from typing import Optional, Callable
 import jax
-import jax.numpy as jnp
 import jax.random as jr
-from jax.sharding import NamedSharding, PositionalSharding
 import equinox as eqx
-from jaxtyping import PRNGKeyArray, Array, Float, jaxtyped
+from jaxtyping import Array, jaxtyped
 from beartype import beartype as typechecker
-import optax
-import numpy as np 
-from tqdm.auto import trange
-
-from configs import DatasetClass
+import numpy as np
 
 typecheck = jaxtyped(typechecker=typechecker)
 
@@ -289,19 +283,46 @@ if __name__ == "__main__":
             plot_contour=False
         )
     )
+    # c.add_chain(
+    #     Chain.from_covariance(
+    #         cumulants_dataset.data.alpha,
+    #         cumulants_dataset.data.Finv,
+    #         columns=cumulants_dataset.get_parameter_strings(),
+    #         name=r"$F_{\Sigma^{-1}}$",
+    #         color="k",
+    #         linestyle=":",
+    #         shade_alpha=0.
+    #     )
+    # )
+    c.add_truth(
+        Truth(
+            location=dict(
+                zip(cumulants_dataset.get_parameter_strings(), 
+                    cumulants_dataset.data.alpha)),
+            name=r"$\pi^0$"
+        )
+    )
+    fisher_samples = np.random.multivariate_normal(
+        cumulants_dataset.data.alpha, cumulants_dataset.data.Finv, (20_000,) 
+    ) 
+    fisher_samples_log_prob = jax.scipy.stats.multivariate_normal.logpdf(
+        fisher_samples, 
+        cumulants_dataset.data.alpha, 
+        cumulants_dataset.data.Finv
+    )
+    fisher_df = make_df(
+        np.clip(fisher_samples, cumulants_dataset.data.lower, cumulants_dataset.data.upper),
+        # samples_log_prob, 
+        parameter_strings=cumulants_dataset.get_parameter_strings()
+    )
     c.add_chain(
-        Chain.from_covariance(
-            cumulants_dataset.data.alpha,
-            cumulants_dataset.data.Finv,
-            columns=cumulants_dataset.get_parameter_strings(),
-            name=r"$F_{\Sigma^{-1}}$",
-            color="k",
+        Chain(
+            samples=fisher_df,
+            name=r"$F_{\Sigma^{-1}}$" + " {}".format("clipped"),
+            color="g",
             linestyle=":",
             shade_alpha=0.
         )
-    )
-    c.add_truth(
-        Truth(location=dict(zip(cumulants_dataset.get_parameter_strings(), cumulants_dataset.data.alpha)), name=r"$\pi^0$")
     )
 
     fig = c.plotter.plot()

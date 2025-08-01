@@ -6,7 +6,7 @@
 #   so that 
 
 # --- Config ---
-RESULTS_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/results_tuesday/" # Base save directory for all results
+RESULTS_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/results/" # Base save directory for all results
 
 STUDY_NAME="arch_para"
 N_JOBS=10
@@ -14,10 +14,19 @@ N_GB=8
 N_CPU=8
 N_LINEAR_SIMS=10_000 
 PARTITION="inter"
-LINEAR_ONLY=true
+LINEAR_ONLY=true # Test NDE or NN on large linearised independent test set
 FREEZE_FLAG="--no-freeze-parameters"
 NDE_TYPE="MAF"
 USE_PLANCK=false
+
+COMPRESSION="nn"
+
+# If requested compression is with a NN, turn arch search onto NN hyperparameters
+if [ "$COMPRESSION" == "nn" ]; then
+    TEST_COMPRESSION_NN="True"
+else
+    TEST_COMPRESSION_NN="False"
+fi
 
 TIMESTAMP=$(date +'%m%d_%H%M')
 
@@ -101,6 +110,7 @@ export RESULTS_DIR=$RESULTS_DIR
 export DEFAULT_NDE_TYPE=$NDE_TYPE 
 export DEFAULT_NDE_TYPE=$NDE_TYPE 
 export DEFAULT_N_NDES=1
+export TEST_COMPRESSION_NN=$TEST_COMPRESSION_NN
 
 python arch_search_slurm.py \
 --seed 0 \

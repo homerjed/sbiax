@@ -53,6 +53,7 @@ TEST = True if os.environ.get('TEST', '').lower() in ('1', 'true') else False
 
 # Implies no datestamping for dirs (so everything writes so same storage)
 RUNNING_MULTIPLE_SLURM_JOBS = True if os.environ.get('MULTI_SLURM', '').lower() in ('1', 'true') else False 
+TEST_COMPRESSION_NN = True if os.environ.get('TEST_COMPRESSION_NN', '').lower() in ('1', 'true') else False 
 
 
 def date_stamp():
@@ -96,7 +97,8 @@ def objective(
     n_repeats: Optional[int] = None, # Number of cross valiation repeats, if None then no cross-validation
     use_independent_test_set: bool = False,
     n_test_sims: int = 20_000,
-    show_tqdm: bool = False
+    show_tqdm: bool = False,
+    test_compression_nn: bool = False
 ) -> Array:
     
     jax.clear_caches()
@@ -109,6 +111,9 @@ def objective(
     print("LINEARISED:", args.linearised)
     print("TRIAL NUMBER", trial.number)
 
+    if test_compression_nn:
+        assert config.compression == "nn"
+
     """
         Config
     """
@@ -119,7 +124,9 @@ def objective(
     config.seed = seed
 
     # Set config attributes based on these hyperparameters
-    config = get_trial_hyperparameters(trial, config)
+    config = get_trial_hyperparameters(
+        trial, config, test_compression_nn=test_compression_nn
+    )
 
     key = jr.key(int(trial.number)) 
 
@@ -143,12 +150,11 @@ def objective(
 
     dataset: Dataset = cumulants_dataset.data
 
+    # Get indepedendent test set, summarize later (to run only one NN training)
     if use_independent_test_set:
         D_lin_test, Y_lin_test = get_linearised_data(
             config, dataset, n_linear_sims=n_test_sims
         )
-        # Indepedendent test set and summaries
-        X_lin_test = jax.vmap(cumulants_dataset.compression_fn)(D_lin_test, Y_lin_test)
 
     parameter_prior: Distribution = cumulants_dataset.prior
 
@@ -168,9 +174,117 @@ def objective(
             Compression
         """
 
-        compression_fn = cumulants_dataset.compression_fn
+        compression_fn = cumulants_dataset.get_compression_fn()
 
         X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
+
+        if test_compression_nn:
+
+            # X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
+
+            X_lin_test = jax.vmap(compression_fn)(D_lin_test, Y_lin_test)
+
+            mean_score = jnp.mean(jnp.sum(jnp.square(jnp.subtract(X_lin_test, Y_lin_test)))).item()
+
+            # Not repeating NN training for now, so 
+            # trial.report(mean_score, int(np.mean(losses_lengths))) # Mean score and average length of trainings
+
+            # Corner plot of summaries
+            c = ChainConsumer()
+            c.add_chain(
+                Chain(
+                    samples=make_df(
+                        cumulants_dataset.data.parameters, 
+                        parameter_strings=cumulants_dataset.get_parameter_strings()
+                    ), 
+                    name="Params", 
+                    color="blue", 
+                    plot_cloud=True, 
+                    plot_contour=False
+                )
+            )
+            c.add_chain(
+                Chain(
+                    samples=make_df(X, parameter_strings=cumulants_dataset.get_parameter_strings()), 
+                    name="Summaries", 
+                    color="red", 
+                    plot_cloud=True, 
+                    plot_contour=False
+                )
+            )
+            c.add_truth(
+                Truth(location=dict(zip(cumulants_dataset.get_parameter_strings(), cumulants_dataset.data.alpha)), name=r"$\pi^0$")
+            )
+
+            fig = c.plotter.plot()
+            plt.savefig(os.path.join(results_dir, "nn_params.png")) 
+            plt.close()
+
+            # Scatter plot
+            fig, axs = plt.subplots(1, cumulants_dataset.data.alpha.size, figsize=(2. + 2. * cumulants_dataset.data.alpha.size, 2.5))
+            for p, ax in enumerate(axs):
+                ax.scatter(cumulants_dataset.data.parameters[:, p], X[:, p], s=0.1)
+                ax.axline((0, 0), slope=1., color="k", linestyle="--")
+                ax.set_xlim(cumulants_dataset.data.lower[p], cumulants_dataset.data.upper[p])
+                ax.set_ylim(cumulants_dataset.data.lower[p], cumulants_dataset.data.upper[p])
+                ax.set_xlabel(cumulants_dataset.get_parameter_strings()[p])
+                ax.set_ylabel(cumulants_dataset.get_parameter_strings()[p] + "'")
+
+            plt.tight_layout()
+            plt.savefig(os.path.join(results_dir, "nn_scatter.png"), bbox_inches="tight")
+            plt.close()
+
+            # NOTE: parameters ignored here
+            X = jax.vmap(compression_fn, in_axes=(0, None))(
+                cumulants_dataset.data.fiducial_data, 
+                cumulants_dataset.data.alpha
+            )
+
+            # Corner plot of summaries
+            c = ChainConsumer()
+            c.add_chain(
+                Chain(
+                    samples=make_df(
+                        cumulants_dataset.data.parameters, 
+                        parameter_strings=cumulants_dataset.get_parameter_strings()
+                    ), 
+                    name="Params", 
+                    color="blue", 
+                    plot_cloud=True, 
+                    plot_contour=False
+                )
+            )
+            c.add_chain(
+                Chain(
+                    samples=make_df(X, parameter_strings=cumulants_dataset.get_parameter_strings()), 
+                    name="Summaries", 
+                    color="red", 
+                    plot_cloud=True, 
+                    plot_contour=False
+                )
+            )
+            c.add_chain(
+                Chain.from_covariance(
+                    cumulants_dataset.data.alpha,
+                    cumulants_dataset.data.Finv,
+                    columns=cumulants_dataset.get_parameter_strings(),
+                    name=r"$F_{\Sigma^{-1}}$",
+                    color="k",
+                    linestyle=":",
+                    shade_alpha=0.
+                )
+            )
+            c.add_truth(
+                Truth(location=dict(zip(cumulants_dataset.get_parameter_strings(), cumulants_dataset.data.alpha)), name=r"$\pi^0$")
+            )
+
+            fig = c.plotter.plot()
+            plt.savefig(os.path.join(results_dir, "nn_params_fiducial.png")) 
+            plt.close()
+
+            print("FIGURE SAVED AT:\n\t", os.path.join(results_dir, "nn_params_fiducial.png")))
+
+            return mean_score # Assuming one NDE!
 
         """
             Build NDEs
@@ -462,11 +576,9 @@ def objective(
         plt.savefig(os.path.join(posteriors_dir, "posterior_affine.pdf"))
         plt.close()
 
-        # %%
         # X.min(), X.max()
         # jnp.log(jnp.clip(X, a=1e-5)).min(), jnp.log(jnp.clip(X, a=1e-5)).max()
-
-        # %%
+       
         Om_s8_idx = np.array([0, -1])
         posterior_df = make_df(
             samples[:, Om_s8_idx], 
@@ -522,7 +634,11 @@ def objective(
         if use_independent_test_set and args.linearised:
             print("Validating on independent test set...")
             # Only one NDE for arch search, negative log-likelihood
+
+            X_lin_test = jax.vmap(compression_fn)(D_lin_test, Y_lin_test)
+
             test_loss_fn = lambda x, y: -ensemble.ndes[0].log_prob(x, y, key=None)
+
             score = jnp.mean(jax.vmap(test_loss_fn)(X_lin_test, Y_lin_test)) 
         else:
             print("Validating on validation set...")
@@ -642,56 +758,87 @@ def callback(
     #     print("HYPERPARAMETER PLOT ISSUE:\n\t", e) # Not enough trials to plot yet
 
 
-def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict) -> ConfigDict:
+def get_trial_hyperparameters(trial: optuna.Trial, config: ConfigDict, test_compression_nn: bool = False) -> ConfigDict:
     """
-        Trial hyperparameters for CNF/MAF and training
+        Trial hyperparameters for CNF/MAF and training, decorate the existing config 
+        with the hyperparameters and return it
     """
 
-    model_type = config.ndes[0].model_type # NOTE: important; get the model type being used 
-
-    assert model_type in ["cnf", "maf"], ("Model type {} not allowable".format(model_type))
-
-    # Arrange hyperparameters to optimise for and return to the experiment
-    if model_type == "cnf":
-        model_hyperparameters = {
-            "width" : trial.suggest_int(name="width", low=2, high=6, step=1), # NN width (NOTE: base 2!)
+    # Testing network for compression
+    if test_compression_nn:
+        nn_hyperparameters = {
+            "width_size" : trial.suggest_int(name="width_size", low=2, high=10, step=1), # NN width (NOTE: base 2!)
             "depth" : trial.suggest_int(name="depth", low=0, high=4, step=1), # NN depth
-            "dt" : trial.suggest_float(name="dt", low=0.01, high=0.15, step=0.01), # ODE solver timestep
-            "solver" : trial.suggest_categorical(name="solver", choices=["Euler", "Heun", "Tsit5"]), # ODE solver
             "activation" : trial.suggest_categorical(name="activation", choices=["tanh", "gelu", "leaky_relu", "swish"])
         }
-        config.ndes[0].width_size = 2 ** model_hyperparameters["width"]
-        config.ndes[0].depth = model_hyperparameters["depth"]
-        config.ndes[0].dt = model_hyperparameters["dt"]
-        config.ndes[0].solver = model_hyperparameters["solver"]
+        config.nn.width_size = 2 ** nn_hyperparameters["width_size"]
+        config.nn.depth = nn_hyperparameters["depth"]
+        config.nn.activation = nn_hyperparameters["activation"]
 
-    if model_type == "maf":
-        model_hyperparameters = {
-            "width" : trial.suggest_int(name="width", low=3, high=8, step=1), # Hidden units in NNs (NOTE: base 2!)
-            "depth" : trial.suggest_int(name="depth", low=1, high=10, step=1), # Flow depth
-            "layers" : trial.suggest_int(name="layers", low=1, high=3, step=1), # NN layers
-            "activation" : trial.suggest_categorical(name="activation", choices=["tanh", "gelu", "leaky_relu", "swish"])
+        # Training
+        training_hyperparameters = {
+            # "n_batch" : trial.suggest_int(name="n_batch", low=40, high=100, step=10), 
+            "lr" : trial.suggest_float(name="lr", low=1e-5, high=1e-3, log=True), 
+            "patience" : trial.suggest_int(name="p", low=100, high=20_000, step=100),
+            "opt" : trial.suggest_categorical(name="opt", choices=["adam", "adamw", "adabelief", "lion"])
         }
-        config.ndes[0].width_size = 2 ** model_hyperparameters["width"] 
-        config.ndes[0].n_layers = model_hyperparameters["depth"]
-        config.ndes[0].nn_depth = model_hyperparameters["layers"]
 
-    # Training
-    training_hyperparameters = {
-        "n_batch" : trial.suggest_int(name="n_batch", low=40, high=100, step=10), 
-        "lr" : trial.suggest_float(name="lr", low=1e-5, high=1e-3, log=True), 
-        "patience" : trial.suggest_int(name="p", low=10, high=200, step=10),
-        "opt" : trial.suggest_categorical(name="opt", choices=["adam", "adamw", "adabelief", "lion"])
-    }
+        # Set config parameters explicitly
+        # config.nn.train.n_batch = training_hyperparameters["n_batch"] # No batching of dataset?
+        config.nn.train.lr = training_hyperparameters["lr"]
+        config.nn.train.patience = training_hyperparameters["patience"]
+        config.nn.train.opt = training_hyperparameters["opt"]
 
-    # Set config parameters explicitly
-    config.train.n_batch = training_hyperparameters["n_batch"]
-    config.train.lr = training_hyperparameters["lr"]
-    config.train.patience = training_hyperparameters["patience"]
-    config.train.opt = training_hyperparameters["opt"]
+        hyperparameters = {**nn_hyperparameters, **training_hyperparameters} 
+        print("Hyperparameters:\n", hyperparameters)
 
-    hyperparameters = {**model_hyperparameters, **training_hyperparameters} 
-    print("Hyperparameters:\n", hyperparameters)
+    # Testing NDEs
+    else:
+        model_type = config.ndes[0].model_type # NOTE: important; get the model type being used 
+
+        assert model_type in ["cnf", "maf"], ("Model type {} not allowable".format(model_type))
+
+        # Arrange hyperparameters to optimise for and return to the experiment
+        if model_type == "cnf":
+            model_hyperparameters = {
+                "width" : trial.suggest_int(name="width", low=2, high=6, step=1), # NN width (NOTE: base 2!)
+                "depth" : trial.suggest_int(name="depth", low=0, high=4, step=1), # NN depth
+                "dt" : trial.suggest_float(name="dt", low=0.01, high=0.15, step=0.01), # ODE solver timestep
+                "solver" : trial.suggest_categorical(name="solver", choices=["Euler", "Heun", "Tsit5"]), # ODE solver
+                "activation" : trial.suggest_categorical(name="activation", choices=["tanh", "gelu", "leaky_relu", "swish"])
+            }
+            config.ndes[0].width_size = 2 ** model_hyperparameters["width"]
+            config.ndes[0].depth = model_hyperparameters["depth"]
+            config.ndes[0].dt = model_hyperparameters["dt"]
+            config.ndes[0].solver = model_hyperparameters["solver"]
+
+        if model_type == "maf":
+            model_hyperparameters = {
+                "width" : trial.suggest_int(name="width", low=3, high=8, step=1), # Hidden units in NNs (NOTE: base 2!)
+                "depth" : trial.suggest_int(name="depth", low=1, high=10, step=1), # Flow depth
+                "layers" : trial.suggest_int(name="layers", low=1, high=3, step=1), # NN layers
+                "activation" : trial.suggest_categorical(name="activation", choices=["tanh", "gelu", "leaky_relu", "swish"])
+            }
+            config.ndes[0].width_size = 2 ** model_hyperparameters["width"] 
+            config.ndes[0].n_layers = model_hyperparameters["depth"]
+            config.ndes[0].nn_depth = model_hyperparameters["layers"]
+
+        # Training
+        training_hyperparameters = {
+            "n_batch" : trial.suggest_int(name="n_batch", low=40, high=100, step=10), 
+            "lr" : trial.suggest_float(name="lr", low=1e-5, high=1e-3, log=True), 
+            "patience" : trial.suggest_int(name="p", low=10, high=200, step=10),
+            "opt" : trial.suggest_categorical(name="opt", choices=["adam", "adamw", "adabelief", "lion"])
+        }
+
+        # Set config parameters explicitly
+        config.train.n_batch = training_hyperparameters["n_batch"]
+        config.train.lr = training_hyperparameters["lr"]
+        config.train.patience = training_hyperparameters["patience"]
+        config.train.opt = training_hyperparameters["opt"]
+
+        hyperparameters = {**model_hyperparameters, **training_hyperparameters} 
+        print("Hyperparameters:\n", hyperparameters)
 
     return config
 
@@ -701,6 +848,9 @@ if __name__ == "__main__":
     search_args = get_arch_search_args() # Specification for architecture search
     
     args = get_cumulants_sbi_args() # Don't conflate with arch_search_args 
+
+    if TEST_COMPRESSION_NN:
+        args.compression = "nn"
 
     config = arch_search_cumulants_config(
         seed=0, # Gets replaced in objective!
@@ -776,7 +926,8 @@ if __name__ == "__main__":
         n_repeats=search_args.n_repeats, # 'Cross validation' of trials... doesn't work with pruning
         show_tqdm=False,
         use_independent_test_set=search_args.use_independent_test_set,
-        n_test_sims=search_args.n_test_sims
+        n_test_sims=search_args.n_test_sims,
+        test_compression_nn=TEST_COMPRESSION_NN
     )
 
     callback_fn = partial(

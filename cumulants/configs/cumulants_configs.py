@@ -11,6 +11,7 @@ typecheck = jaxtyped(typechecker=typechecker)
 USE_SCALERS = True #if os.environ.get("USE_SCALERS", "").lower() in ("1", "true") else False 
 DEFAULT_NDE_TYPE = os.environ.get("DEFAULT_NDE_TYPE", None)
 DEFAULT_N_NDES = int(os.environ.get("DEFAULT_N_NDES", 1))
+NON_GAUSSIAN_TEST = True if os.environ.get("NON_GAUSSIAN_TEST", "").lower() in ("1", "true") else False
 
 def exists(v):
     return v is not None
@@ -195,32 +196,40 @@ def get_config_nn(config: ConfigDict, bulk_or_tails: str) -> ConfigDict:
     nn.train = train = ConfigDict()
 
     if bulk_or_tails == "bulk":
-        nn.width_size        = 256 # 32
-        nn.depth             = 2 # 3
+        if NON_GAUSSIAN_TEST:
+            nn.width_size    = 64 #256 # 32
+            nn.depth         = 0 # 3
+        else:
+            nn.width_size    = 256 # 32
+            nn.depth         = 2 # 3
         nn.activation        = "tanh"
-        nn.use_final_bias    = False
+        nn.use_final_bias    = True
         nn.n_ensemble        = 1 
         nn.use_pca           = False
 
         train.opt            = "adamw"
         train.lr             = 1e-3
-        train.n_batch        = None # Batch dataset or not
-        train.patience       = 6_000 # 3000
+        train.n_batch        = 1000 # None # Batch dataset or not
+        train.patience       = 200 # 3000
         train.n_steps        = 200_000
         train.valid_fraction = 0.1
 
     if bulk_or_tails == "tails":
-        nn.width_size        = 256 # 32
-        nn.depth             = 2 # 3
+        if NON_GAUSSIAN_TEST:
+            nn.width_size    = 64
+            nn.depth         = 0 # 3
+        else:
+            nn.width_size    = 256 # 32
+            nn.depth         = 2 # 3
         nn.activation        = "tanh"
-        nn.use_final_bias    = False
+        nn.use_final_bias    = True 
         nn.n_ensemble        = 1 
         nn.use_pca           = False
 
         train.opt            = "adamw"
         train.lr             = 1e-3
         train.n_batch        = None # Batch dataset or not
-        train.patience       = 8_000 # 3000
+        train.patience       = 200 # 3000
         train.n_steps        = 200_000
         train.valid_fraction = 0.1
     

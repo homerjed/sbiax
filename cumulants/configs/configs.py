@@ -21,6 +21,7 @@ logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
 DatasetClass = BulkCumulantsDataset | TailsCumulantsDataset | BulkPDFsDataset | CumulantsDataset
 
+NON_GAUSSIAN_TEST = True if os.environ.get("NON_GAUSSIAN_TEST", "").lower() in ("1", "true") else False
 
 def exists(v):
     return v is not None
@@ -89,6 +90,7 @@ def get_config_subdir(
 
     parts = [
         "arch_search" if arch_search else None,
+        "NON_GAUSSIAN_TEST" if NON_GAUSSIAN_TEST else None,
         "frozen" if args.freeze_parameters else "nonfrozen",
         args.bulk_or_tails,
         "linearised" if args.linearised else "nonlinearised",

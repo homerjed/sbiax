@@ -43,6 +43,7 @@ jax.clear_caches()
 
 logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
+NON_GAUSSIAN_TEST = True if os.environ.get("NON_GAUSSIAN_TEST", "").lower() in ("1", "true") else False
 
 """ 
     Run NLE or NPE SBI with the moments of the 1pt matter PDF.
@@ -528,6 +529,7 @@ if 1:
                 r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
                 + " z={}".format(config.redshift) + "\n"
                 + (" linearised" if config.linearised else " Quijote") + ("[bulk]" if args.bulk_or_tails == "bulk" else "[tails]") + "\n"
+                + (r"[non-Gaussian $\xi_L[\pi]$ test]" if NON_GAUSSIAN_TEST else "") + "\n"
                 + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
                 + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
                 + r"$k_n$ = [{}]".format(
@@ -536,8 +538,8 @@ if 1:
             ),
             multialignment='center'
         )
-        plt.savefig(os.path.join(results_dir, "posterior_affine.png"))
-        plt.savefig(os.path.join(posteriors_dir, "posterior_affine.pdf"))
+        plt.savefig(os.path.join(results_dir, "posterior_affine_{}.png".format("linearised" if config.linearised else "quijote")))
+        plt.savefig(os.path.join(posteriors_dir, "posterior_affine_{}.pdf".format("linearised" if config.linearised else "quijote")))
         plt.close()
 
         target_idx = np.array([0, 4])
@@ -611,6 +613,7 @@ if 1:
                 r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
                 + " z={}".format(config.redshift) + "\n"
                 + (" linearised" if config.linearised else " Quijote") + ("[bulk]" if args.bulk_or_tails == "bulk" else "[tails]") + "\n"
+                + (r"[non-Gaussian $\xi_L[\pi]$ test]" if NON_GAUSSIAN_TEST else "") + "\n"
                 + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
                 + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
                 + r"$k_n$ = [{}]".format(
@@ -619,8 +622,8 @@ if 1:
             ),
             multialignment='center'
         )
-        plt.savefig(os.path.join(results_dir, "posterior_affine_marginalised.png"))
-        plt.savefig(os.path.join(posteriors_dir, "posterior_affine_marginalised.pdf"))
+        plt.savefig(os.path.join(results_dir, "posterior_affine_{}_marginalised.png".format("linearised" if config.linearised else "quijote")))
+        plt.savefig(os.path.join(posteriors_dir, "posterior_affine_{}_marginalised.pdf".format("linearised" if config.linearised else "quijote")))
         plt.close()
     except Exception as e:
         print("~" * 50)
@@ -754,6 +757,7 @@ if 1:
             r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
             + " z={}".format(config.redshift) + "\n"
             + (" linearised" if config.linearised else " Quijote") + ("[bulk]" if args.bulk_or_tails == "bulk" else "[tails]") + "\n"
+            + (r"[non-Gaussian $\xi_L[\pi]$ test]" if NON_GAUSSIAN_TEST else "") + "\n"
             + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
             + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
             + r"$k_n$ = [{}]".format(
@@ -837,6 +841,7 @@ if 1:
             r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
             + " z={}".format(config.redshift) + "\n"
             + (" linearised" if config.linearised else " Quijote") + ("[bulk]" if args.bulk_or_tails == "bulk" else "[tails]") + "\n"
+            + (r"[non-Gaussian $\xi_L[\pi]$ test]" if NON_GAUSSIAN_TEST else "") + "\n"
             + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
             + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
             + r"$k_n$ = [{}]".format(
@@ -848,7 +853,6 @@ if 1:
     plt.savefig(os.path.join(results_dir, "posterior_affine_marginalised_{}.png".format(_ext)))
     plt.savefig(os.path.join(posteriors_dir, "posterior_affine_marginalised_{}.pdf".format(_ext)))
     plt.close()
-
 
     jax.clear_caches()
 
@@ -962,6 +966,7 @@ if 1:
                     r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
                     + " z={}".format(config.redshift) + "\n"
                     + (" linearised" if config.linearised else " Quijote") + ("[bulk]" if args.bulk_or_tails == "bulk" else "[tails]") + "\n"
+                    + (r"[non-Gaussian $\xi_L[\pi]$ test]" if NON_GAUSSIAN_TEST else "") + "\n"
                     + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
                     + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
                     + r"$k_n$ = [{}]".format(
@@ -974,6 +979,110 @@ if 1:
             plt.savefig(os.path.join(posteriors_dir, "posterior_affine_nde={}.pdf".format(ensemble.ndes.index(nde))))
             plt.close()
 
+    """
+        Additional plot with clipped Fisher
+    """
+
+    c = ChainConsumer()
+
+    fisher_samples = np.random.multivariate_normal(
+        dataset.alpha, datasets["tails"].data.Finv, (20_000,) 
+    ) 
+    fisher_samples_log_prob = jax.scipy.stats.multivariate_normal.logpdf(
+        fisher_samples, dataset.alpha, datasets["tails"].data.Finv
+    )
+    fisher_df = make_df(
+        np.clip(fisher_samples, dataset.lower, dataset.upper),
+        # samples_log_prob, 
+        parameter_strings=dataset.parameter_strings
+    )
+    c.add_chain(
+        Chain(
+            samples=fisher_df,
+            name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[tails]"),
+            color="r",
+            linestyle=":",
+            shade_alpha=0.
+        )
+    )
+
+    fisher_samples = np.random.multivariate_normal(
+        dataset.alpha, datasets["bulk"].data.Finv, (20_000,) 
+    ) 
+    fisher_samples_log_prob = jax.scipy.stats.multivariate_normal.logpdf(
+        fisher_samples, dataset.alpha, datasets["bulk"].data.Finv
+    )
+    fisher_df = make_df(
+        np.clip(fisher_samples, dataset.lower, dataset.upper),
+        # samples_log_prob, 
+        parameter_strings=dataset.parameter_strings
+    )
+    c.add_chain(
+        Chain(
+            samples=fisher_df,
+            name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[bulk]"),
+            color="b",
+            linestyle=":",
+            shade_alpha=0.
+        )
+    )
+
+    fisher_samples = np.random.multivariate_normal(
+        dataset.alpha, datasets["bulk_pdf"].data.Finv, (20_000,) 
+    ) 
+    fisher_samples_log_prob = jax.scipy.stats.multivariate_normal.logpdf(
+        fisher_samples, dataset.alpha, datasets["bulk_pdf"].data.Finv
+    )
+    fisher_df = make_df(
+        np.clip(fisher_samples, dataset.lower, dataset.upper),
+        # samples_log_prob, 
+        parameter_strings=dataset.parameter_strings
+    )
+    c.add_chain(
+        Chain(
+            samples=fisher_df,
+            name=r"$F_{\Sigma^{-1}}$" + " {}".format("$k_n$[bulk PDF]"),
+            color="g",
+            linestyle=":",
+            shade_alpha=0.
+        )
+    )
+
+    c.add_chain(
+        Chain(
+            samples=posterior_df, 
+            name="SBI[{}]".format(args.bulk_or_tails), 
+            color="r" if args.bulk_or_tails == "tails" else "b"
+        )
+    )
+    c.add_marker(
+        location=marker(x_, parameter_strings=dataset.parameter_strings),
+        name=r"$\hat{x}$", 
+        color="r" if args.bulk_or_tails == "tails" else "b"
+    )
+    c.add_marker(
+        location=marker(dataset.alpha, parameter_strings=dataset.parameter_strings),
+        name=r"$\alpha$", 
+        color="k"
+    )
+    fig = c.plotter.plot()
+    fig.suptitle(
+        (
+            r"$k_n$ SBI & $F_{{\Sigma}}^{{-1}}$"
+            + " z={}".format(config.redshift) + "\n"
+            + (" linearised" if config.linearised else " Quijote") + ("[bulk]" if args.bulk_or_tails == "bulk" else "[tails]") + "\n"
+            + (r"[non-Gaussian $\xi_L[\pi]$ test]" if NON_GAUSSIAN_TEST else "") + "\n"
+            + r"$n_s$ = {}".format(config.n_linear_sims if config.linearised else 2000) + "\n"
+            + r"$R$ = [{}] Mpc".format(", ".join(map(str, config.scales))) + "\n"
+            + r"$k_n$ = [{}]".format(
+                ", ".join([get_cumulant_names()[_] for _ in config.order_idx])
+            )
+        ),
+        multialignment='center'
+    )
+    plt.savefig(os.path.join(results_dir, "posterior_affine_{}_clipped.png".format(_ext)))
+    plt.savefig(os.path.join(posteriors_dir, "posterior_affine_{}_clipped.pdf".format(_ext)))
+    plt.close()
 
 
 
@@ -1096,3 +1205,22 @@ print("Time={:.1} mins.".format((time.time() - t0) / 60.))
 # print(jax.tree.map(lambda x: x.shape, eqx.filter(ensemble, eqx.is_array)))
 
 ################################
+
+
+# from dataclasses import replace
+
+# # Non-Gaussian noise with linearised model realisations
+# def non_gaussian_linear_model(pi, ix):
+#     # `ix` is an index into the fiducial_data
+#     mu = jnp.mean(dataset.fiducial_data, axis=0)
+#     dmu = jnp.mean(dataset.derivatives, axis=0)
+#     n_s = dataset.fiducial_data.shape[0]
+
+#     def linear_model(pi):
+#         return mu + jnp.dot(pi - dataset.alpha, dmu)
+
+#     return linear_model(pi) + (dataset.fiducial_data[ix] - mu) * (n_s / (n_s - 1))
+
+# data = jax.vmap(non_gaussian_linear_model)(dataset.parameters, jnp.arange(dataset.parameters.shape[0]))
+
+# dataset = replace(dataset, data=data)

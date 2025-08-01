@@ -11,7 +11,11 @@ def get_log_level(default="DEBUG"):
     return getattr(logging, level_str, logging.INFO)
 
 
-def setup_module_logger(module_name: str, level=logging.INFO, log_dir=LOG_DIR):
+def setup_module_logger(
+    module_name: str, 
+    level=logging.INFO, 
+    log_dir=LOG_DIR
+) -> tuple[logging.Logger, str]:
 
     log_figs_dir = os.path.join(log_dir, "figs/")
 
@@ -20,7 +24,7 @@ def setup_module_logger(module_name: str, level=logging.INFO, log_dir=LOG_DIR):
 
     log_path = os.path.join(log_dir, f"{module_name}.log")
 
-    print("LOG PATH:\n\t{}".format(log_path))
+    print("LOG PATH:\n\t{}".format(os.path.abspath(log_path)))
 
     try:
         if os.path.exists(log_path):

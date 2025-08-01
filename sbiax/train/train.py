@@ -582,7 +582,7 @@ def train_ensemble(
     results_dir: Optional[str] = None,
     # Progress bar
     tqdm_description: str = "Training",
-    show_tqdm: bool = True,
+    show_tqdm: Optional[bool] = True,
 ) -> Tuple[eqx.Module, list[dict]]:
     """
     Trains an ensemble of neural density estimator (NDE) models. 

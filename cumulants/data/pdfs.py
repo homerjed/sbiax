@@ -28,6 +28,7 @@ from data.common import (
     sample_prior,
     get_compression_fn,
     get_linearised_data,
+    get_non_gaussian_linear_model_data,
     get_datavector,
     freeze_out_parameters_dataset, 
     hartlap,
@@ -45,6 +46,7 @@ FORCE_RECOMPUTE_DATASET = True if os.environ.get("FORCE_RECOMPUTE_DATASET", "").
 USE_QUIJOTE_TAILS = True if os.environ.get("USE_QUIJOTE_TAILS", "").lower() in ("1", "true") else False
 FIDUCIAL_REDUCE = True if os.environ.get("FIDUCIAL_REDUCE", "").lower() in ("1", "true") else False
 DEFAULT_RESOLUTION = int(os.environ.get("DEFAULT_RESOLUTION", 1024))
+NON_GAUSSIAN_TEST = True if os.environ.get("NON_GAUSSIAN_TEST", "").lower() in ("1", "true") else False
 
 PRINT_FREQ = 500
 
@@ -820,6 +822,13 @@ def get_calculated_cumulants_data(
         # NOTE: whether PDFs or cumulants convert to linearised dataset if so required...
         if config.linearised:
             logger.info("Using linearised dataset [replacing only hypercube]...")
+
+            D, Y = get_linearised_data(config, return_dataset) 
+
+            return_dataset = replace(return_dataset, data=D, parameters=Y)
+
+        if NON_GAUSSIAN_TEST:
+            logger.info("Using non-Gaussian linear model dataset [replacing only hypercube]...")
 
             D, Y = get_linearised_data(config, return_dataset) 
 
