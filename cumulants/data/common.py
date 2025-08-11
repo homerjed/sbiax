@@ -768,7 +768,12 @@ def fit_nn(
             x, y = eqx.filter_shard((x, y), sharding)
 
         valid_loss = evaluate(
-            model, x, y, key_v, precision=precision, replicated_sharding=replicated_sharding
+            model, 
+            x, 
+            y, 
+            key_v, 
+            precision=precision, 
+            replicated_sharding=replicated_sharding
         )
 
         L[step] = train_loss, valid_loss
@@ -942,16 +947,18 @@ def get_nn_compressor(
             return jnp.mean(x, axis=0)
 
 
+    mu_D = dataset.data.mean(axis=0) #jnp.mean(dataset.fiducial_data, axis=0)
+    std_D = dataset.data.std(axis=0) #jnp.std(dataset.fiducial_data, axis=0)
+
+    mu_p = dataset.parameters.mean(axis=0)
+    std_p = dataset.parameters.std(axis=0)
+
     def get_preprocess_fn(D, use_pca):
         """ 
             Pre-process data, using PCA or not, returning the pre-processing transform 
             for use downstream with measurements.
             - Data is pre-processed here!
         """ 
-
-        mu_D = dataset.data.mean(axis=0) #jnp.mean(dataset.fiducial_data, axis=0)
-        std_D = dataset.data.mean(axis=0) #jnp.std(dataset.fiducial_data, axis=0)
-        D = (D - mu_D) / std_D
 
         # eigvals, eigvecs = jnp.linalg.eigh(
         #     # jnp.cov(D - mu_D, rowvar=False)
@@ -960,18 +967,18 @@ def get_nn_compressor(
         # )
         # D = ((D - mu_D) @ eigvecs) / np.sqrt(eigvals + 1e-8)
 
-        if use_pca:
-            pca = PCA(num_components=D.shape[-1]) 
-            pca.fit(dataset.data.fiducial_data) # Fit on fiducial data?
+        # if use_pca:
+        #     pca = PCA(num_components=D.shape[-1]) 
+        #     pca.fit(dataset.data.fiducial_data) # Fit on fiducial data?
 
         def preprocess_fn(d):
-            d = jnp.asarray(d)
-            if use_pca:
-                d = pca.transform(d)
+            # d = jnp.asarray(d)
+            # if use_pca:
+            #     d = pca.transform(d)
             # return ((d - mu_D) @ eigvecs) / np.sqrt(eigvals + 1e-10) 
             return (d - mu_D) / std_D
 
-        return D, preprocess_fn
+        return preprocess_fn
 
 
     description = "Fitting NN [{}]".format(dataset.name)
@@ -982,21 +989,25 @@ def get_nn_compressor(
 
     net = Ensemble(make_ensemble(keys))
 
-    D, preprocess_fn = get_preprocess_fn(dataset.data, use_pca=config.nn.use_pca)
+    preprocess_fn = get_preprocess_fn(dataset.data, use_pca=config.nn.use_pca)
 
+    print("D, Y:", dataset.data.shape, dataset.parameters.shape)
+    
     def preprocess_fn_p(p):
         # Scale parameters into loss / out of net
         # return (p - dataset.alpha) / np.diag(dataset.Finv)
-        return (p - dataset.parameters.mean(axis=0)) / dataset.parameters.std(axis=0)
+        return (p - mu_p) / std_p
 
     def postprocess_fn_p(p):
         # Scale parameters into loss / out of net
         # return (p - dataset.alpha) / np.diag(dataset.Finv)
-        return p * dataset.parameters.std(axis=0) + dataset.parameters.mean(axis=0)
+        return p * std_p + mu_p
 
-    train_data = (D, preprocess_fn_p(dataset.parameters))
+    preprocess_fn = preprocess_fn_p = postprocess_fn_p = lambda x: x
 
-    precision = None #jnp.linalg.inv(dataset.Finv) # In reality this varies with parameters
+    train_data = (preprocess_fn(dataset.data), preprocess_fn_p(dataset.parameters))
+
+    precision = jnp.linalg.inv(dataset.Finv) # In reality this varies with parameters
 
     if lbfgs:
         net, losses = fit_nn_lbfgs(
@@ -1057,15 +1068,21 @@ def get_compression_fn(
             key, 
             config,
             dataset, 
-            lbfgs=config.compression == "nn-lbfgs", 
+            lbfgs=(config.compression == "nn-lbfgs"), 
             results_dir=results_dir
         )
 
-        compression_fn = lambda d, p: postprocess_fn(net(preprocess_fn(d))) # Ignore parameter kwarg for NN
+        def compression_fn(d, p): 
+            return postprocess_fn(net(preprocess_fn(d))) # Ignore parameter kwarg for NN
+
+        logger.info("Using NN compression function.")
 
     if config.compression == "linear":
         compressor = get_linear_compressor(config, dataset)
 
-        compression_fn = lambda d, p: compressor(d, p)
+        def compression_fn(d, p): 
+            return compressor(d, p)
+
+        logger.info("Using linear compression function.")
 
     return compression_fn 

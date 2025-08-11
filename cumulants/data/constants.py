@@ -5,6 +5,7 @@ import numpy as np
 
 _RESULTS_DIR_ = os.environ.get("RESULTS_DIR", "results") + "/"
 DEFAULT_RESOLUTION = int(os.environ.get("DEFAULT_RESOLUTION", 1024))
+USE_SOBOL = int(os.environ.get("USE_SOBOL", True))
 
 assert _RESULTS_DIR_ != "/", "RESULTS_DIR={} IS NOT ALLOWED.".format(_RESULTS_DIR_)
 
@@ -20,7 +21,11 @@ FIGS_DIR = os.path.join(ROOT_DIR, _RESULTS_DIR_)
 DATA_DIR = os.path.join(ROOT_DIR, "quijote_data/") 
 OUT_DIR = DATA_DIR
 # QUIJOTE_DIR = "/project/ls-gruen/users/jed.homer/quijote_pdfs/" # Cluster only!
-QUIJOTE_DIR = "/project/ls-gruen/users/jed.homer/quijote_pdfs_later/" # Cluster only!
+QUIJOTE_DIR = (
+    "/project/ls-gruen/users/jed.homer/quijote_pdfs_later/sobol2/" # Cluster only!
+    if USE_SOBOL else
+    "/project/ls-gruen/users/jed.homer/quijote_pdfs_later/" # Cluster only!
+)
 DERIVATIVES_DIR = os.path.join(QUIJOTE_DIR, "derivatives/")
 
 
@@ -46,18 +51,37 @@ def get_cumulant_names(include_m0_m1=False):
         r"$\langle \delta^3 \rangle_c$",
         r"$\langle \delta^4 \rangle_c$"
     ]
+
     if include_m0_m1:
-        cumulant_names = [
+        m0m1_names = [
             r"$\langle \delta^0 \rangle_c$",
             r"$\langle \delta^1 \rangle_c$"
-        ] + cumulant_names
+        ] 
+        cumulant_names = m0m1_names + cumulant_names
+
     return cumulant_names
 
 
-if DEFAULT_RESOLUTION == 1024:
-    ALL_RADII = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
-else:
-    ALL_RADII = [10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
+def get_scales():
+
+    if USE_SOBOL:
+        box_size = 1000.0 # Mpc/h
+        grid = 256
+        d = box_size / grid
+
+        scale_numbers = np.array([3., 5., 7., 9., 11., 13., 15., 17.])
+        scales = scale_numbers * d / 2 # Mpc/h, for accurate results the mesh is 1/10 of this
+    else:
+        if DEFAULT_RESOLUTION == 1024:
+            scales = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
+        else:
+            scales = [10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
+
+    return scales
+
+
+ALL_RADII = get_scales()
+
 ALL_REDSHIFTS = [0., 0.5, 1., 2., 3.]
 REDSHIFT_STRINGS = ["0", "0.5", "1", "2", "3"] # Quijote filename strings
 
@@ -69,9 +93,23 @@ PARAMETER_STRINGS = [
 
 ALPHA = np.array([0.3175, 0.049, 0.6711, 0.9624, 0.834])
 
+
+def get_prior_limits():
+    if USE_SOBOL:
+        lower = np.array([0.10, 0.02, 0.50, 0.80, 0.60])
+        upper = np.array([0.50, 0.08, 0.90, 1.20, 1.00])
+    else:
+        lower = np.array([0.10, 0.03, 0.50, 0.80, 0.60])
+        upper = np.array([0.50, 0.07, 0.90, 1.20, 1.00])
+    return lower, upper
+
+
+def get_sobol_scale_numbers():
+    return np.array([3., 5., 7., 9., 11., 13., 15., 17.])
+
+
 # Prior bounds
-LOWER = np.array([0.10, 0.03, 0.50, 0.80, 0.60])
-UPPER = np.array([0.50, 0.07, 0.90, 1.20, 1.00])
+LOWER, UPPER = get_prior_limits()
 
 # Minus derivative is first, then plus derivative
 PARAMETER_DERIVATIVE_STRINGS = [
@@ -156,16 +194,6 @@ def get_sobol_prior_limits():
     lower = np.array([0.10, 0.02, 0.50, 0.80, 0.60])
     upper = np.array([0.50, 0.08, 0.90, 1.20, 1.00])
     return lower, upper
-
-
-def get_sobol_scales():
-    box_size = 1000.0 # Mpc/h
-    grid = 256
-    d = box_size / grid
-
-    scale_numbers = np.array([3., 5., 7., 9., 11., 13., 15., 17.])
-    scales = scale_numbers * d / 2 # Mpc/h, for accurate results the mesh is 1/10 of this
-    return scales
 
 
 def get_sobol_ingredients():

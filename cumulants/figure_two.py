@@ -18,7 +18,13 @@ from data.constants import (
     get_target_idx,
     get_Finv_planck
 )
-from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
+
+USE_SOBOL = int(os.environ.get("USE_SOBOL", True))
+
+if USE_SOBOL:
+    from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
+else:
+    from data.get_sobol_cumulants import load_multi_z_bulk_pdf_fisher_forecast
 
 logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 

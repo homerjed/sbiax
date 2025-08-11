@@ -38,10 +38,17 @@ from data.constants import (
     LOWER, 
     UPPER
 )
-from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
 from cumulants_ensemble import Ensemble, MultiEnsemble
 from affine import affine_sample
 from utils import finite_samples_log_prob, get_datasets, get_fisher_chain_df, get_target_idx
+
+
+USE_SOBOL = int(os.environ.get("USE_SOBOL", True))
+
+if USE_SOBOL:
+    from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
+else:
+    from data.get_sobol_cumulants import load_multi_z_bulk_pdf_fisher_forecast
 
 typecheck = jaxtyped(typechecker=typechecker)
 

@@ -9,6 +9,8 @@ from constants import get_quijote_parameters, get_save_and_load_dirs, get_raw_qu
     Get fiducial and latin pdfs, plus/minus derivatives
 """
 
+USE_SOBOL = int(os.environ.get("USE_SOBOL", True))
+
 quijote_dir = get_raw_quijote_dir()
 
 (

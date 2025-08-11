@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Optional, Union
 import argparse
 import yaml
 import jax.numpy as jnp
@@ -13,15 +13,24 @@ from .log import setup_module_logger, get_log_level
 from data.constants import get_base_results_dir, get_base_posteriors_dir, ALL_RADII
 from data.cumulants import CumulantsDataset
 from data.pdfs import BulkCumulantsDataset, TailsCumulantsDataset, BulkPDFsDataset
+from data.get_sobol_cumulants import SobolBulkCumulantsDataset, SobolTailsCumulantsDataset, SobolBulkPDFsDataset
 from sbiax.ndes import CNF, MAF, Scaler
 
 typecheck = jaxtyped(typechecker=typechecker)
 
 logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
-DatasetClass = BulkCumulantsDataset | TailsCumulantsDataset | BulkPDFsDataset | CumulantsDataset
-
+USE_SOBOL = int(os.environ.get("USE_SOBOL", True))
 NON_GAUSSIAN_TEST = True if os.environ.get("NON_GAUSSIAN_TEST", "").lower() in ("1", "true") else False
+
+if USE_SOBOL:
+    DatasetClass = Union[ 
+        SobolBulkCumulantsDataset, SobolTailsCumulantsDataset, SobolBulkPDFsDataset
+    ]
+else:
+    DatasetClass = Union[ 
+        BulkCumulantsDataset, TailsCumulantsDataset, BulkPDFsDataset, CumulantsDataset,
+    ]
 
 def exists(v):
     return v is not None
@@ -89,6 +98,7 @@ def get_config_subdir(
         z_str = "z={}".format(str(args.redshift))
 
     parts = [
+        "sobol" if USE_SOBOL else None,
         "arch_search" if arch_search else None,
         "NON_GAUSSIAN_TEST" if NON_GAUSSIAN_TEST else None,
         "frozen" if args.freeze_parameters else "nonfrozen",

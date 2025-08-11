@@ -262,18 +262,18 @@ if __name__ == "__main__":
 
     # Corner plot of summaries
     c = ChainConsumer()
-    c.add_chain(
-        Chain(
-            samples=make_df(
-                cumulants_dataset.data.parameters, 
-                parameter_strings=cumulants_dataset.get_parameter_strings()
-            ), 
-            name="Params", 
-            color="blue", 
-            plot_cloud=True, 
-            plot_contour=False
-        )
-    )
+    # c.add_chain(
+    #     Chain(
+    #         samples=make_df(
+    #             cumulants_dataset.data.parameters, 
+    #             parameter_strings=cumulants_dataset.get_parameter_strings()
+    #         ), 
+    #         name="Params", 
+    #         color="blue", 
+    #         plot_cloud=True, 
+    #         plot_contour=False
+    #     )
+    # )
     c.add_chain(
         Chain(
             samples=make_df(X, parameter_strings=cumulants_dataset.get_parameter_strings()), 

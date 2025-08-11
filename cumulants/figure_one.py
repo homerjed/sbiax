@@ -23,7 +23,13 @@ from data.constants import (
     LOWER,
     UPPER
 )
-from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
+
+USE_SOBOL = int(os.environ.get("USE_SOBOL", True))
+
+if USE_SOBOL:
+    from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
+else:
+    from data.get_sobol_cumulants import load_multi_z_bulk_pdf_fisher_forecast
 
 jax.clear_caches()
 

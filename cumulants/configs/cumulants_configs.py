@@ -200,8 +200,8 @@ def get_config_nn(config: ConfigDict, bulk_or_tails: str) -> ConfigDict:
             nn.width_size    = 64 #256 # 32
             nn.depth         = 0 # 3
         else:
-            nn.width_size    = 256 # 32
-            nn.depth         = 2 # 3
+            nn.width_size    = 64 # 32
+            nn.depth         = 0 # 3
         nn.activation        = "tanh"
         nn.use_final_bias    = True
         nn.n_ensemble        = 1 
@@ -209,8 +209,8 @@ def get_config_nn(config: ConfigDict, bulk_or_tails: str) -> ConfigDict:
 
         train.opt            = "adamw"
         train.lr             = 1e-3
-        train.n_batch        = 1000 # None # Batch dataset or not
-        train.patience       = 200 # 3000
+        train.n_batch        = None # Batch dataset or not
+        train.patience       = 1_000 # 3000
         train.n_steps        = 200_000
         train.valid_fraction = 0.1
 
@@ -219,8 +219,8 @@ def get_config_nn(config: ConfigDict, bulk_or_tails: str) -> ConfigDict:
             nn.width_size    = 64
             nn.depth         = 0 # 3
         else:
-            nn.width_size    = 256 # 32
-            nn.depth         = 2 # 3
+            nn.width_size    = 64 # 32
+            nn.depth         = 0 # 3
         nn.activation        = "tanh"
         nn.use_final_bias    = True 
         nn.n_ensemble        = 1 
@@ -229,7 +229,7 @@ def get_config_nn(config: ConfigDict, bulk_or_tails: str) -> ConfigDict:
         train.opt            = "adamw"
         train.lr             = 1e-3
         train.n_batch        = None # Batch dataset or not
-        train.patience       = 200 # 3000
+        train.patience       = 1_000 # 3000
         train.n_steps        = 200_000
         train.valid_fraction = 0.1
     
