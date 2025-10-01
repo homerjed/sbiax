@@ -5,31 +5,40 @@ import yaml
 import jax.numpy as jnp
 import jax.random as jr 
 from equinox import Module
-from jaxtyping import PRNGKeyArray, jaxtyped
+from jaxtyping import PRNGKeyArray, Float, Array, jaxtyped
 from beartype import beartype as typechecker
 from ml_collections import ConfigDict
 
 from .log import setup_module_logger, get_log_level
-from data.constants import get_base_results_dir, get_base_posteriors_dir, ALL_RADII
+from data.constants import get_base_results_dir, get_base_posteriors_dir, get_scales
 from data.cumulants import CumulantsDataset
-from data.pdfs import BulkCumulantsDataset, TailsCumulantsDataset, BulkPDFsDataset
-from data.get_sobol_cumulants import SobolBulkCumulantsDataset, SobolTailsCumulantsDataset, SobolBulkPDFsDataset
 from sbiax.ndes import CNF, MAF, Scaler
 
 typecheck = jaxtyped(typechecker=typechecker)
 
 logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
-USE_SOBOL = int(os.environ.get("USE_SOBOL", True))
+USE_SOBOL = True if os.environ.get("USE_SOBOL", "True").lower() in ("1", "true") else False
 NON_GAUSSIAN_TEST = True if os.environ.get("NON_GAUSSIAN_TEST", "").lower() in ("1", "true") else False
 
 if USE_SOBOL:
-    DatasetClass = Union[ 
+    from data.get_sobol_cumulants import (
         SobolBulkCumulantsDataset, SobolTailsCumulantsDataset, SobolBulkPDFsDataset
+    )
+    DatasetClass = Union[ 
+        SobolBulkCumulantsDataset, 
+        SobolTailsCumulantsDataset, 
+        SobolBulkPDFsDataset
     ]
 else:
+    from data.pdfs import (
+        BulkCumulantsDataset, TailsCumulantsDataset, BulkPDFsDataset
+    )
     DatasetClass = Union[ 
-        BulkCumulantsDataset, TailsCumulantsDataset, BulkPDFsDataset, CumulantsDataset,
+        BulkCumulantsDataset, 
+        TailsCumulantsDataset, 
+        BulkPDFsDataset, 
+        CumulantsDataset,
     ]
 
 def exists(v):
@@ -80,7 +89,7 @@ def get_config_subdir(
     # NOTE: Multi-z posteriors marked by cumulants in datavector, not redshift!
 
     # Scales marker
-    if args.scales == ALL_RADII:
+    if args.scales == get_scales():
         R_str = "R_all" 
     else:
         R_str = "R_{}".format("".join(map(str, args.scales)))
@@ -180,7 +189,7 @@ def get_multi_z_posterior_dir(args: argparse.Namespace) -> str:
     return multi_z_dir
 
 
-def get_multi_z_posterior_filename(args: argparse.Namespace) -> str:
+def get_multi_z_posterior_filename(args: argparse.Namespace, mcmc: bool = False, blackjax: bool = False) -> str:
     # Save posterior, Fisher and summary
 
     posterior_save_dir = get_multi_z_posterior_dir(args)
@@ -193,7 +202,9 @@ def get_multi_z_posterior_filename(args: argparse.Namespace) -> str:
         posterior_save_dir, 
         "multi_z_posterior_{}{}.npz".format( # NOTE: was just 'posterior_...' before
             args.seed, 
-            ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else ""
+            ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else "",
+            "_MCMC" if mcmc else "",
+            "_blackjax" if blackjax else ""
         ) 
     )
 
@@ -215,19 +226,33 @@ def get_ndes_from_config(
     context_dim: Optional[int] = None, 
     *, 
     use_scalers: bool = False,
+    compressed_dataset: Optional[tuple[Float[Array, "n p"], Float[Array, "n p"]]] = None,
     key: PRNGKeyArray 
 ) -> list[Module]:
 
-    fisher_mu_std = (dataset.data.alpha, jnp.sqrt(jnp.diag(dataset.data.Finv)))
-    # X = jax.vmap(dataset.compression_fn)(dataset.data, dataset.parameters)
+    if use_scalers:
+        if compressed_dataset is not None:
+            X, Q = compressed_dataset
 
-    # Pack the single scaler for each NDE
-    scaler = Scaler(
-        # X, dataset.parameters,
-        x_mu_std=fisher_mu_std,
-        q_mu_std=fisher_mu_std,
-        use_scaling=use_scalers
-    )
+            # Pack the single scaler for each NDE
+            scaler = Scaler(
+                X, 
+                Q,
+                # x_mu_std=(jnp.mean(X, axis=0), jnp.std(X, axis=0)),
+                # q_mu_std=(jnp.mean(Y, axis=0), jnp.std(Y, axis=0)),
+                use_scaling=use_scalers
+            )
+        else:
+            fisher_mu_std = (dataset.data.alpha, jnp.sqrt(jnp.diag(dataset.data.Finv)))
+            # X = jax.vmap(dataset.compression_fn)(dataset.data, dataset.parameters)
+
+            # Pack the single scaler for each NDE
+            scaler = Scaler(
+                # X, dataset.parameters,
+                x_mu_std=fisher_mu_std,
+                q_mu_std=fisher_mu_std,
+                use_scaling=use_scalers
+            )
 
     keys = jr.split(key, len(config.ndes))
 
@@ -251,7 +276,8 @@ def get_ndes_from_config(
             context_dim=context_dim if exists(context_dim) else event_dim, 
             key=key,
             scaler=scaler if (nde.use_scaling and use_scalers) else None,
-            **dict(nde)
+            **dict(nde),
+            bounds=jnp.stack([dataset.data.lower, dataset.data.upper], axis=1)
         )
 
         logger.info("NDE DICT: {}".format(nde_dict))

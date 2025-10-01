@@ -15,9 +15,10 @@ class Sample(NamedTuple):
 
 @jaxtyped(typechecker=typechecker)
 def sort_sample(
-    train_mode: Literal["npe", "nle"], 
     simulations: Float[Array, "b x"],
-    parameters: Float[Array, "b y"]
+    parameters: Float[Array, "b y"],
+    *,
+    train_mode: Literal["npe", "nle"]
 ) -> Sample:
     """
         Sort simulations and parameters according to NPE or NLE
@@ -30,10 +31,10 @@ def sort_sample(
         Returns:
             (`Sample`): Ordered sample of simulations and parameters.
     """
-    _nle = train_mode.lower() == "nle"
+    nle = train_mode == "nle"
     return Sample(
-        x=simulations if _nle else parameters,
-        y=parameters if _nle else simulations 
+        x=simulations if nle else parameters,
+        y=parameters if nle else simulations 
     )
 
 
@@ -136,9 +137,9 @@ class _InMemoryDataLoader(_AbstractDataLoader):
             # Yield whole dataset if batch size is larger than dataset size
             if one_batch:
                 yield sort_sample(
-                    self.train_mode, 
                     self.simulations, 
-                    self.parameters
+                    self.parameters,
+                    train_mode=self.train_mode, 
                 )
             else:
                 key, subkey = jr.split(key)
@@ -148,9 +149,9 @@ class _InMemoryDataLoader(_AbstractDataLoader):
                 while end < dataset_size:
                     batch_perm = perm[start:end]
                     yield sort_sample(
-                        self.train_mode, 
                         self.simulations[batch_perm], 
-                        self.parameters[batch_perm] 
+                        self.parameters[batch_perm],
+                        train_mode=self.train_mode 
                     )
                     start = end
                     end = start + batch_size
@@ -162,6 +163,7 @@ class DataLoader(eqx.Module):
     """
     arrays: tuple[Float[Array, "n x"], Float[Array, "n y"]]
     batch_size: int
+    train_mode: Literal["nle", "npe"]
     key: Key
 
     def __check_init__(self):
@@ -186,4 +188,7 @@ class DataLoader(eqx.Module):
         start = (step % num_batches) * self.batch_size
         slice_size = self.batch_size
         batch_indices = jax.lax.dynamic_slice_in_dim(perm, start, slice_size)
-        return tuple(array[batch_indices] for array in self.arrays)
+        return sort_sample(
+            *tuple(array[batch_indices] for array in self.arrays), 
+            train_mode=self.train_mode
+        )

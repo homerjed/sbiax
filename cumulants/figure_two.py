@@ -13,18 +13,22 @@ from configs.configs import (
     get_multi_z_posterior_filename
 )
 from data.constants import (
+    ALPHA,
+    LOWER,
+    UPPER,
     get_quijote_parameters, 
     get_save_and_load_dirs,
     get_target_idx,
     get_Finv_planck
 )
 
-USE_SOBOL = int(os.environ.get("USE_SOBOL", True))
+USE_SOBOL = True if os.environ.get("USE_SOBOL", "").lower() in ("1", "true") else False 
+PLOT_FISHER_CLIPPED = True if os.environ.get("PLOT_FISHER_CLIPPED", "").lower() in ("1", "true") else False
 
 if USE_SOBOL:
-    from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
-else:
     from data.get_sobol_cumulants import load_multi_z_bulk_pdf_fisher_forecast
+else:
+    from data.pdfs import load_multi_z_bulk_pdf_fisher_forecast
 
 logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
@@ -95,7 +99,6 @@ logger.info("MULTI-Z ARGS:{}".format(vars(multi_z_args)))
 print("FIGURE TWO ARGS:{}".format(vars(figure_two_args)))
 logger.info("FIGURE TWO ARGS:{}".format(vars(figure_two_args)))
 
-
 # Load Bulk PDF Fisher matrix just once NOTE: replace this with PDFs dataset NOTE: Scale PDF Fisher information by number of datavectors!
 Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, multi_z_args)
 Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z / multi_z_args.n_datavectors 
@@ -109,15 +112,21 @@ posterior_widths = dict(
     bulk=np.zeros((N_DATAVECTOR_SEEDS, N_REPEATED_SBI_SEEDS, n_p)), 
     tails=np.zeros((N_DATAVECTOR_SEEDS, N_REPEATED_SBI_SEEDS, n_p))
 )
+mcmc_posterior_widths = dict(
+    bulk=np.zeros((N_DATAVECTOR_SEEDS, N_REPEATED_SBI_SEEDS, n_p)), 
+    tails=np.zeros((N_DATAVECTOR_SEEDS, N_REPEATED_SBI_SEEDS, n_p))
+)
 Finvs = dict(bulk=None, tails=None)
+
 for bulk_or_tails in ["bulk", "tails"]:
 
     for _global_seed in range(N_REPEATED_SBI_SEEDS):
+
         # Loop over datavector seeds?
         for s in trange(
             N_DATAVECTOR_SEEDS, 
             colour="red" if bulk_or_tails == "tails" else "blue",
-            desc="Posterior widths (SBI seed={})".format(_global_seed)
+            desc="Posterior widths (SBI seed={}, bt={})".format(_global_seed, bulk_or_tails)
         ):
             # Attempt to load posterior 
             try:
@@ -127,13 +136,22 @@ for bulk_or_tails in ["bulk", "tails"]:
                 multi_z_args.bulk_or_tails = bulk_or_tails
                 multi_z_args.redshifts = figure_two_args.redshifts
 
+                """
+                    SBI
+                """
                 # Load posterior for seed and experiment
                 posterior_filename = get_multi_z_posterior_filename(multi_z_args)
                 print("POSTERIOR_FILENAME:", posterior_filename)
 
                 posterior = np.load(posterior_filename)
+
+                posterior_samples = posterior["samples"]
+
+                assert posterior_samples.shape[-1] == n_p, (
+                    "Posterior samples n_p={}, n_p requested={}".format(posterior_samples.shape[-1], n_p)
+                )
                     
-                widths = np.var(posterior["samples"], axis=0) # Shape (n_samples, parameters)
+                widths = np.var(posterior_samples, axis=0) # Shape (n_samples, parameters)
 
                 print(widths.shape)
 
@@ -148,8 +166,38 @@ for bulk_or_tails in ["bulk", "tails"]:
 
                 posterior_widths[bulk_or_tails][s, _global_seed, :] = widths
 
+                """
+                    MCMC 
+                """
+                # Load posterior for seed and experiment
+                mcmc_posterior_filename = get_multi_z_posterior_filename(multi_z_args, mcmc=True)
+                print("POSTERIOR_FILENAME:", posterior_filename)
+
+                mcmc_posterior = np.load(mcmc_posterior_filename)
+
+                mcmc_posterior_samples = posterior["samples"]
+
+                assert mcmc_posterior_samples.shape[-1] == n_p, (
+                    "Posterior samples n_p={}, n_p requested={}".format(posterior_samples.shape[-1], n_p)
+                )
+                    
+                mcmc_widths = np.var(mcmc_posterior_samples, axis=0) # Shape (n_samples, parameters)
+
+                print(mcmc_widths.shape)
+
+                # print(
+                #     "SBI seed: {}\ndatavector: {}\nvar (sigma8): {}".format(
+                #         _global_seed, bulk_or_tails, widths[-1]
+                #     )
+                # )
+
+                if scale_by_fisher:
+                    mcmc_widths = mcmc_widths / np.diag(Finv_bulk_pdfs_all_z) - 1.
+
+                mcmc_posterior_widths[bulk_or_tails][s, _global_seed, :] = mcmc_widths
+
                 # Grab multi-z Fisher forecast, scaled by n_datavectors
-                Finvs[bulk_or_tails] = posterior["Finv"] # This may be multi-z when it shouldn't be...
+                Finvs[bulk_or_tails] = posterior["Finv"] # NOTE: this should be combined redshift Fisher
 
             except Exception as e:
                 print(
@@ -172,7 +220,42 @@ for _global_seed in range(N_REPEATED_SBI_SEEDS):
 # Plot histogram of posterior widths across all seeds for all multi-z posteriors
 landscape = False
 
-vertical_lines = np.diag(Finv_bulk_pdfs_all_z) # Variances (widths) for Bulk PDF Gaussian posterior
+
+# Clip multi-z forecast to prior boundary
+if PLOT_FISHER_CLIPPED:
+    #vertical_lines = np.std(fisher_samples, axis=0)
+
+    print("\nCLIPPING CHAINS\n")
+
+    n_fisher_samples = 800_000
+
+    def cut_samples(samples, lower, upper):
+        return samples[np.all((samples >= lower) & (samples <= upper), axis=1)]
+
+    Finvs["bulk_pdf"] = Finv_bulk_pdfs_all_z
+
+    fisher_widths = dict()
+    for name in ["bulk_pdf", "bulk", "tails"]:
+
+        print("FINV SHAPE", name, Finvs[name].shape)
+
+        fisher_samples = np.random.multivariate_normal(
+            ALPHA, Finvs[name], (n_fisher_samples,) 
+        ) 
+
+        fisher_samples = cut_samples(fisher_samples, LOWER, UPPER)
+
+        # Marginal variances
+        fisher_widths[name] = np.var(fisher_samples, axis=0) # fisher_samples
+else:
+    vertical_lines = np.diag(Finv_bulk_pdfs_all_z) # Variances (widths) for Bulk PDF Gaussian posterior
+
+    # Marginal variances
+    fisher_widths = dict(
+        bulk_pdf=np.diag(Finv_bulk_pdfs_all_z), 
+        bulk=np.diag(Finvs["bulk"]), 
+        tails=np.diag(Finvs["tails"])
+    )
 
 plotting_dict = dict(
     bulk=dict(color="b"),
@@ -220,8 +303,11 @@ for i in range(n_p):
         ): 
             continue
 
+        """
+            SBI
+        """
         _ = ax.hist(
-            posterior_widths["bulk"][:, _global_seed, i], 
+            posterior_widths["bulk"][:, _global_seed, i], # Parameter i, SBI run `_global_seed`, all posteriors
             bins=bins, 
             color=plotting_dict["bulk"]["color"], 
             edgecolor="none", 
@@ -256,23 +342,62 @@ for i in range(n_p):
             density=True
         )
 
+        """
+           MCMCs 
+        """
+        _ = ax.hist(
+            mcmc_posterior_widths["bulk"][:, _global_seed, i], # Parameter i, SBI run `_global_seed`, all posteriors
+            bins=bins, 
+            color="lightgray", 
+            edgecolor="none", 
+            alpha=0.3, 
+            density=True
+        )
+        _ = ax.hist(
+            mcmc_posterior_widths["bulk"][:, _global_seed, i], 
+            bins=bins, 
+            color=plotting_dict["bulk"]["color"], 
+            histtype="step", 
+            label=("MCMC[bulk]" + tag) if _global_seed == 0 else None, # Legend entry only for first plot
+            alpha=0.7, 
+            density=True
+        )
+
+        _ = ax.hist(
+            mcmc_posterior_widths["tails"][:, _global_seed, i], 
+            bins=bins, 
+            color="lightgray", 
+            edgecolor="none", 
+            alpha=0.3, 
+            density=True
+        )
+        _ = ax.hist(
+            mcmc_posterior_widths["tails"][:, _global_seed, i], 
+            bins=bins, 
+            color=plotting_dict["tails"]["color"], 
+            histtype="step", 
+            label=("MCMC[tails]" + tag) if _global_seed == 0 else None, 
+            alpha=0.7,
+            density=True
+        )
+
     # Bulk Fisher information line
     ax.axvline(
-        np.diag(Finv_bulk_pdfs_all_z)[i], 
+        fisher_widths["bulk_pdf"][i],
         color="green", 
         linestyle=":", 
         linewidth=2, 
         label=r"$F^{{-1}}[{}]$ (PDF[bulk])".format(parameter_strings[i][1:-1])
     )
     ax.axvline(
-        np.diag(Finvs["bulk"])[i], 
+        fisher_widths["bulk"][i],
         color="blue", 
         linestyle="--", 
         linewidth=2, 
         label=r"$F^{{-1}}[{}]$ ($k_n$[bulk])".format(parameter_strings[i][1:-1])
     )
     ax.axvline(
-        np.diag(Finvs["tails"])[i], 
+        fisher_widths["tails"][i],
         color="red", 
         linestyle="--", 
         linewidth=2, 
@@ -333,6 +458,7 @@ parts = [
     "".join(map(str, multi_z_args.order_idx)),
     "".join(map(str, multi_z_args.scales)),
     # str(multi_z_args.seed)
+    "clipped" if PLOT_FISHER_CLIPPED else None
 ]
 identifier_str = "_".join(filter(None, parts))
 
@@ -358,6 +484,7 @@ if not exp_dict["freeze_parameters"]:
         fig, axes = plt.subplots(1, n_p, figsize=(fig_dim, 4.), sharey=False)
     else:
         fig, axes = plt.subplots(n_p, 1, figsize=(5., fig_dim), sharex=False)
+
     axes = np.atleast_1d(axes)
 
     for _i, i in enumerate(target_idx):
@@ -427,7 +554,7 @@ if not exp_dict["freeze_parameters"]:
 
         # Bulk PDFs Fisher information line
         ax.axvline(
-            np.diag(Finv_bulk_pdfs_all_z)[i], 
+            fisher_widths["bulk_pdf"][i], # np.diag(Finv_bulk_pdfs_all_z)[i], 
             color="green", 
             linestyle=":", 
             linewidth=2, 
@@ -435,15 +562,15 @@ if not exp_dict["freeze_parameters"]:
         )
         # Bulk Fisher information line
         ax.axvline(
-            np.diag(Finvs["bulk"])[i], 
+            fisher_widths["bulk"][i], # np.diag(Finvs["bulk"])[i], 
             color="blue", 
             linestyle="--", 
             linewidth=2, 
             label=r"$F^{{-1}}[{}]$ ($k_n$[bulk])".format(parameter_strings[i][1:-1])
         )
         # Tails Fisher information line
-        ax.axvline(
-            np.diag(Finvs["tails"])[i], 
+        ax.axvline( 
+            fisher_widths["tails"][i], # np.diag(Finvs["tails"])[i], 
             color="red", 
             linestyle="--", 
             linewidth=2, 
@@ -503,11 +630,15 @@ if not exp_dict["freeze_parameters"]:
         "".join(map(str, multi_z_args.order_idx)),
         "".join(map(str, multi_z_args.scales)),
         # str(multi_z_args.seed),
-        "marginalised"
+        "marginalised",
+        "clipped" if PLOT_FISHER_CLIPPED else None
     ]
     identifier_str = "_".join(filter(None, parts))
 
-    filename = os.path.join(figs_dir, "figure_two_repeated_{}.pdf".format(identifier_str))
+    filename = os.path.join(
+        figs_dir, 
+        "figure_two_repeated_{}.pdf".format(identifier_str)
+    )
 
     print("Figure two (marginalised) saved at:\n\t", filename)
 

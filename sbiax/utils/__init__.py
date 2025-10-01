@@ -9,8 +9,8 @@ import pandas as pd
 
 
 def make_df(
-    samples: Float[Array, "..."], 
-    log_probs: Optional[Float[Array, "..."]] = None, 
+    samples: Float[Array | np.ndarray, "..."], 
+    log_probs: Optional[Float[Array | np.ndarray, "..."]] = None, 
     *,
     parameter_strings: List[str]
 ) -> pd.DataFrame:

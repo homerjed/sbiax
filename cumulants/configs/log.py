@@ -1,7 +1,9 @@
+import sys
 import logging
 import os
 
 LOG_DIR = os.getenv("LOG_DIR", "logs/")
+PRINT_LOGS = os.getenv("PRINT_LOGS", False)
 
 
 def get_log_level(default="DEBUG"):
@@ -41,10 +43,20 @@ def setup_module_logger(
 
         file_handler.setFormatter(
             logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+                '%(name)s - %(levelname)s \n >> %(message)s' # %(asctime)s - 
             )
         )
 
         logger.addHandler(file_handler)
+
+    if PRINT_LOGS:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(
+            logging.Formatter(
+                '%(name)s - %(levelname)s \n >> %(message)s' # %(asctime)s - 
+            )
+        )
+        logger.addHandler(handler)
 
     return logger, log_figs_dir

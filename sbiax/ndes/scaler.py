@@ -13,6 +13,48 @@ def stop_grad(a):
     return jax.lax.stop_gradient(a)
 
 
+class Constrainer(eqx.Module):
+    lower: Float[Array, "p"]
+    upper: Float[Array, "p"]
+    constrain: bool
+
+    @jaxtyped(typechecker=typechecker)
+    def __init__(
+        self, 
+        lower: Float[Array, "x"], 
+        upper: Float[Array, "x"], 
+        *,
+        constrain: bool = True
+    ):
+        self.lower = lower
+        self.upper = upper
+        self.constrain = constrain
+
+    @jaxtyped(typechecker=typechecker)
+    def forward(
+        self, 
+        x: Float[Array, "{self.x_dim}"], 
+        q: Optional[Float[Array, "{self.q_dim}"]] = None
+    ) -> Tuple[Float[Array, "{self.x_dim}"], Float[Array, "{self.q_dim}"]]: 
+        if self.constrain:
+            x = self.lower + (self.upper - self.lower) * jax.nn.sigmoid(x)
+        return x, q
+
+    @jaxtyped(typechecker=typechecker)
+    def reverse(
+        self, 
+        x: Float[Array, "{self.x_dim}"], 
+        q: Optional[Float[Array, "{self.q_dim}"]] = None,
+        *,
+        eps: float = 1e-8
+    ) -> Tuple[Float[Array, "{self.x_dim}"], Float[Array, "{self.q_dim}"]]: 
+        if self.constrain:
+            x = jax.scipy.special.logit(
+                jnp.clip((x - self.lower) / (self.upper - self.lower), eps, 1. - eps)
+            )
+        return x, q
+
+
 class Scaler(eqx.Module):
     """
     A scaling module for inputs to NDE models. Easier to keep track of scaling/rescaling

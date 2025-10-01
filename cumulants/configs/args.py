@@ -1,8 +1,10 @@
+import os
 import argparse
 from collections import namedtuple
 from typing import Type
 
-from data.constants import ALL_RADII
+from configs.log import setup_module_logger, get_log_level
+from data.constants import get_scales 
 
 ArgsTuple: Type[tuple] = None
 
@@ -10,7 +12,11 @@ ArgsTuple: Type[tuple] = None
     CLI args 
 """
 
-DEFAULT_N_LINEAR_SIMS = 2000
+USE_SOBOL = True if os.environ.get("USE_SOBOL", "").lower() in ("1", "true") else False 
+
+logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
+
+DEFAULT_N_LINEAR_SIMS = 32768 if USE_SOBOL else 2000
 
 
 def args_to_namedtuple(args: argparse.Namespace) -> tuple:
@@ -65,7 +71,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "-r", 
         "--scales", 
-        default=ALL_RADII, 
+        default=get_scales(), 
         nargs="+", 
         type=float, 
         help="Physical scales."
@@ -91,7 +97,11 @@ def add_common_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     return parser
 
 
-def get_cumulants_sbi_args(multi_z: bool = False, using_notebook: bool = False) -> argparse.Namespace | ArgsTuple:
+def get_cumulants_sbi_args(
+    multi_z: bool = False, 
+    using_notebook: bool = False
+) -> argparse.Namespace | ArgsTuple:
+
     parser = argparse.ArgumentParser(
         description="Run SBI experiment with cumulants of the matter PDF."
     )
@@ -106,13 +116,21 @@ def get_cumulants_sbi_args(multi_z: bool = False, using_notebook: bool = False) 
     else:
         args = parser.parse_args()
 
+    logger.info("CUMULANTS SBI ARGS (multi_z={}):".format(multi_z))
+    for k, v in vars(args).items():
+        logger.info("%-12s : %s", k, v)
+
     if using_notebook:
         args = args_to_namedtuple(args)
 
     return args
 
 
-def get_cumulants_multi_z_args(figure_one: bool = False, using_notebook: bool = False) -> argparse.Namespace | ArgsTuple:
+def get_cumulants_multi_z_args(
+    figure_one: bool = False, 
+    using_notebook: bool = False
+) -> argparse.Namespace | ArgsTuple:
+
     parser = argparse.ArgumentParser(
         description="Run posterior sampling over multi-redshift SBI experiments with moments of the matter PDF."
     )
@@ -128,6 +146,10 @@ def get_cumulants_multi_z_args(figure_one: bool = False, using_notebook: bool = 
         args, _ = parser.parse_known_args()
     else:
         args = parser.parse_args()
+
+    logger.info("MULTI-Z ARGS (figure_one={}):".format(figure_one))
+    for k, v in vars(args).items():
+        logger.info("%-12s : %s", k, v)
 
     if using_notebook:
         args = args_to_namedtuple(args)
@@ -149,6 +171,10 @@ def get_figure_one_args():
 
     args = parser.parse_args()
 
+    logger.info("FIGURE_ONE ARGS:")
+    for k, v in vars(args).items():
+        logger.info("%-12s : %s", k, v)
+
     return args
 
 
@@ -163,6 +189,10 @@ def get_figure_two_args():
     parser.add_argument("-z", "--redshifts", default=[0.0, 0.5, 1.0], nargs="+", type=float, help="Redshifts.")
 
     args = parser.parse_args()
+
+    logger.info("FIGURE_TWO ARGS:")
+    for k, v in vars(args).items():
+        logger.info("%-12s : %s", k, v)
 
     return args
 
@@ -259,7 +289,7 @@ def get_arch_search_args(using_notebook: bool = False):
 #     parser.add_argument(
 #         "-r", 
 #         "--scales",
-#         default=ALL_RADII,
+#         default=get_scales(),
 #         nargs="+", 
 #         type=float,
 #         help="Physical scales."
@@ -384,7 +414,7 @@ def get_arch_search_args(using_notebook: bool = False):
 #     parser.add_argument(
 #         "-r", 
 #         "--scales",
-#         default=ALL_RADII,
+#         default=get_scales(),
 #         nargs="+", 
 #         type=float,
 #         help="Physical scales."
@@ -497,7 +527,7 @@ def get_arch_search_args(using_notebook: bool = False):
 #     parser.add_argument(
 #         "-r", 
 #         "--scales",
-#         default=ALL_RADII,
+#         default=get_scales(),
 #         nargs="+", 
 #         type=float,
 #         help="Physical scales."
@@ -585,7 +615,7 @@ def get_arch_search_args(using_notebook: bool = False):
 #     parser.add_argument(
 #         "-r", 
 #         "--scales",
-#         default=ALL_RADII,
+#         default=get_scales(),
 #         nargs="+", 
 #         type=float,
 #         help="Physical scales."

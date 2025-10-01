@@ -5,7 +5,7 @@ import numpy as np
 
 _RESULTS_DIR_ = os.environ.get("RESULTS_DIR", "results") + "/"
 DEFAULT_RESOLUTION = int(os.environ.get("DEFAULT_RESOLUTION", 1024))
-USE_SOBOL = int(os.environ.get("USE_SOBOL", True))
+USE_SOBOL = True if os.environ.get("USE_SOBOL", "").lower() in ("1", "true") else False 
 
 assert _RESULTS_DIR_ != "/", "RESULTS_DIR={} IS NOT ALLOWED.".format(_RESULTS_DIR_)
 
@@ -22,12 +22,13 @@ DATA_DIR = os.path.join(ROOT_DIR, "quijote_data/")
 OUT_DIR = DATA_DIR
 # QUIJOTE_DIR = "/project/ls-gruen/users/jed.homer/quijote_pdfs/" # Cluster only!
 QUIJOTE_DIR = (
-    "/project/ls-gruen/users/jed.homer/quijote_pdfs_later/sobol2/" # Cluster only!
+    "/project/ls-gruen/users/jed.homer/quijote_pdfs_later/sobol2/sobol_pdfs/" # Cluster only!
     if USE_SOBOL else
     "/project/ls-gruen/users/jed.homer/quijote_pdfs_later/" # Cluster only!
 )
 DERIVATIVES_DIR = os.path.join(QUIJOTE_DIR, "derivatives/")
 
+N_S_HYPERCUBE = 32768 if USE_SOBOL else 2000
 
 def get_raw_quijote_dir():
     return QUIJOTE_DIR # Directory containing Quijote simulation data
@@ -45,19 +46,27 @@ def get_base_posteriors_dir():
     return POSTERIORS_DIR
 
 
-def get_cumulant_names(include_m0_m1=False):
+def get_cumulant_names(include_m0_m1=True):
+    # cumulant_names = [
+    #     r"$\langle \delta^2 \rangle_c$", 
+    #     r"$\langle \delta^3 \rangle_c$",
+    #     r"$\langle \delta^4 \rangle_c$"
+    # ]
+
+    # if include_m0_m1:
+    #     m0m1_names = [
+    #         r"$\langle \delta^0 \rangle$",
+    #         r"$\langle \delta^1 \rangle$"
+    #     ] 
+    #     cumulant_names = m0m1_names + cumulant_names
+
     cumulant_names = [
+        r"$\langle \delta^0 \rangle$",
+        r"$\langle \delta^1 \rangle$",
         r"$\langle \delta^2 \rangle_c$", 
         r"$\langle \delta^3 \rangle_c$",
         r"$\langle \delta^4 \rangle_c$"
     ]
-
-    if include_m0_m1:
-        m0m1_names = [
-            r"$\langle \delta^0 \rangle_c$",
-            r"$\langle \delta^1 \rangle_c$"
-        ] 
-        cumulant_names = m0m1_names + cumulant_names
 
     return cumulant_names
 
@@ -71,6 +80,7 @@ def get_scales():
 
         scale_numbers = np.array([3., 5., 7., 9., 11., 13., 15., 17.])
         scales = scale_numbers * d / 2 # Mpc/h, for accurate results the mesh is 1/10 of this
+        scales = [round(x, 1) for x in scales]
     else:
         if DEFAULT_RESOLUTION == 1024:
             scales = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0]
@@ -88,7 +98,7 @@ REDSHIFT_STRINGS = ["0", "0.5", "1", "2", "3"] # Quijote filename strings
 RESOLUTION = DEFAULT_RESOLUTION
 
 PARAMETER_STRINGS = [
-    r"$\Omega_m$", r"$\Omega_b$", r"$h_m$", r"$n_s$", r"$\sigma_8$"
+    r"$\Omega_m$", r"$\Omega_b$", r"$h$", r"$n_s$", r"$\sigma_8$"
 ]
 
 ALPHA = np.array([0.3175, 0.049, 0.6711, 0.9624, 0.834])
@@ -139,7 +149,7 @@ D_DELTAS = DELTA_BIN_EDGES[1:] - DELTA_BIN_EDGES[:-1]
 
 def get_target_idx():
     idx = jnp.array([0, 4]) # Om, s8; ignoring h, n_s, Ob
-    print("TARGET_IDX:", [PARAMETER_STRINGS[_] for _ in idx])
+    # print("TARGET_IDX:", [PARAMETER_STRINGS[_] for _ in idx])
     return idx
 
 
@@ -198,7 +208,7 @@ def get_sobol_prior_limits():
 
 def get_sobol_ingredients():
     parameter_strings = [
-        r"$\Omega_m$", r"$\Omega_b$", r"$h_m$", r"$n_s$", r"$\sigma_8$"
+        r"$\Omega_m$", r"$\Omega_b$", r"$h$", r"$n_s$", r"$\sigma_8$"
     ]
 
     alpha = np.array([0.3175, 0.049, 0.6711, 0.9624, 0.834])

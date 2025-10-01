@@ -6,7 +6,9 @@ import equinox as eqx
 from jaxtyping import Key, Array, Float, jaxtyped
 from beartype import beartype as typechecker
 from flowjax.flows import masked_autoregressive_flow
-from flowjax.distributions import Normal
+from flowjax.distributions import Normal, Transformed
+from paramax import non_trainable
+import flowjax.bijections as bij
 
 
 class MAF(eqx.Module):
@@ -101,6 +103,7 @@ class MAF(eqx.Module):
         nn_depth: int, 
         activation: Callable = jax.nn.tanh, 
         scaler: eqx.Module = None,
+        bounds: Optional[Float[Array, "p 2"]] = None,
         *, 
         key: Key
     ):
@@ -131,7 +134,7 @@ class MAF(eqx.Module):
         self.base_dist = Normal(
             loc=jnp.zeros(event_dim), scale=jnp.ones(event_dim)
         )
-        self.flow = masked_autoregressive_flow(
+        _maf = masked_autoregressive_flow(
             key,
             base_dist=self.base_dist,
             cond_dim=context_dim,
@@ -140,6 +143,25 @@ class MAF(eqx.Module):
             nn_depth=nn_depth,
             nn_activation=activation
         )
+
+
+        if bounds is not None:
+            to_constrained = bij.Stack(
+                [
+                    bij.Chain([bij.Affine(loc=l, scale=u - l), bij.Sigmoid()]) 
+                    for l, u in bounds
+                ]
+            )
+
+            constrained_maf = Transformed(
+                _maf,
+                non_trainable(to_constrained) # Ensure constraint not trained!
+            )
+
+            self.flow = constrained_maf
+        else:
+            self.flow = _maf
+
         self.scaler = scaler
         self.x_dim = event_dim
         self.y_dim = context_dim

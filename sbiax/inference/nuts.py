@@ -144,7 +144,9 @@ def nuts_sample(
         kernel = blackjax.nuts.build_kernel()
 
         def step_fn(
-            key: Key[jnp.ndarray, "..."], state: blackjax._hmc.HMCState, **params
+            key: Key[jnp.ndarray, "..."], 
+            state: blackjax._hmc.HMCState, 
+            **params
         ) -> Callable:
             """
             Performs a single step of the NUTS algorithm.
@@ -161,7 +163,8 @@ def nuts_sample(
 
         @scan_tqdm(n_samples, desc="Sampling")
         def one_step(
-            states: blackjax._hmc.HMCState, i: int
+            states: blackjax._hmc.HMCState, 
+            i: int
         ) -> Tuple[blackjax._hmc.HMCState, blackjax._nuts.NUTSInfo]: 
             """
             Executes one step of sampling across all chains.
@@ -178,6 +181,7 @@ def nuts_sample(
             return states, (states, infos)
 
         _, (states, infos) = jax.lax.scan(one_step, initial_states, jnp.arange(n_samples))
+
         return states, infos
 
     states, infos = inference_loop_multiple_chains(

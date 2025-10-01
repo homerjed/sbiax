@@ -1,4 +1,4 @@
-from typing import Tuple, Optional, Literal
+from typing import Tuple, Optional, Literal, NamedTuple
 from copy import deepcopy
 import os
 
@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import optuna
 
 from .loss import batch_loss_fn, batch_eval_fn
-from .loader import _InMemoryDataLoader, sort_sample
+from .loader import _InMemoryDataLoader, DataLoader, sort_sample
 from ..ndes import Ensemble
 
 Optimiser = optax.GradientTransformation 
@@ -161,6 +161,157 @@ def make_step(
         )
 
     return nde, opt_state, L 
+
+
+class Sample(NamedTuple):
+    x: Float[Array, "n ..."]
+    y: Float[Array, "n ..."]
+
+
+# @jaxtyped(typechecker=typechecker)
+# def sort_sample(
+#     simulations: Float[Array, "b x"],
+#     parameters: Float[Array, "b y"],
+#     *,
+#     train_mode: Literal["npe", "nle"] 
+# ) -> Sample:
+#     """
+#         Sort simulations and parameters according to NPE or NLE
+        
+#         Args:
+#             train_mode (`str`): NPE or NLE mode of SBI.
+#             simulations (`Array`): Simulations array.
+#             parameters (`Array`): Parameters array.
+        
+#         Returns:
+#             (`Sample`): Ordered sample of simulations and parameters.
+#     """
+#     _nle = train_mode.lower() == "nle"
+#     return Sample(
+#         x=simulations if _nle else parameters,
+#         y=parameters if _nle else simulations 
+#     )
+
+
+class EpochDataLoader(eqx.Module):
+    # arrays: Tuple[Array, ...]
+    perms: Array  # shape (num_batches, n_batch)
+    train_mode: Literal["npe", "nle"] 
+
+    def __call__(self, arrays, idx: int):
+        # idx is a scalar index into the perms axis
+        batch_indices = self.perms[idx]
+        return sort_sample(
+            *tuple(array[batch_indices] for array in arrays), 
+            train_mode="nle"
+        )
+
+def make_epoch_loader(
+    arrays: Tuple[Array, ...], 
+    n_batch: int, 
+    key: PRNGKeyArray,
+    *,
+    train_mode: Literal["npe", "nle"] 
+) -> DataLoader:
+    dataset_size = arrays[0].shape[0]
+    n_batches = max(dataset_size // n_batch, 1)
+    # perm = jr.permutation(key, jnp.arange(dataset_size))
+    # perm = perm[: n_batches * n_batch] # NOTE: Drop remainder (jittable)
+    # perms = perm.reshape((n_batches, n_batch))
+    loader = DataLoader(
+        arrays, 
+        n_batch, # perms=perms, 
+        key=key,
+        train_mode=train_mode
+    )
+    return loader
+
+
+@jaxtyped(typechecker=typechecker)
+@eqx.filter_jit
+def make_step_with_loader(
+    nde: eqx.Module, 
+    loader: DataLoader,
+    step: int,
+    opt_state: PyTree,
+    opt: Optimiser,
+    key: PRNGKeyArray,
+    *,
+    clip_max_norm: Optional[float] = None,
+    sharding: Optional[jax.sharding.NamedSharding] = None,
+    replicated_sharding: Optional[PositionalSharding] = None,
+) -> Tuple[eqx.Module, PyTree, Float[Array, ""]]:
+    """
+    Performs a single optimization step for a neural density estimator.
+
+    Args:
+        nde: The neural density estimator model (`eqx.Module`) being optimized.
+        x: The input data of shape `(b, x)`.
+        y: The target data of shape `(b, y)`.
+        opt_state: The optimizer state (`PyTree`) used to compute parameter updates.
+        opt: The optimizer object (`Optimiser`) for computing updates.
+        key: A JAX random key for stochastic operations.
+        clip_max_norm: An optional float specifying the maximum norm for gradient clipping. Defaults to `None`.
+        replicated_sharding: An optional `PositionalSharding` object for distributing computations across devices. Defaults to `None`.
+
+    Returns:
+        A tuple containing:
+            - The updated model (`eqx.Module`).
+            - The updated optimizer state (`PyTree`).
+            - The loss value (`Float[Array, ""]`).
+
+    Notes:
+        - The function computes the loss and its gradients using `batch_loss_fn`.
+        - If `clip_max_norm` is specified, gradient clipping is applied.
+        - Supports distributed computations using sharding for model parameters and optimizer states.
+    """
+    _fn = eqx.filter_value_and_grad(batch_loss_fn)
+    
+    if replicated_sharding is not None:
+        nde, opt_state = eqx.filter_shard(
+            (nde, opt_state), replicated_sharding
+        )
+
+    xy = loader(step)
+
+    if sharding is not None:
+        xy = eqx.filter_shard(xy, sharding)
+
+    L, grads = _fn(nde, xy.x, xy.y, key=key)
+
+    if clip_max_norm is not None:
+        grads = clip_grad_norm(grads, clip_max_norm)
+
+    updates, opt_state = opt.update(grads, opt_state, nde)
+    nde = eqx.apply_updates(nde, updates)
+
+    if replicated_sharding is not None:
+        nde, opt_state = eqx.filter_shard(
+            (nde, opt_state), replicated_sharding
+        )
+
+    return nde, opt_state, L 
+
+
+@eqx.filter_jit
+def batch_eval_fn_with_loader(
+    nde: eqx.Module, 
+    loader: DataLoader,
+    step: int,
+    pdfs: Optional[Float[Array, "..."]] = None, 
+    key: Optional[Key[jnp.ndarray, "..."]] = None,
+    sharding: Optional[jax.sharding.NamedSharding] = None,
+    replicated_sharding: Optional[PositionalSharding] = None
+) -> Float[Array, ""]:
+    xy = loader(step)
+    if sharding is not None:
+        xy = eqx.filter_shard(xy, sharding)
+    if replicated_sharding is not None:
+        nde = eqx.filter_shard(nde, replicated_sharding)
+    nde = eqx.nn.inference_mode(nde, True)
+    keys = jr.split(key, len(xy.x))
+    loss = jax.vmap(nde.loss)(x=xy.x, y=xy.y, key=keys).mean()
+    return loss
 
 
 def count_params(nde: eqx.Module) -> int:
@@ -357,6 +508,7 @@ def train_nde(
     Raises:
         optuna.exceptions.TrialPruned: If the Optuna trial is pruned based on validation loss.
     """
+
     if results_dir is not None:
         if not os.path.exists(results_dir):
             os.mkdir(results_dir) 
@@ -397,13 +549,20 @@ def train_nde(
             key_loaders, data_train, data_valid, train_mode=train_mode
         )
 
+        # train_dataloader = make_epoch_loader(
+        #     data_train, n_batch, key=key_loaders, train_mode=train_mode
+        # )
+        # valid_dataloader = make_epoch_loader(
+        #     data_valid, n_batch, key=key_loaders, train_mode=train_mode
+        # )
+
         # Train 
         epoch_train_loss = 0.
         for s, xy in zip(
             range(n_train_batches), train_dataloader.loop(n_batch)
         ):
             key = jr.fold_in(key, s)
-            
+
             if sharding is not None:
                 xy = eqx.filter_shard(xy, sharding)
 
@@ -417,6 +576,18 @@ def train_nde(
                 clip_max_norm=clip_max_norm, 
                 replicated_sharding=replicated_sharding
             )
+
+            # model, opt_state, train_loss = make_step_with_loader(
+            #     model, 
+            #     train_dataloader,
+            #     s,
+            #     opt_state, 
+            #     opt, 
+            #     key=key, 
+            #     clip_max_norm=clip_max_norm, 
+            #     sharding=sharding,
+            #     replicated_sharding=replicated_sharding
+            # )
 
             epoch_train_loss += train_loss 
 
@@ -432,14 +603,19 @@ def train_nde(
         ):
             key = jr.fold_in(key, s)
 
+            # xy = valid_dataloader(s)
+
             if sharding is not None:
                 xy = eqx.filter_shard(xy, sharding)
 
-            valid_loss = batch_eval_fn(
+            valid_loss = batch_eval_fn( # _with_loader
                 ema_model if use_ema else model, 
                 xy.x, 
                 xy.y, 
+                # valid_dataloader,
+                # s,
                 key=key, 
+                # sharding=sharding,
                 replicated_sharding=replicated_sharding
             )
 
@@ -512,7 +688,7 @@ def train_nde(
     else:
         X, Y = data_valid
 
-    xy = sort_sample(train_mode, X, Y) # Arrange for NLE or NPE
+    xy = sort_sample(X, Y, train_mode=train_mode) # Arrange for NLE or NPE
 
     all_valid_loss = batch_eval_fn(
         ema_model if use_ema else model, 
@@ -709,14 +885,16 @@ def train_ensemble(
             stats[n]["all_valid_loss"] for n, _ in enumerate(ensemble.ndes)
         ]
     )
-    weights = jnp.atleast_1d(weights)
+    # weights = jnp.atleast_1d(weights)
     ensemble = eqx.tree_at(lambda e: e.weights, ensemble, weights)
 
     print("Weights:", ensemble.weights)
 
     if results_dir is not None:
         ensemble_save_path = os.path.join(results_dir, "ensemble.eqx")
+
         eqx.tree_serialise_leaves(ensemble_save_path, ensemble)
+
         print("Saved ensemble at {}".format(ensemble_save_path))
 
     return ensemble, stats

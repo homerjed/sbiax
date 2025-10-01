@@ -9,7 +9,7 @@ from constants import get_quijote_parameters, get_save_and_load_dirs, get_raw_qu
     Get fiducial and latin pdfs, plus/minus derivatives
 """
 
-USE_SOBOL = int(os.environ.get("USE_SOBOL", True))
+USE_SOBOL = True if os.environ.get("USE_SOBOL", "").lower() in ("1", "true") else False 
 
 quijote_dir = get_raw_quijote_dir()
 
@@ -69,10 +69,11 @@ for n in trange(n_fiducials, desc="Fiducials"):
                     os.path.join(quijote_dir, "fiducial/", f"{n}/", filename_),
                     unpack=True
                 )
+
+                ALL_FIDUCIAL_PDFS[n_z, n, n_R, :] = pdfs_z_R / D_deltas
+
             except Exception as e:
                 print(e)
-
-            ALL_FIDUCIAL_PDFS[n_z, n, n_R, :] = pdfs_z_R / D_deltas
 
             print(
                 f"\r fiducials: n={n:05d} " + 

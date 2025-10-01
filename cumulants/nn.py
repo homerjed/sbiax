@@ -5,6 +5,7 @@ import equinox as eqx
 from jaxtyping import Array, jaxtyped
 from beartype import beartype as typechecker
 import numpy as np
+from utils import plot_cumulants
 
 typecheck = jaxtyped(typechecker=typechecker)
 
@@ -171,8 +172,6 @@ if __name__ == "__main__":
 
     args = get_cumulants_sbi_args()
 
-    config, cumulants_dataset, datasets = get_datasets(args) # Config and cumulants_dataset can be bulk ... etc
-
     print("TIME:", datetime.datetime.now().strftime("%H:%M %d-%m-%y"))
     print("SEED:", args.seed)
     print("MOMENTS:", args.order_idx)
@@ -182,9 +181,16 @@ if __name__ == "__main__":
         Config
     """
 
-    config, cumulants_dataset, datasets = get_datasets(args) # Config and cumulants_dataset can be bulk ... etc
+    config, cumulants_dataset, datasets = get_datasets(args) 
 
     results_dir = get_results_dir(config, args)
+
+    plot_cumulants(
+        args, 
+        config, 
+        cumulants_dataset.data.fiducial_data, 
+        results_dir=results_dir
+    )
 
     key = jr.key(config.seed)
 
@@ -192,10 +198,6 @@ if __name__ == "__main__":
         model_key, train_key, key_prior, 
         key_datavector, key_state, key_sample
     ) = jr.split(key, 6)
-
-    results_dir = get_results_dir(config, args)
-
-    key = jr.key(config.seed)
 
     assert config.compression in ["nn", "nn-lbfgs"]
 
@@ -218,7 +220,7 @@ if __name__ == "__main__":
                 parameter_strings=cumulants_dataset.get_parameter_strings()
             ), 
             name="Params", 
-            color="blue", 
+            color="k", 
             plot_cloud=True, 
             plot_contour=False
         )
@@ -227,7 +229,7 @@ if __name__ == "__main__":
         Chain(
             samples=make_df(X, parameter_strings=cumulants_dataset.get_parameter_strings()), 
             name="Summaries", 
-            color="red", 
+            color="red" if cumulants_dataset.data.name == "tails" else "blue", 
             plot_cloud=True, 
             plot_contour=False
         )
@@ -243,7 +245,12 @@ if __name__ == "__main__":
     # Scatter plot
     fig, axs = plt.subplots(1, cumulants_dataset.data.alpha.size, figsize=(2. + 2. * cumulants_dataset.data.alpha.size, 2.5))
     for p, ax in enumerate(axs):
-        ax.scatter(cumulants_dataset.data.parameters[:, p], X[:, p], s=0.1)
+        ax.scatter(
+            cumulants_dataset.data.parameters[:, p], 
+            X[:, p], 
+            s=0.1, 
+            color="red" if cumulants_dataset.data.name == "tails" else "blue"
+        )
         ax.axline((0, 0), slope=1., color="k", linestyle="--")
         ax.set_xlim(cumulants_dataset.data.lower[p], cumulants_dataset.data.upper[p])
         ax.set_ylim(cumulants_dataset.data.lower[p], cumulants_dataset.data.upper[p])
@@ -278,9 +285,10 @@ if __name__ == "__main__":
         Chain(
             samples=make_df(X, parameter_strings=cumulants_dataset.get_parameter_strings()), 
             name="Summaries", 
-            color="red", 
+            # color="red", 
+            color="red" if cumulants_dataset.data.name == "tails" else "blue",
             plot_cloud=True, 
-            plot_contour=False
+            plot_contour=True
         )
     )
     # c.add_chain(
@@ -303,15 +311,19 @@ if __name__ == "__main__":
         )
     )
     fisher_samples = np.random.multivariate_normal(
-        cumulants_dataset.data.alpha, cumulants_dataset.data.Finv, (20_000,) 
+        cumulants_dataset.data.alpha, cumulants_dataset.data.Finv, (800_000,) 
     ) 
     fisher_samples_log_prob = jax.scipy.stats.multivariate_normal.logpdf(
         fisher_samples, 
         cumulants_dataset.data.alpha, 
         cumulants_dataset.data.Finv
     )
+
+    def cut_samples(samples, lower, upper):
+        return samples[np.all((samples >= lower) & (samples <= upper), axis=1)]
+
     fisher_df = make_df(
-        np.clip(fisher_samples, cumulants_dataset.data.lower, cumulants_dataset.data.upper),
+        cut_samples(fisher_samples, cumulants_dataset.data.lower, cumulants_dataset.data.upper),
         # samples_log_prob, 
         parameter_strings=cumulants_dataset.get_parameter_strings()
     )
@@ -319,7 +331,7 @@ if __name__ == "__main__":
         Chain(
             samples=fisher_df,
             name=r"$F_{\Sigma^{-1}}$" + " {}".format("clipped"),
-            color="g",
+            color="k",
             linestyle=":",
             shade_alpha=0.
         )
@@ -328,3 +340,5 @@ if __name__ == "__main__":
     fig = c.plotter.plot()
     plt.savefig(os.path.join(results_dir, "nn_params_fiducial.png")) 
     plt.close()
+
+    results_dir = get_results_dir(config, args)

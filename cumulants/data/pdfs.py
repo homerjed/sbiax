@@ -132,15 +132,15 @@ def get_calculated_cumulants_data(
         _ 
     ) = get_quijote_parameters()
 
-    p_value_min                  = config.p_value_min # Independent of choosing rho/delta for random variable of PDF
-    p_value_max                  = config.p_value_max 
+    p_value_min        = config.p_value_min # Independent of choosing rho/delta for random variable of PDF
+    p_value_max        = config.p_value_max 
 
-    cumulants                    = True                    # Use cumulants over moments (NOTE: check not calculating reduced-cumulants, Quijote uses cumulants)
-    use_means                    = use_means               # Use <delta> in calculation of cumulants from moments 
-    stack_means                  = stack_means             # Stack bulk mean do bulk datavector For full shape <delta> is very close to zero but <rho> approximately one
-    use_normalisations           = use_normalisations      # Stack M_0 normalisation of pdf into datavector ahead of mean M_1 
-    normalise                    = False #not use_normalisations  # Divide moments by M_0, don't do this if concatenating M_0 (NOTE: in quijote vs calculation comparison this is ignored in the bulk)
-    central_moments              = True                    # Calculate central moments or not (NOTE: 4th cumulant not the same as 4th central moment, but Bernardeau formulae use non-central moments)
+    cumulants          = True                    # Use cumulants over moments (NOTE: check not calculating reduced-cumulants, Quijote uses cumulants)
+    use_means          = use_means               # Use <delta> in calculation of cumulants from moments 
+    stack_means        = stack_means             # Stack bulk mean do bulk datavector For full shape <delta> is very close to zero but <rho> approximately one
+    use_normalisations = use_normalisations      # Stack M_0 normalisation of pdf into datavector ahead of mean M_1 
+    normalise          = False #not use_normalisations  # Divide moments by M_0, don't do this if concatenating M_0 (NOTE: in quijote vs calculation comparison this is ignored in the bulk)
+    central_moments    = True                    # Calculate central moments or not (NOTE: 4th cumulant not the same as 4th central moment, but Bernardeau formulae use non-central moments)
 
     # Value of normalisation of bulk PDF (NOTE: turn this off for the comparison? Divide ALL cumulants by this? => it's off for full-shape)
     fiducial_based_normalisation = config.p_value_max - config.p_value_min 
@@ -520,6 +520,8 @@ def get_calculated_cumulants_data(
                     #         cut=cut
                     #     )
 
+                    print("NORMALISATION:", pdf.sum())
+
                     cumulant = _pdf_to_cumulants_bulk(
                         pdf, 
                         deltas=deltas[cut], 
@@ -830,7 +832,9 @@ def get_calculated_cumulants_data(
         if NON_GAUSSIAN_TEST:
             logger.info("Using non-Gaussian linear model dataset [replacing only hypercube]...")
 
-            D, Y = get_linearised_data(config, return_dataset) 
+            # D, Y = get_linearised_data(config, return_dataset) 
+            key = jr.key(config.seed)
+            D, Y = get_non_gaussian_linear_model_data(config, return_dataset, key=key)
 
             return_dataset = replace(return_dataset, data=D, parameters=Y)
 
@@ -959,11 +963,11 @@ class BulkCumulantsDataset:
         )
         return P
 
-    def get_compression_fn(self):
+    def get_compression_fn(self, train: bool = True):
         if self.compression_fn is None:
             key = jr.key(self.config.seed)
             fn = get_compression_fn(
-                key, self.config, self.data, results_dir=self.results_dir
+                key, self.config, self.data, train=train, results_dir=self.results_dir
             )
             assert callable(fn), "Compression function returned is not callable"
             self.compression_fn = fn
@@ -1059,11 +1063,11 @@ class TailsCumulantsDataset:
         )
         return P
 
-    def get_compression_fn(self):
+    def get_compression_fn(self, train: bool = True):
         if self.compression_fn is None:
             key = jr.key(self.config.seed)
             fn = get_compression_fn(
-                key, self.config, self.data, results_dir=self.results_dir
+                key, self.config, self.data, train=train, results_dir=self.results_dir
             )
             assert callable(fn), "Compression function returned is not callable"
             self.compression_fn = fn

@@ -11,6 +11,7 @@ typecheck = jaxtyped(typechecker=typechecker)
 
 LogProbFn = Callable[[Float[Array, "p"]], Scalar]
 
+is_eqx_module = lambda l: isinstance(l, eqx.Module)
 
 def exists(v):
     return v is not None
@@ -24,7 +25,9 @@ def default_weights(
     weights: Float[Array, "n"], 
     ndes: list[eqx.Module]
 ) -> Float[Array, "n"]:
+
     assert len(ndes) > 0
+
     return weights if exists(weights) else jnp.ones((len(ndes),)) / len(ndes)
 
 
@@ -35,7 +38,7 @@ class Ensemble(eqx.Module):
 
     sbi_type: Literal["nle", "npe"]
     ndes: Sequence[eqx.Module]
-    n_ndes: int
+    # n_ndes: int
     weights: Float[Array, "n"]
 
     @typecheck
@@ -48,7 +51,12 @@ class Ensemble(eqx.Module):
         self.ndes = ndes
         self.sbi_type = sbi_type
         self.weights = default_weights(weights, ndes)
-        self.n_ndes = len(ndes)
+        # self.n_ndes = len(ndes)
+
+    @property
+    @typecheck
+    def n_ndes(self) -> int:
+        return len(self.ndes)
 
     @typecheck
     def nde_log_prob_fn(
@@ -104,51 +112,57 @@ class Ensemble(eqx.Module):
                 > Assumptions about datavector shape and batch axis...
             """
 
-            # Log-prob function with fixed parameters
-            fn = lambda data, key: nde.log_prob(x=data, y=theta, key=key)
+            # Log-prob function with fixed parameters, NLE, scaling done in here
+            log_prob_fn = lambda data, key: nde.log_prob(x=data, y=theta, key=key)
 
             # If stacked datavectors, split keys and vmap
             if data.ndim > 1:
+
                 if exists(key):
                     keys = jr.split(key, data.shape[0])
+                    in_axes = (0, 0)
                 else:
                     keys = None
-                L = jnp.sum(jax.vmap(fn)(data, keys)) # Independent => sum
+                    in_axes = (0, None)
+
+                L = jnp.sum(jax.vmap(log_prob_fn, in_axes=in_axes)(data, keys)) # Independent => sum
             else:
-                L = fn(data, key)
+                L = log_prob_fn(data, key)
 
             return L
 
         @typecheck
         def _joint_log_prob_fn(
-            theta: Float[Array, "p"], key: Optional[PRNGKeyArray] = None
+            theta: Float[Array, "p"], 
+            key: Optional[PRNGKeyArray] = None
         ) -> Scalar:
-            """ Joint log-probability function for ensemble of NDEs """
+            """ 
+                Joint log-probability function for ensemble of NDEs 
+            """
 
             if key is not None:
-                keys = jr.split(key, self.n_ndes) 
+                keys = list(jr.split(key, self.n_ndes)) # List for tree map
             else: 
                 keys = [None] * self.n_ndes
 
-            # fn = lambda nde, key: _maybe_vmap_nde_log_L(
-            #     nde=nde, data=data, theta=theta, key=key
-            # )
-            # nde_log_Ls = jax.tree.map(
-            #     lambda weight, key, nde: weight * jnp.exp(fn(nde, key)),
-            #     list(jnp.atleast_1d(self.weights)),
-            #     keys,
-            #     self.ndes
-            # )
-            # L = jnp.log(sum(nde_log_Ls)) 
+            assert jax.tree.structure(keys, is_leaf=lambda x: x is None) == jax.tree.structure(self.ndes, is_leaf=is_eqx_module), (
+                "Structure mismatch: keys / self.ndes: {}, {}".format(
+                    jax.tree.structure(keys, is_leaf=lambda x: x is None), jax.tree.structure(self.ndes, is_leaf=is_eqx_module)
+                )
+            )
 
+            # Possibly vmap the NDE over the data, given a parameter set,
+            # with a key for each NDE
             nde_log_Ls = jax.tree.map(
                 lambda key, nde: _maybe_vmap_nde_log_L(
                     nde=nde, data=data, theta=theta, key=key
                 ),
                 keys,
                 self.ndes,
-                is_leaf=lambda x: x is None # Allow keys=[None, ...]
+                is_leaf=lambda x: x is None # Allow keys=[None, None, ...]
             )
+
+            # Weighted sum of log-likelihoods
             L = jax.scipy.special.logsumexp(
                 jnp.asarray(nde_log_Ls), b=jnp.atleast_1d(self.weights)
             )
@@ -177,6 +191,11 @@ class Ensemble(eqx.Module):
             - losses is a list of final-epoch validation losses
             - never used in gradient calculations
         """
+
+        assert len(losses) == self.n_ndes, (
+            "Mismatch: len(losses)={} / self.n_ndes={}".format(losses, self.n_ndes)
+        )
+
         nde_Ls = jnp.array([-losses[n] for n, _ in enumerate(self.ndes)])
 
         nde_Ls = jnp.exp(nde_Ls - jnp.max(nde_Ls))
@@ -185,7 +204,7 @@ class Ensemble(eqx.Module):
 
         assert nde_weights.shape == (self.n_ndes,)
 
-        nde_weights = jnp.atleast_1d(nde_weights.astype(jnp.float32))
+        nde_weights = nde_weights.astype(jnp.float32)
 
         return nde_weights
 
@@ -194,6 +213,18 @@ class Ensemble(eqx.Module):
 
     def load_ensemble(self, path: str) -> eqx.Module:
         return eqx.tree_deserialise_leaves(path, self)
+
+
+# fn = lambda nde, key: _maybe_vmap_nde_log_L(
+#     nde=nde, data=data, theta=theta, key=key
+# )
+# nde_log_Ls = jax.tree.map(
+#     lambda weight, key, nde: weight * jnp.exp(fn(nde, key)),
+#     list(jnp.atleast_1d(self.weights)),
+#     keys,
+#     self.ndes
+# )
+# L = jnp.log(sum(nde_log_Ls)) 
 
 
 class MultiEnsemble(eqx.Module):
@@ -218,10 +249,12 @@ class MultiEnsemble(eqx.Module):
         self.prior = prior # Allow to be overwritten in inference call
         self.sbi_type = sbi_type
 
+        assert all([ensemble.sbi_type == "nle" for ensemble in self.ensembles])
+
     @typecheck
     def get_multi_ensemble_log_prob_fn(
         self, 
-        datavectors: list[Float[Array, "n d"]],# | Float[Array, "n d"], 
+        datavectors: list[Float[Array, "n d"]],
         prior: Optional[Distribution] = None
     ) -> LogProbFn:
         
@@ -241,6 +274,13 @@ class MultiEnsemble(eqx.Module):
             )
         )
 
+        # This will fail
+        assert jax.tree.structure(datavectors) == jax.tree.structure(self.ensembles, is_leaf=is_eqx_module), (
+            "Mismatch in datavectors / self.ensembles structures: {}, {}".format(
+                jax.tree.structure(datavectors), jax.tree.structure(self.ensembles, is_leaf=is_eqx_module)
+            )
+        )
+
         @typecheck
         def _multi_ensemble_log_prob_fn(theta: Float[Array, "p"]) -> Scalar:
 
@@ -251,6 +291,7 @@ class MultiEnsemble(eqx.Module):
             )
             L = jnp.sum(jnp.asarray(L))
 
+            # Force prior here since `ensemble_likelihood` doesn't use it by definition
             if self.sbi_type == "nle":
                 L = L + _prior.log_prob(theta) 
 

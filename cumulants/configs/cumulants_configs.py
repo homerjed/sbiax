@@ -8,7 +8,7 @@ from data.constants import ALL_RADII
 
 typecheck = jaxtyped(typechecker=typechecker)
 
-USE_SCALERS = True #if os.environ.get("USE_SCALERS", "").lower() in ("1", "true") else False 
+USE_SCALERS = True if os.environ.get("USE_SCALERS", "").lower() in ("1", "true") else False 
 DEFAULT_NDE_TYPE = os.environ.get("DEFAULT_NDE_TYPE", None)
 DEFAULT_N_NDES = int(os.environ.get("DEFAULT_N_NDES", 1))
 NON_GAUSSIAN_TEST = True if os.environ.get("NON_GAUSSIAN_TEST", "").lower() in ("1", "true") else False
@@ -43,7 +43,7 @@ DEFAULT_CNF_ARCH = dict(
     activation       = "tanh",
     dropout_rate     = 0.,
     dt               = 0.05,
-    t1               = 1.,
+    t1               = 1.,  
     solver           = "Euler", # Heun
     exact_log_prob   = True,
     use_scaling      = True # Defaults  
@@ -87,7 +87,7 @@ HP_OPT_OPT_CNF = dict(
     start_step       = 0,
     n_epochs         = 10_000,
     n_batch          = 70, 
-    patience         = 500, #250, #190, 
+    patience         = 50, #250, #190, 
     lr               = 0.00013408396337403455,
     opt              = "lion",
     opt_kwargs       = {}
@@ -105,12 +105,18 @@ N_NDES = default(int(DEFAULT_N_NDES), 1)
 
 
 def get_default_nde(cnf, maf):
-    _default = {"CNF": cnf, "MAF": maf}[DEFAULT_NDE_TYPE] if exists(DEFAULT_NDE_TYPE) else None
+    _default = (
+        {"CNF": cnf, "MAF": maf}[DEFAULT_NDE_TYPE] 
+        if exists(DEFAULT_NDE_TYPE) else None
+    )
     return default(_default, maf)
 
 
 def get_default_nde_opt():
-    _default = {"CNF": DEFAULT_OPT_CNF, "MAF": DEFAULT_OPT_MAF}[DEFAULT_NDE_TYPE] if exists(DEFAULT_NDE_TYPE) else DEFAULT_OPT 
+    _default = (
+        {"CNF": DEFAULT_OPT_CNF, "MAF": DEFAULT_OPT_MAF}[DEFAULT_NDE_TYPE] 
+        if exists(DEFAULT_NDE_TYPE) else DEFAULT_OPT 
+    )
     return _default
 
 
@@ -119,29 +125,29 @@ def get_config_ndes(config):
 
     # CNF
     cnf = ConfigDict()
-    cnf.model_type       = "cnf"
-    cnf.width_size       = DEFAULT_CNF_ARCH["width_size"]
-    cnf.depth            = DEFAULT_CNF_ARCH["depth"]
-    cnf.activation       = DEFAULT_CNF_ARCH["activation"]
-    cnf.dropout_rate     = DEFAULT_CNF_ARCH["dropout_rate"]
-    cnf.dt               = DEFAULT_CNF_ARCH["dt"]
-    cnf.t1               = DEFAULT_CNF_ARCH["t1"]
-    cnf.solver           = DEFAULT_CNF_ARCH["solver"]
-    cnf.exact_log_prob   = DEFAULT_CNF_ARCH["exact_log_prob"]
-    cnf.use_scaling      = DEFAULT_CNF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
+    cnf.model_type      = "cnf"
+    cnf.width_size      = DEFAULT_CNF_ARCH["width_size"]
+    cnf.depth           = DEFAULT_CNF_ARCH["depth"]
+    cnf.activation      = DEFAULT_CNF_ARCH["activation"]
+    cnf.dropout_rate    = DEFAULT_CNF_ARCH["dropout_rate"]
+    cnf.dt              = DEFAULT_CNF_ARCH["dt"]
+    cnf.t1              = DEFAULT_CNF_ARCH["t1"]
+    cnf.solver          = DEFAULT_CNF_ARCH["solver"]
+    cnf.exact_log_prob  = DEFAULT_CNF_ARCH["exact_log_prob"]
+    cnf.use_scaling     = DEFAULT_CNF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
     # MAF
     maf = ConfigDict()
-    maf.model_type       = "maf" # = model.__class__.__name__
-    maf.width_size       = DEFAULT_MAF_ARCH["width_size"]
-    maf.n_layers         = DEFAULT_MAF_ARCH["n_layers"]
-    maf.nn_depth         = DEFAULT_MAF_ARCH["nn_depth"]
-    maf.activation       = DEFAULT_MAF_ARCH["activation"]
-    maf.use_scaling      = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
+    maf.model_type      = "maf" # = model.__class__.__name__
+    maf.width_size      = DEFAULT_MAF_ARCH["width_size"]
+    maf.n_layers        = DEFAULT_MAF_ARCH["n_layers"]
+    maf.nn_depth        = DEFAULT_MAF_ARCH["nn_depth"]
+    maf.activation      = DEFAULT_MAF_ARCH["activation"]
+    maf.use_scaling     = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
     # Ensemble
-    config.ndes          = [get_default_nde(cnf, maf)] * N_NDES
-    config.n_ndes        = len(config.ndes)
+    config.ndes         = [get_default_nde(cnf, maf)] * N_NDES
+    config.n_ndes       = len(config.ndes)
 
     _CONFIG_DEFAULT_OPT = get_default_nde_opt()
 
@@ -195,43 +201,46 @@ def get_config_nn(config: ConfigDict, bulk_or_tails: str) -> ConfigDict:
     config.nn = nn = ConfigDict()
     nn.train = train = ConfigDict()
 
-    if bulk_or_tails == "bulk":
-        if NON_GAUSSIAN_TEST:
-            nn.width_size    = 64 #256 # 32
-            nn.depth         = 0 # 3
-        else:
-            nn.width_size    = 64 # 32
-            nn.depth         = 0 # 3
-        nn.activation        = "tanh"
-        nn.use_final_bias    = True
-        nn.n_ensemble        = 1 
-        nn.use_pca           = False
+    USE_FINAL_BIAS = True
 
-        train.opt            = "adamw"
-        train.lr             = 1e-3
-        train.n_batch        = None # Batch dataset or not
-        train.patience       = 1_000 # 3000
-        train.n_steps        = 200_000
-        train.valid_fraction = 0.1
+    if bulk_or_tails == "bulk":
+        if config.linearised:
+            nn.width_size        = [None] # No hidden layer
+            nn.depth             = 0 
+            nn.activation        = "" # Use final bias / use bias are the same for this net
+            train.patience       = 2000 # 500
+            nn.use_final_bias    = USE_FINAL_BIAS
+        else:
+            nn.width_size        = [128, 64, 32] #[64, 32, 16, 8] # 64 # 1024 # 64 # 32
+            nn.depth             = 3  # 1 # 3
+            nn.activation        = "tanh" # gelu
+            train.patience       = 4000 # 1000 # 700
+            nn.use_final_bias    = USE_FINAL_BIAS
 
     if bulk_or_tails == "tails":
-        if NON_GAUSSIAN_TEST:
-            nn.width_size    = 64
-            nn.depth         = 0 # 3
+        if config.linearised:
+            nn.width_size        = [None] # No hidden layer
+            nn.depth             = 0 # 3
+            nn.activation        = ""
+            train.patience       = 2000 # 500
+            nn.use_final_bias    = USE_FINAL_BIAS
         else:
-            nn.width_size    = 64 # 32
-            nn.depth         = 0 # 3
-        nn.activation        = "tanh"
-        nn.use_final_bias    = True 
-        nn.n_ensemble        = 1 
-        nn.use_pca           = False
+            nn.width_size        = [128, 64, 32] #[64, 32, 16, 8] # 64 # 1024 # 64
+            nn.depth             = 3 # 1 
+            nn.activation        = "tanh" # gelu
+            train.patience       = 4000 # 1000 # 700
+            nn.use_final_bias    = USE_FINAL_BIAS
 
-        train.opt            = "adamw"
-        train.lr             = 1e-3
-        train.n_batch        = None # Batch dataset or not
-        train.patience       = 1_000 # 3000
-        train.n_steps        = 200_000
-        train.valid_fraction = 0.1
+    # train.patience       = 200
+
+    train.opt            = "adamw"#w"
+    train.lr             = 1e-3
+    train.n_batch        = 20_000 # None # Batch dataset or not
+    train.n_steps        = 10_000_000
+    train.valid_fraction = 0.8
+
+    nn.n_ensemble        = 1 
+    nn.use_pca           = False
     
     return config
 
@@ -269,8 +278,8 @@ def default_cumulants_configuration(
 def default_cut_configuration(config, bulk_or_tails):
 
     if bulk_or_tails == "tails":
-        config.p_value_min    = 0.01
-        config.p_value_max    = 0.99
+        config.p_value_min    = 0.0
+        config.p_value_max    = 0.999999
     if bulk_or_tails == "bulk":
         config.p_value_min    = 0.03
         config.p_value_max    = 0.90
@@ -296,6 +305,7 @@ def cumulants_config(
     pre_train: bool = False,
     use_planck: bool = False
 ) -> ConfigDict:
+    """ This is the tails config """
 
     config = ConfigDict()
 

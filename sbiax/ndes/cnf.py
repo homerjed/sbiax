@@ -458,6 +458,7 @@ class CNF(eqx.Module):
         dropout_rate: float = 0.,
         solver: Optional[dfx.AbstractSolver] = None,
         scaler: eqx.Module = None,
+        bounds: Optional[Float[Array, "p 2"]] = None,
         *,
         key: Key
     ):
@@ -576,7 +577,9 @@ class CNF(eqx.Module):
         x0 = (x, 0.)
         soln = dfx.diffeqsolve(term, solver, 0., self.t1, self.dt, x0, args)
         (z,), (delta_log_likelihood,) = soln.ys
+
         log_prob = delta_log_likelihood + self.prior_log_prob(z)
+
         return log_prob
 
     @jaxtyped(typechecker=typechecker)
@@ -639,6 +642,7 @@ class CNF(eqx.Module):
         (x,), (delta_log_likelihood,) = soln.ys
 
         log_prob = delta_log_likelihood + self.prior_log_prob(z)
+
         return x, log_prob
 
     @jaxtyped(typechecker=typechecker)
@@ -680,6 +684,7 @@ class CNF(eqx.Module):
         )
         keys = jr.split(key, n_samples)
         samples, log_probs = _sampler(keys, y)
+
         return samples, log_probs 
 
     def prior_log_prob(self, z: Float[Array, "{self.x_dim}"]) -> Float[Array, ""]:

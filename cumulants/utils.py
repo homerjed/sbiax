@@ -1,7 +1,7 @@
 import os 
 import time
 import argparse
-from typing import Literal, Callable
+from typing import Literal, Callable, Union
 import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
@@ -19,16 +19,78 @@ from configs.log import setup_module_logger, get_log_level
 from configs.configs import get_results_dir
 from configs.cumulants_configs import cumulants_config, bulk_cumulants_config, bulk_pdf_config
 from data.common import Dataset
-from data.pdfs import BulkCumulantsDataset, BulkPDFsDataset, TailsCumulantsDataset
 from data.cumulants import CumulantsDataset
 from data.constants import get_alpha_and_parameter_strings, LOWER, UPPER, get_target_idx
 
 logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
-DatasetType = CumulantsDataset | BulkCumulantsDataset | BulkPDFsDataset | TailsCumulantsDataset
 
 FORCE_RECOMPUTE_DATASET = True if os.environ.get("FORCE_RECOMPUTE_DATASET", "").lower() in ("1", "true") else False 
 USE_QUIJOTE_TAILS = True if os.environ.get("USE_QUIJOTE_TAILS", "").lower() in ("1", "true") else False
+USE_SOBOL = True if os.environ.get("USE_SOBOL", "").lower() in ("1", "true") else False 
+
+if USE_SOBOL:
+    from data.get_sobol_cumulants import (
+        SobolBulkCumulantsDataset, 
+        SobolTailsCumulantsDataset, 
+        SobolBulkPDFsDataset
+    )
+    DatasetType = Union[
+        SobolBulkCumulantsDataset, 
+        SobolBulkPDFsDataset, 
+        SobolTailsCumulantsDataset
+    ]
+else:
+    from data.pdfs import (
+        BulkCumulantsDataset, 
+        BulkPDFsDataset, 
+        TailsCumulantsDataset
+    )
+    DatasetType = Union[
+        CumulantsDataset, 
+        BulkCumulantsDataset, 
+        BulkPDFsDataset, 
+        TailsCumulantsDataset
+    ]
+
+
+import matplotlib.patches as patches
+
+def overlay_bounds_on_corner(fig, lower, upper, *, ec="k", lw=1.5, alpha=0.12):
+    lower = list(lower) 
+    upper = list(upper)
+    n = len(lower)
+
+    # Map each Axes to its (row, col) index in the n x n grid
+    ax_at = {}
+    for ax in fig.axes:
+        ss = ax.get_subplotspec()
+        r, c = ss.rowspan.start, ss.colspan.start
+        ax_at[(r, c)] = ax
+
+    # Diagonals: 1D marginals (shade the allowed interval)
+    for i in range(n):
+        ax = ax_at.get((i, i))
+        if ax is None: 
+            continue
+        ax.axvspan(lower[i], upper[i], color=ec, fc=None, alpha=alpha * 0.5, lw=0)
+
+    # Off-diagonals (lower triangle): draw rectangles
+    for i in range(1, n):          # rows (y = param i)
+        for j in range(0, i):      # cols (x = param j)
+            ax = ax_at.get((i, j))
+            if ax is None: 
+                continue
+            rect = patches.Rectangle(
+                (lower[j], upper[i]),                 # (x0, y0)
+                (upper[j] - lower[j]),                  # width  in x (param j)
+                -(upper[i] - lower[i]),                  # height in y (param i)
+                fill=False, 
+                ec=ec, 
+                lw=lw, 
+                linestyle=":"
+            )
+            ax.add_patch(rect)
 
 
 def get_fisher_chain_df(alpha, Finv, parameter_strings=None, prior_clip=True):
@@ -61,7 +123,9 @@ def finite_samples_log_prob(samples_log_prob):
     n_bad = jnp.logical_or(
         jnp.isnan(samples_log_prob), jnp.isneginf(samples_log_prob)
     ).sum()
+
     print("CHAIN HAS {}/{} bad samples:".format(n_bad, samples_log_prob.size))
+
     samples_log_prob = jnp.where(
         jnp.logical_or(
             jnp.isnan(samples_log_prob), 
@@ -70,6 +134,7 @@ def finite_samples_log_prob(samples_log_prob):
         -1e32,
         samples_log_prob
     )
+
     return samples_log_prob
 
 
@@ -84,24 +149,38 @@ def get_dataset_and_config(
     )
 
     if bulk_or_tails == "bulk": 
-        dataset_constructor = BulkCumulantsDataset
+        if USE_SOBOL:
+            dataset_constructor = SobolBulkCumulantsDataset
+        else:
+            dataset_constructor = BulkCumulantsDataset
 
-        config = bulk_cumulants_config 
+        config = bulk_cumulants_config
+
     if bulk_or_tails == "bulk_pdf":
-        dataset_constructor = BulkPDFsDataset
+        if USE_SOBOL:
+            dataset_constructor = SobolBulkPDFsDataset
+        else:
+            dataset_constructor = BulkPDFsDataset
 
         config = bulk_pdf_config 
+
     if bulk_or_tails == "tails":
         if USE_QUIJOTE_TAILS:
             logger.info("NOTE:\n\tusing Quijote data for full-shape dataset.")
             print("NOTE:\n\tusing Quijote data for full-shape dataset.")
+
+            if USE_SOBOL:
+                raise NotImplementedError()
 
             dataset_constructor = CumulantsDataset
         else:
             logger.info("NOTE:\n\tusing calculations for full-shape dataset.")
             print("NOTE:\n\tusing calculations for full-shape dataset.")
 
-            dataset_constructor = TailsCumulantsDataset 
+            if USE_SOBOL:
+                dataset_constructor = SobolTailsCumulantsDataset
+            else:
+                dataset_constructor = TailsCumulantsDataset 
 
         config = cumulants_config 
 
@@ -142,11 +221,16 @@ def get_datasets(args: argparse.Namespace) -> tuple[ConfigDict, Dataset, dict[st
             configs[dataset_type], results_dir=results_dir
         )
 
+        assert args.redshift == configs[dataset_type].redshift == datasets[dataset_type].config.redshift, (
+            "Mistmatch in redshifts for args / config / dataset = {} / {} / {}".format(
+                args.redshift, configs[dataset_type].redshift, datasets[dataset_type].config.redshift
+            )
+        )
 
     # Config and dataset being used in the experiment
     config = configs[args.bulk_or_tails]
     dataset = datasets[args.bulk_or_tails]
-
+    
     # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
     fig, axs = plt.subplots(1, 3, figsize=(12., 4.))
@@ -291,7 +375,7 @@ def plot_cumulants(args, config, cumulants, results_dir):
 
     n_scales = len(config.scales)
     n_cumulants_plot = 3
-    if args.bulk_or_tails == "bulk":
+    if 1: #args.bulk_or_tails == "bulk":
         if config.stack_means:
             n_cumulants_plot += 1
         if config.use_normalisations:
@@ -479,7 +563,7 @@ def plot_summaries(X, P, dataset, results_dir=None):
         plt.show()
 
 
-def plot_summaries_fiducial(X, X_, alpha, dataset, results_dir=None, Finv=None):
+def plot_summaries_fiducial(X, X_, alpha, dataset, results_dir=None, Finv=None, filename=None):
 
     P = jnp.tile(alpha[jnp.newaxis, :], (X.shape[0], 1))
 
@@ -489,7 +573,7 @@ def plot_summaries_fiducial(X, X_, alpha, dataset, results_dir=None, Finv=None):
         Chain(
             samples=make_df(P, parameter_strings=dataset.parameter_strings), 
             name="Params", 
-            color="blue", 
+            color="k", 
             plot_cloud=True, 
             plot_contour=False
         )
@@ -498,30 +582,53 @@ def plot_summaries_fiducial(X, X_, alpha, dataset, results_dir=None, Finv=None):
         Chain(
             samples=make_df(X, parameter_strings=dataset.parameter_strings), 
             name="Summaries", 
-            color="red", 
+            color="red" if dataset.name == "tails" else "blue", 
             plot_cloud=True, 
-            plot_contour=False
+            plot_contour=True
         )
     )
     c.add_chain(
         Chain(
             samples=make_df(X_, parameter_strings=dataset.parameter_strings), 
             name="Summaries data", 
-            color="blue", 
+            color="red" if dataset.name == "tails" else "blue", 
             plot_cloud=True, 
             plot_contour=False
         )
     )
-    c.add_chain(
-        Chain.from_covariance(
-            dataset.alpha,
+
+    n_fisher_samples = 800_000
+
+    def cut_samples(samples, lower, upper):
+        return samples[np.all((samples >= lower) & (samples <= upper), axis=1)]
+
+    fisher_samples = cut_samples(
+        np.random.multivariate_normal(
+            dataset.alpha, 
             Finv if Finv is not None else dataset.Finv,
-            columns=dataset.parameter_strings,
+            size=(n_fisher_samples,)
+        ), 
+        LOWER, 
+        UPPER
+    )
+
+    c.add_chain(
+        Chain(
+            samples=make_df(fisher_samples, parameter_strings=dataset.parameter_strings), 
             name=r"$F_{\Sigma^{-1}}$",
             color="k",
             linestyle=":",
             shade_alpha=0.
         )
+        # Chain.from_covariance(
+        #     dataset.alpha,
+        #     Finv if Finv is not None else dataset.Finv,
+        #     columns=dataset.parameter_strings,
+        #     name=r"$F_{\Sigma^{-1}}$",
+        #     color="k",
+        #     linestyle=":",
+        #     shade_alpha=0.
+        # )
     )
     c.add_truth(
         Truth(location=dict(zip(dataset.parameter_strings, dataset.alpha)), name=r"$\pi^0$")
@@ -536,8 +643,13 @@ def plot_summaries_fiducial(X, X_, alpha, dataset, results_dir=None, Finv=None):
     # )
     # c.set_plot_config(plot_config)
     fig = c.plotter.plot()
+    overlay_bounds_on_corner(fig, dataset.lower, dataset.upper)
+
     if results_dir is not None:
-        plt.savefig(os.path.join(results_dir, "fiducial_params.png")) 
+        if filename is not None:
+            plt.savefig(os.path.join(results_dir, filename)) 
+        else:
+            plt.savefig(os.path.join(results_dir, "fiducial_params.png")) 
         plt.close()
     else:
         plt.show()
