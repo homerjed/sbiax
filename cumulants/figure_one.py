@@ -3,7 +3,7 @@ import os
 import jax
 import numpy as np
 import matplotlib.pyplot as plt
-from chainconsumer import ChainConsumer, Chain
+from chainconsumer import ChainConsumer, Chain, Truth
 
 from sbiax.utils import make_df, marker
 
@@ -19,18 +19,15 @@ from data.constants import (
     get_quijote_parameters, 
     get_save_and_load_dirs,
     get_target_idx,
-    get_Finv_planck,
     get_cumulant_names,
     ALPHA,
     PARAMETER_STRINGS,
     LOWER,
     UPPER
 )
+from utils import customize_plot
 
 USE_SOBOL = True if os.environ.get("USE_SOBOL", "").lower() in ("1", "true") else False 
-
-BLACKJAX_SAMPLE = True if os.environ.get("BLACKJAX_SAMPLE", "").lower() in ("1", "true") else False 
-AFFINE_SAMPLE = True if os.environ.get("AFFINE_SAMPLE", "").lower() in ("1", "true") else False
 
 N_LINEAR_SIMS = 32768 if USE_SOBOL else 2000
 
@@ -44,48 +41,6 @@ jax.clear_caches()
 PLOT_SUMMARIES = False
 
 target_idx = get_target_idx()
-
-
-def customize_plot(fig, lw=1.5, fs=16):
-    fig.set_size_inches(6., 6.)
-    fig.set_dpi(200)
-
-    # Loop over axes to customize them
-    for ax in fig.axes:
-        # Change axis label font sizes
-        ax.xaxis.label.set_size(fs)
-        ax.yaxis.label.set_size(fs)
-
-        # Change tick label font sizes
-        ax.tick_params(axis='both', labelsize=fs - 2)
-
-        # Change spline (axis spine) linewidths
-        for spine in ax.spines.values():
-            spine.set_linewidth(lw)
-
-        # Change contour line widths (if any exist)
-        for coll in ax.collections:
-            if hasattr(coll, 'get_linewidths'):
-                coll.set_linewidths([lw])  # or another desired width
-
-        # Identify diagonal axes
-        for line in ax.lines:
-            line.set_linewidth(lw)  # set your desired linewidth here
-
-        # Legend fontsize
-        legend = ax.get_legend()
-        if legend is not None:
-            for text in legend.get_texts():
-                text.set_fontsize(fs) 
-
-        # Marker sizes
-        for coll in ax.collections:
-            if hasattr(coll, 'get_sizes'):  # Check if this is a PathCollection (e.g. scatter/marker)
-                sizes = coll.get_sizes()
-                if len(sizes) > 0:
-                    # Set new marker size (squared points); e.g., 50 means ~7 px
-                    coll.set_sizes([50] * len(sizes))
-    return fig
 
 
 def get_posterior_object(posterior_file):
@@ -190,9 +145,7 @@ multi_z_args.redshifts         = figure_one_args.redshifts
 multi_z_args.linearised        = figure_one_args.linearised 
 multi_z_args.pre_train         = figure_one_args.pre_train
 multi_z_args.order_idx         = figure_one_args.order_idx
-multi_z_args.freeze_parameters = figure_one_args.freeze_parameters
 multi_z_args.n_linear_sims     = figure_one_args.n_linear_sims
-multi_z_args.use_planck        = figure_one_args.use_planck
 
 # Loop through bulk / tails (just grab PDF Fisher forecast, no posterior for PDFs)
 posterior_objects = dict(bulk=None, tails=None)
@@ -203,18 +156,18 @@ for bulk_or_tails in ["bulk", "tails"]:
     multi_z_args.bulk_or_tails = bulk_or_tails 
 
     # Posterior for bulk/tails for a given seed
-    posterior_filename = get_multi_z_posterior_filename(multi_z_args, blackjax=BLACKJAX_SAMPLE) # If False, uses affine sampling
+    posterior_filename = get_multi_z_posterior_filename(multi_z_args) # If False, uses affine sampling
     posterior_file = np.load(posterior_filename)
     posterior_object = get_posterior_object(posterior_file)
  
-    posterior_objects[bulk_or_tails] = posterior_object # NOTE: already F_planck'd 
+    posterior_objects[bulk_or_tails] = posterior_object 
 
     # MCMC posterior loading
-    mcmc_posterior_filename = get_multi_z_posterior_filename(multi_z_args, mcmc=True, blackjax=BLACKJAX_SAMPLE)
+    mcmc_posterior_filename = get_multi_z_posterior_filename(multi_z_args, mcmc=True)
     mcmc_posterior_file = np.load(mcmc_posterior_filename)
     mcmc_posterior_object = get_posterior_object(mcmc_posterior_file)
  
-    mcmc_posterior_objects[bulk_or_tails] = mcmc_posterior_object # NOTE: already F_planck'd 
+    mcmc_posterior_objects[bulk_or_tails] = mcmc_posterior_object 
 
     print("MULTI-Z POSTERIOR FILENAME:\n", posterior_filename)
     print("MULTI-Z POSTERIOR FILENAME (MCMC):\n", mcmc_posterior_filename)
@@ -222,7 +175,7 @@ for bulk_or_tails in ["bulk", "tails"]:
 
 # Get the bulk PDF Fisher forecast for all redshifts 
 # (easier to load frozen or not since it autosaves...)
-Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, multi_z_args) # NOTE: already F_planck'd 
+Finv_bulk_pdfs_all_z = load_multi_z_bulk_pdf_fisher_forecast(data_dir, multi_z_args) 
 Finv_bulk_pdfs_all_z = Finv_bulk_pdfs_all_z / multi_z_args.n_datavectors 
 
 """ 
@@ -235,11 +188,7 @@ def cut_samples(samples, lower, upper):
     return samples[np.all((samples >= lower) & (samples <= upper), axis=1)]
 
 # Load posteriors from bulk / tails for marginalised and non-marginalised cases
-for marginalised in [True, False]:
-
-    # Don't plot marginalised posterior if freezing parameters, 'same' effect...
-    if marginalised and multi_z_args.freeze_parameters:
-        continue
+for marginalised in [False]: # , True]:
 
     # Plot 
     c = ChainConsumer() 
@@ -276,7 +225,7 @@ for marginalised in [True, False]:
             _mcmc_posterior_object, 
             *_
         ) = maybe_marginalise(
-            mcmc_posterior_object, 
+            _mcmc_posterior_object, # Pass the correct mcmc posterior into the loop
             alpha, 
             parameter_strings, 
             Finv_bulk_pdfs_all_z, 
@@ -285,10 +234,6 @@ for marginalised in [True, False]:
             upper=UPPER,
             marginalise=marginalised
         )
-
-        if multi_z_args.freeze_parameters: 
-            _alpha = alpha[target_idx]
-            _parameter_strings = [parameter_strings[t] for t in target_idx]
         
         print(
             "_alpha", _alpha.shape, 
@@ -296,6 +241,10 @@ for marginalised in [True, False]:
             "_mcmc_posterior_object", jax.tree.map(lambda x: x.shape, _mcmc_posterior_object), 
             "_Finv_bulk", _Finv_bulk_pdfs_all_z.shape
         )
+
+        """
+            Fisher
+        """
 
         # Fisher clipped (NOTE: this fisher is scaled by n_datavectors)
         fisher_samples = np.random.multivariate_normal(
@@ -310,7 +259,7 @@ for marginalised in [True, False]:
                 samples=fisher_df,
                 name=r"$F_{\Sigma^{-1}}$ " + title,
                 color=plotting_dict[bulk_or_tails]["color"],
-                linestyle=":",
+                linestyle="-",
                 shade_alpha=0.
             )
             # Chain.from_covariance(
@@ -324,6 +273,10 @@ for marginalised in [True, False]:
             # )
         )
 
+        """
+            SBI
+        """
+
         # Posterior from SBI on bulk or tails
         posterior_df = make_df(
             _posterior_object.samples, 
@@ -332,12 +285,19 @@ for marginalised in [True, False]:
         )
         c.add_chain(
             Chain(
-                samples=posterior_df, name="SBI " + title, 
+                samples=posterior_df, 
+                name="SBI " + title, 
                 color=plotting_dict[bulk_or_tails]["color"],
                 linestyle=plotting_dict[bulk_or_tails]["linestyle"],
-                shade_alpha=plotting_dict[bulk_or_tails]["shade_alpha"],
+                shade=True,
+                shade_alpha=0.5
+                # shade_alpha=plotting_dict[bulk_or_tails]["shade_alpha"],
             )
         )
+
+        """
+            MCMC 
+        """
 
         # Posterior from MCMC on bulk or tails
         mcmc_posterior_df = make_df(
@@ -347,10 +307,12 @@ for marginalised in [True, False]:
         )
         c.add_chain(
             Chain(
-                samples=mcmc_posterior_df, name="MCMC " + title, 
+                samples=mcmc_posterior_df, 
+                name="MCMC " + title, 
                 color=plotting_dict[bulk_or_tails]["color"], #"#9426B6", #plotting_dict[bulk_or_tails]["color"],
                 linestyle="--",# if bulk_or_tails == "bulk" else "--",
-                shade_alpha=plotting_dict[bulk_or_tails]["shade_alpha"],
+                shade=False,
+                # shade_alpha=plotting_dict[bulk_or_tails]["shade_alpha"],
             )
         )
 
@@ -372,6 +334,10 @@ for marginalised in [True, False]:
                 color=plotting_dict[bulk_or_tails]["color"]
             )
 
+    """
+        Fisher (PDF)
+    """
+
     # Fisher forecast for bulk of PDF over all redshifts
     fisher_samples = np.random.multivariate_normal(
         _alpha, _Finv_bulk_pdfs_all_z, (n_fisher_samples,) # NOTE: wasn't PDFs just before?
@@ -386,7 +352,7 @@ for marginalised in [True, False]:
             samples=fisher_df,
             name=r"$F_{\Sigma^{-1}}$ PDF[bulk]",
             color="g",
-            linestyle=":",
+            linestyle="-",
             shade_alpha=0.
         )
         # Chain.from_covariance(
@@ -401,11 +367,14 @@ for marginalised in [True, False]:
     )
 
     # True parameters
-    c.add_marker(
-        location=marker(_alpha, _parameter_strings), 
-        name=r"$\alpha$", 
-        color="#7600bc",
-        marker_style="x"
+    # c.add_marker(
+    #     location=marker(_alpha, _parameter_strings), 
+    #     name=r"$\alpha$", 
+    #     color="#7600bc",
+    #     marker_style="x"
+    # )
+    c.add_truth(
+        Truth(location=dict(zip(_parameter_strings, _alpha)), name=r"$\pi^0$")
     )
 
     fig = c.plotter.plot()
@@ -426,7 +395,6 @@ for marginalised in [True, False]:
     # Naming convention for figure one
     sub_figs_dir = os.path.join(
         figs_dir, 
-        "frozen/" if multi_z_args.freeze_parameters else "nofrozen/", 
         "linearised/" if multi_z_args.linearised else "nonlinearised/", 
         "pretrain/" if multi_z_args.pre_train else "nopretrain/", 
         "m{}/".format("".join(map(str, multi_z_args.order_idx))),
@@ -444,7 +412,94 @@ for marginalised in [True, False]:
         )
     )
 
-    plt.savefig(filename)
+    fig.savefig(filename)
+
+    """ 
+        Save untitled figure too
+    """
+    fig.suptitle("")
+
+    no_title_sub_figs_dir = os.path.join(sub_figs_dir, "no_title/")
+    if not os.path.exists(no_title_sub_figs_dir):
+        os.makedirs(no_title_sub_figs_dir)
+
+    filename = os.path.join(
+        no_title_sub_figs_dir, 
+        "figure_one_{}{}{}_notitle.pdf".format(
+            multi_z_args.seed, 
+            ("_" + str(multi_z_args.seed_datavector)) if multi_z_args.seed_datavector is not None else "",
+            "_marginalised" if marginalised else ""
+        )
+    )
+    fig.savefig(filename)
+
+    """ 
+        Save figure with summaries
+    """
+
+    try:
+        # Compressed datavectors (assuming more than one of them)
+        for bulk_or_tails in ["bulk", "tails"]:
+
+            title = "$k_n$[{}]".format(bulk_or_tails) 
+
+            _posterior_object = posterior_objects[bulk_or_tails]
+
+            (
+                _posterior_object, 
+                _alpha,
+                _parameter_strings,
+                _Finv_bulk_pdfs_all_z,
+                _lower,
+                _upper
+            ) = maybe_marginalise(
+                _posterior_object, 
+                alpha, 
+                parameter_strings, 
+                Finv_bulk_pdfs_all_z, 
+                target_idx=target_idx,
+                lower=LOWER,
+                upper=UPPER,
+                marginalise=marginalised
+            )
+
+            z_markers = [".", "d", "s"]
+            for n_z, _summaries in enumerate(_posterior_object.summaries):
+                for n, _summary in enumerate(_summaries):
+                    c.add_marker(
+                        location=marker(_summary, _parameter_strings), 
+                        name=r"$\hat{\pi}[\hat{\xi}]$ " + "z={}, n={}".format(multi_z_args.redshifts[n_z], n) + title + n * " ", # Whitespace for unique name?
+                        color=plotting_dict[bulk_or_tails]["color"],
+                        show_label_in_legend=False if n > 0 else True,
+                        marker_style=z_markers[n_z]
+                    )
+            c.add_marker(
+                location=marker(np.mean(np.mean(_posterior_object.summaries, axis=0), axis=0), _parameter_strings), 
+                name=r"$\bar{\pi}[\hat{\xi}_i,...]$ " + title, # Whitespace for unique name?
+                marker_style="x",
+                color=plotting_dict[bulk_or_tails]["color"]
+            )
+
+        fig = c.plotter.plot()
+        fig = customize_plot(fig)
+
+        summaries_sub_figs_dir = os.path.join(sub_figs_dir, "summaries/")
+        if not os.path.exists(summaries_sub_figs_dir):
+            os.makedirs(summaries_sub_figs_dir)
+        
+        filename = os.path.join(
+            summaries_sub_figs_dir, 
+            "figure_one_{}{}{}_summaries.pdf".format(
+                multi_z_args.seed, 
+                ("_" + str(multi_z_args.seed_datavector)) if multi_z_args.seed_datavector is not None else "",
+                "_marginalised" if marginalised else ""
+            )
+        )
+        fig.savefig(filename)
+    except Exception as e:
+        print("Failed to plot summaries figure one...")
+        print(e)
+
     plt.close()
 
     print("Saved figure one to {}".format(filename))

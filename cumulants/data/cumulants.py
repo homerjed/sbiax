@@ -11,30 +11,35 @@ from beartype import beartype as typechecker
 import numpy as np
 from ml_collections import ConfigDict
 import matplotlib.pyplot as plt
-import tensorflow_probability.substrates.jax.distributions as tfd
+# import tensorflow_probability.substrates.jax.distributions as tfd
+from typing import Any
+Distribution = Any
 from tqdm.auto import trange
 
 from configs.log import setup_module_logger, get_log_level
-from data.constants import get_quijote_parameters, get_save_and_load_dirs, ALPHA
+from data.constants import get_quijote_parameters, get_save_and_load_dirs, ALPHA, PARAMETER_STRINGS
 from data.common import (
     Dataset,
     get_prior,
     sample_prior,
-    get_compression_fn,
     linearised_model,
     get_linearised_data,
     get_datavector,
-    freeze_out_parameters_dataset, 
-    hartlap,
-    get_parameter_strings
+    hartlap
 )
+from compression import get_compression_fn
 
-typecheck = jaxtyped(typechecker=typechecker)
+import os
+TYPECHECK = True if os.environ.get("TYPECHECK", "").lower() in ("1", "true") else False
+if TYPECHECK:
+    typecheck = jaxtyped(typechecker=typechecker)
+else:
+    typecheck = lambda x: x
+
 
 logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
 FORCE_RECOMPUTE_DATASET = True if os.environ.get("FORCE_RECOMPUTE_DATASET", "").lower() in ("1", "true") else False 
-USE_QUIJOTE_TAILS = True if os.environ.get("USE_QUIJOTE_TAILS", "").lower() in ("1", "true") else False
 FIDUCIAL_REDUCE = True if os.environ.get("FIDUCIAL_REDUCE", "").lower() in ("1", "true") else False
 
 """
@@ -225,7 +230,6 @@ def get_cumulant_data(
             "_R" + "".join(map(str, config.scales)),
             "_m" + "".join(map(str, config.order_idx)),
             "_z" + str(config.redshift),
-            "_f" if config.freeze_parameters else "_nf",
             "_linearised" if config.linearised else "_nonlinear",
             "_reduced" if FIDUCIAL_REDUCE else "", # Reduction k_n -> S_n with fiducial variance
             "_quijote" # E.g. not calculated from PDFs
@@ -319,10 +323,6 @@ def get_cumulant_data(
         plt.savefig(filename)
         plt.close()
         logger.debug("Saved correlation matrix (moments) figure at: \n\t{}".format(filename))
-
-        if config.freeze_parameters:
-            print("Freezing all but Om, s8")
-            dataset = freeze_out_parameters_dataset(dataset)
 
         return dataset
 
@@ -462,7 +462,7 @@ class CumulantsDataset:
 
     config: ConfigDict
     data: Dataset
-    prior: tfd.Distribution
+    prior: Distribution
     compression_fn: Callable
     results_dir: str
 
@@ -478,7 +478,7 @@ class CumulantsDataset:
             config, results_dir=results_dir
         )
 
-        self.prior = get_prior(config, self.data) # Possibly not equal to Quijote prior
+        self.prior = get_prior() # Possibly not equal to Quijote prior
 
         key = jr.key(config.seed)
         self.compression_fn = get_compression_fn(
@@ -492,17 +492,16 @@ class CumulantsDataset:
         print(">DATA / PARAMETERS:\n\t", [_.shape for _ in (self.data.data, self.data.parameters)])
 
     def get_parameter_strings(self) -> list[str]:
-        return get_parameter_strings()
+        return PARAMETER_STRINGS
 
-    def sample_prior(self, key: PRNGKeyArray, n: int, *, hypercube: bool = True) -> Float[Array, "n p"]:
+    def sample_prior(self, key: PRNGKeyArray, n: int) -> Float[Array, "n p"]:
         # Sample Quijote prior which may not be the same as inference prior
         P = sample_prior(
             key, 
             n, 
             alpha=self.data.alpha, 
             lower=self.data.lower, 
-            upper=self.data.upper, 
-            hypercube=hypercube
+            upper=self.data.upper
         )
         return P
 
@@ -517,8 +516,6 @@ class CumulantsDataset:
         # Sample datavector from linearised Gaussian model
         mu = jnp.mean(self.data.fiducial_data, axis=0) 
         d = jr.multivariate_normal(key, mu, self.data.C, (n,))
-        if not (n > 1):
-            d = jnp.squeeze(d, axis=0) 
         return d
 
     def get_linearised_data(self) -> tuple[Float[Array, "n d"], Float[Array, "n p"]]:

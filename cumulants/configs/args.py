@@ -1,12 +1,8 @@
 import os
 import argparse
-from collections import namedtuple
-from typing import Type
 
 from configs.log import setup_module_logger, get_log_level
 from data.constants import get_scales 
-
-ArgsTuple: Type[tuple] = None
 
 """
     CLI args 
@@ -19,11 +15,6 @@ logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 DEFAULT_N_LINEAR_SIMS = 32768 if USE_SOBOL else 2000
 
 
-def args_to_namedtuple(args: argparse.Namespace) -> tuple:
-    ArgsTuple = namedtuple("ArgsTuple", vars(args).keys())
-    return ArgsTuple(**vars(args))
-
-
 def add_common_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "-l", 
@@ -34,15 +25,15 @@ def add_common_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "-c", 
         "--compression", 
-        default="linear", 
-        choices=["linear", "nn", "nn-lbfgs"], 
+        # default="linear", 
+        choices=["linear", "nn", "nn-lbfgs", "imnn", "ensemble-nn"], 
         type=str, 
         help="Compression with neural network or MOPED."
     )
     parser.add_argument(
         "-bt", 
         "--bulk_or_tails", 
-        default="tails", 
+        # default="tails", 
         choices=["bulk", "tails", "bulk_pdf"], 
         type=str, 
         help="Use cumulants from bulk or tails of PDF"
@@ -77,18 +68,6 @@ def add_common_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         help="Physical scales."
     )
     parser.add_argument(
-        "-f", 
-        "--freeze-parameters", 
-        action=argparse.BooleanOptionalAction, 
-        help="Freeze parameters not in [Om, s8]."
-    )
-    parser.add_argument(
-        "-u", 
-        "--use-planck", 
-        action=argparse.BooleanOptionalAction, 
-        help="Use Planck prior."
-    )
-    parser.add_argument(
         "-ut", 
         "--use-tqdm", 
         action=argparse.BooleanOptionalAction, 
@@ -97,10 +76,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     return parser
 
 
-def get_cumulants_sbi_args(
-    multi_z: bool = False, 
-    using_notebook: bool = False
-) -> argparse.Namespace | ArgsTuple:
+def get_cumulants_sbi_args(multi_z: bool = False) -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(
         description="Run SBI experiment with cumulants of the matter PDF."
@@ -108,8 +84,9 @@ def get_cumulants_sbi_args(
 
     parser = add_common_args(parser)
 
-    parser.add_argument("-s", "--seed", type=int, help="Seed for random number generation.", default=0)
-    parser.add_argument("-z", "--redshift", default=0.0, choices=[0.0, 0.5, 1.0], type=float, help="Redshift of simulations.")
+    parser.add_argument("-s", "--seed", type=int, help="Seed for random number generation.")
+    parser.add_argument("-z", "--redshift", choices=[0.0, 0.5, 1.0], type=float, help="Redshift of simulations.")
+    parser.add_argument("-n_d", "--n_datavectors", type=int, help="Number of datavectors per redshift.")
 
     if multi_z:
         args, _ = parser.parse_known_args() 
@@ -120,16 +97,10 @@ def get_cumulants_sbi_args(
     for k, v in vars(args).items():
         logger.info("%-12s : %s", k, v)
 
-    if using_notebook:
-        args = args_to_namedtuple(args)
-
     return args
 
 
-def get_cumulants_multi_z_args(
-    figure_one: bool = False, 
-    using_notebook: bool = False
-) -> argparse.Namespace | ArgsTuple:
+def get_cumulants_multi_z_args(figure_one: bool = False) -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(
         description="Run posterior sampling over multi-redshift SBI experiments with moments of the matter PDF."
@@ -137,9 +108,9 @@ def get_cumulants_multi_z_args(
 
     parser = add_common_args(parser)
 
-    parser.add_argument("-s", "--seed", type=int, default=0, help="Seed for random number generation.")
-    parser.add_argument("-sd", "--seed_datavector", type=int, default=0, help="Seed for datavector.")
-    parser.add_argument("-n_d", "--n_datavectors", type=int, default=10, help="Number of datavectors per redshift.")
+    parser.add_argument("-s", "--seed", type=int, help="Seed for random number generation.")
+    parser.add_argument("-sd", "--seed_datavector", type=int, help="Seed for datavector.")
+    parser.add_argument("-n_d", "--n_datavectors", type=int, help="Number of datavectors per redshift.")
     parser.add_argument("-z", "--redshifts", default=[0.0, 0.5, 1.0], nargs="+", type=float, help="Redshifts.")
 
     if figure_one:
@@ -151,9 +122,6 @@ def get_cumulants_multi_z_args(
     for k, v in vars(args).items():
         logger.info("%-12s : %s", k, v)
 
-    if using_notebook:
-        args = args_to_namedtuple(args)
-
     return args
 
 
@@ -164,9 +132,9 @@ def get_figure_one_args():
 
     parser = add_common_args(parser)
 
-    parser.add_argument("-s", "--seed", type=int, default=0, help="Seed for random number generation.")
-    parser.add_argument("-sd", "--seed_datavector", type=int, default=0, help="Seed for datavector.")
-    parser.add_argument("-n_d", "--n_datavectors", type=int, default=10, help="Number of datavectors per redshift.")
+    parser.add_argument("-s", "--seed", type=int, help="Seed for random number generation.")
+    parser.add_argument("-sd", "--seed_datavector", type=int, help="Seed for datavector.")
+    parser.add_argument("-n_d", "--n_datavectors", type=int, help="Number of datavectors per redshift.")
     parser.add_argument("-z", "--redshifts", default=[0.0, 0.5, 1.0], nargs="+", type=float, help="Redshifts.")
 
     args = parser.parse_args()
@@ -185,7 +153,7 @@ def get_figure_two_args():
 
     parser = add_common_args(parser)
 
-    parser.add_argument("-n_d", "--n_datavectors", type=int, default=10, help="Number of datavectors per redshift.")
+    parser.add_argument("-n_d", "--n_datavectors", type=int, help="Number of datavectors per redshift.")
     parser.add_argument("-z", "--redshifts", default=[0.0, 0.5, 1.0], nargs="+", type=float, help="Redshifts.")
 
     args = parser.parse_args()
@@ -197,7 +165,7 @@ def get_figure_two_args():
     return args
 
 
-def get_arch_search_args(using_notebook: bool = False):
+def get_arch_search_args():
     # Fixed args "tuple" to not interfere with CLI parsed args
 
     class Args:
@@ -212,447 +180,3 @@ def get_arch_search_args(using_notebook: bool = False):
         use_independent_test_set = True
 
     return Args()
-
-
-
-
-# def args_to_namedtuple(args: argparse.Namespace) -> tuple:
-#     ArgsTuple = namedtuple("ArgsTuple", vars(args).keys()) # Create namedtuple type
-#     args = ArgsTuple(**vars(args)) # Convert Namespace to namedtuple
-#     return args
-
-
-# def get_cumulants_sbi_args(multi_z: bool = False, using_notebook: bool = False) -> argparse.Namespace | ArgsTuple:
-#     parser = argparse.ArgumentParser(
-#         description="Run SBI experiment with cumulants of the matter PDF."
-#     )
-#     parser.add_argument(
-#         "-s", 
-#         "--seed", 
-#         type=int, 
-#         help="Seed for random number generation.", 
-#         default=0
-#     )
-#     parser.add_argument(
-#         "-l",
-#         "--linearised", 
-#         default=True,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Linearised model for datavector."
-#     )
-#     parser.add_argument(
-#         "-c",
-#         "--compression", 
-#         default="linear",
-#         choices=["linear", "nn", "nn-lbfgs"],
-#         type=str,
-#         help="Compression with neural network or MOPED."
-#     )
-#     parser.add_argument(
-#         "-bt",
-#         "--bulk_or_tails", 
-#         default="tails",
-#         choices=["bulk", "tails", "bulk_pdf"],
-#         type=str,
-#         help="Use cumulants from bulk or tails of PDF"
-#     )
-#     parser.add_argument(
-#         "-n",
-#         "--n_linear_sims", 
-#         default=DEFAULT_N_LINEAR_SIMS,
-#         type=int,
-#         help="Number of linearised simulations (used for pre-training if non-linear simulations and requested)."
-#     )
-#     parser.add_argument(
-#         "-p",
-#         "--pre-train", 
-#         default=False,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Pre-train (only) when using non-linearised model for datavector. Pre-train on linearised simulations."
-#     )
-#     parser.add_argument(
-#         "-z",
-#         "--redshift", 
-#         default=0.0,
-#         choices=[0.0, 0.5, 1.0],
-#         type=float,
-#         help="Redshift of simulations."
-#     )
-#     parser.add_argument(
-#         "-o", 
-#         "--order_idx",
-#         default=[0, 1, 2],
-#         nargs="+", 
-#         type=int,
-#         help="Indices of variance, skewness and kurtosis sample cumulants."
-#     )
-#     parser.add_argument(
-#         "-r", 
-#         "--scales",
-#         default=get_scales(),
-#         nargs="+", 
-#         type=float,
-#         help="Physical scales."
-#     )
-#     parser.add_argument(
-#         "-f",
-#         "--freeze-parameters", 
-#         default=False,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Freeze parameters not in [Om, s8] to their fixed values, in hypercube simulations."
-#     )
-#     parser.add_argument(
-#         "-u",
-#         "--use-planck", 
-#         default=False,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Use Planck prior."
-#     )
-#     parser.add_argument(
-#         "-ut",
-#         "--use-tqdm", 
-#         default=True,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Show loading bar. Useful to turn off during architecture search."
-#     )
-#     parser.add_argument(
-#         "-v",
-#         "--verbose", 
-#         default=False,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Say what's going on."
-#     )
-
-#     if not multi_z:
-#         args = parser.parse_args()
-#     else:
-#         args, unknown = parser.parse_known_args()
-
-#     if using_notebook:
-#         args = args_to_namedtuple(args)
-
-#     return args
-
-
-# def get_cumulants_multi_z_args(figure_one: bool = False, using_notebook: bool = False) -> argparse.Namespace | ArgsTuple:
-#     parser = argparse.ArgumentParser(
-#         description="Run SBI experiment with moments of the matter PDF."
-#     )
-#     parser.add_argument(
-#         "-s", 
-#         "--seed", 
-#         type=int, 
-#         help="Seed for random number generation.", 
-#         default=0
-#     )
-#     parser.add_argument(
-#         "-sd", 
-#         "--seed_datavector", 
-#         type=int, 
-#         help="Seed for datavector given fixed ensemble/experiment seed.", 
-#         default=0
-#     )
-#     parser.add_argument(
-#         "-n_d",
-#         "--n_datavectors", 
-#         type=int,
-#         default=10,
-#         help="Number of independent datavectors to measure at each redshift." # NOTE: possibly make this depend on redshift, a list of ints
-#     )
-#     parser.add_argument(
-#         "-n_p",
-#         "--n_posteriors_sample", 
-#         type=int,
-#         default=1,
-#         help="Number of posteriors to sample (using different measurements for each)." 
-#     )
-#     parser.add_argument(
-#         "-l",
-#         "--linearised", 
-#         default=True,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Linearised model for datavector."
-#     )
-#     parser.add_argument(
-#         "-c",
-#         "--compression", 
-#         default="linear",
-#         choices=["linear", "nn", "nn-lbfgs"],
-#         type=str,
-#         help="Compression with neural network or MOPED."
-#     )
-#     parser.add_argument(
-#         "-bt",
-#         "--bulk_or_tails", 
-#         default="tails",
-#         choices=["bulk", "tails", "bulk_pdf"], # Choose bulk cumulants/tails or bulk pdf
-#         type=str,
-#         help="Use cumulants from bulk or tails of PDF, or bulk of the PDF."
-#     )
-#     parser.add_argument(
-#         "-n",
-#         "--n_linear_sims", 
-#         default=DEFAULT_N_LINEAR_SIMS,
-#         type=int,
-#         help="Number of linearised simulations (used for pre-training if non-linear simulations and requested)."
-#     )
-#     parser.add_argument(
-#         "-p",
-#         "--pre-train", 
-#         default=False,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Pre-train (only) when using non-linearised model for datavector. Pre-train on linearised simulations."
-#     )
-#     parser.add_argument(
-#         "-z", 
-#         "--redshifts",
-#         default=[0.0, 0.5, 1.0],
-#         nargs="+", 
-#         type=float,
-#         help="Redshifts."
-#     )
-#     parser.add_argument(
-#         "-r", 
-#         "--scales",
-#         default=get_scales(),
-#         nargs="+", 
-#         type=float,
-#         help="Physical scales."
-#     )
-#     parser.add_argument(
-#         "-o", 
-#         "--order_idx",
-#         default=[0, 1, 2],
-#         nargs="+", 
-#         type=int,
-#         help="Indices of variance, skewness and kurtosis sample cumulants."
-#     )
-#     parser.add_argument(
-#         "-f",
-#         "--freeze-parameters", 
-#         default=False,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Freeze parameters not in [Om, s8] to their fixed values, in hypercube simulations."
-#     )
-#     parser.add_argument(
-#         "-u",
-#         "--use-planck", 
-#         default=False,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Use Planck prior."
-#     )
-#     parser.add_argument(
-#         "-v",
-#         "--verbose", 
-#         default=False,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Say what's going on."
-#     )
-
-#     # If running figure one scripts, don't parse these args (reset them inside figure one)
-#     if not figure_one:
-#         args = parser.parse_args()
-#     else:
-#         args, unknown = parser.parse_known_args()
-
-#     if using_notebook:
-#         args = parser.parse_args([])
-#         args = args_to_namedtuple(args)
-#     else:
-#         args = parser.parse_args()
-
-#     return args
-
-
-# def get_figure_one_args():
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument(
-#         "-s", 
-#         "--seed", 
-#         type=int, 
-#         help="Seed for random number generation.", 
-#         default=0
-#     )
-#     parser.add_argument(
-#         "-s_d", 
-#         "--seed_datavector", 
-#         type=int, 
-#         help="Seed for random number generation.", 
-#         default=0
-#     )
-#     parser.add_argument(
-#         "-n_d",
-#         "--n_datavectors", 
-#         type=int,
-#         default=10,
-#         help="Number of independent datavectors to measure at each redshift." # NOTE: possibly make this depend on redshift, a list of ints
-#     )
-#     parser.add_argument(
-#         "-l",
-#         "--linearised", 
-#         default=True,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Linearised model for datavector."
-#     )
-#     parser.add_argument(
-#         "-c",
-#         "--compression", 
-#         default="linear",
-#         choices=["linear", "nn", "nn-lbfgs"],
-#         type=str,
-#         help="Compression with neural network or MOPED."
-#     )
-#     parser.add_argument(
-#         "-p",
-#         "--pre-train", 
-#         default=False,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Pre-train (only) when using non-linearised model for datavector. Pre-train on linearised simulations."
-#     )
-#     parser.add_argument(
-#         "-n",
-#         "--n_linear_sims", 
-#         default=DEFAULT_N_LINEAR_SIMS,
-#         type=int,
-#         help="Number of linearised simulations (used for pre-training if non-linear simulations and requested)."
-#     )
-#     parser.add_argument(
-#         "-o", 
-#         "--order_idx",
-#         default=[0, 1, 2],
-#         nargs="+", 
-#         type=int,
-#         help="Indices of variance, skewness and kurtosis sample cumulants."
-#     )
-#     parser.add_argument(
-#         "-r", 
-#         "--scales",
-#         default=get_scales(),
-#         nargs="+", 
-#         type=float,
-#         help="Physical scales."
-#     )
-#     parser.add_argument(
-#         "-z", 
-#         "--redshifts",
-#         default=[0.0, 0.5, 1.0],
-#         nargs="+", 
-#         type=float,
-#         help="Redshifts."
-#     )
-#     parser.add_argument(
-#         "-f",
-#         "--freeze-parameters", 
-#         default=False,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Freeze parameters not in [Om, s8] to their fixed values, in hypercube simulations."
-#     )
-#     parser.add_argument(
-#         "-u",
-#         "--use-planck", 
-#         default=False,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Use Planck prior."
-#     )
-#     args = parser.parse_args()
-#     return args
-
-
-# def get_figure_two_args():
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument(
-#         "-n_d",
-#         "--n_datavectors", 
-#         type=int,
-#         default=10,
-#         help="Number of independent datavectors to measure at each redshift." # NOTE: possibly make this depend on redshift, a list of ints
-#     )
-#     parser.add_argument(
-#         "-l",
-#         "--linearised", 
-#         default=True,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Linearised model for datavector."
-#     )
-#     parser.add_argument(
-#         "-c",
-#         "--compression", 
-#         default="linear",
-#         choices=["linear", "nn", "nn-lbfgs"],
-#         type=str,
-#         help="Compression with neural network or MOPED."
-#     )
-#     parser.add_argument(
-#         "-p",
-#         "--pre-train", 
-#         default=False,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Pre-train (only) when using non-linearised model for datavector. Pre-train on linearised simulations."
-#     )
-#     parser.add_argument(
-#         "-n",
-#         "--n_linear_sims", 
-#         default=DEFAULT_N_LINEAR_SIMS,
-#         type=int,
-#         help="Number of linearised simulations (used for pre-training if non-linear simulations and requested)."
-#     )
-#     parser.add_argument(
-#         "-o", 
-#         "--order_idx",
-#         default=[0, 1, 2],
-#         nargs="+", 
-#         type=int,
-#         help="Indices of variance, skewness and kurtosis sample cumulants."
-#     )
-#     parser.add_argument(
-#         "-z", 
-#         "--redshifts",
-#         default=[0.0, 0.5, 1.0],
-#         nargs="+", 
-#         type=float,
-#         help="Redshifts."
-#     )
-#     parser.add_argument(
-#         "-r", 
-#         "--scales",
-#         default=get_scales(),
-#         nargs="+", 
-#         type=float,
-#         help="Physical scales."
-#     )
-#     parser.add_argument(
-#         "-f",
-#         "--freeze-parameters", 
-#         default=False,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Freeze parameters not in [Om, s8] to their fixed values, in hypercube simulations."
-#     )
-#     parser.add_argument(
-#         "-u",
-#         "--use-planck", 
-#         default=False,
-#         action=argparse.BooleanOptionalAction, 
-#         help="Use Planck prior."
-#     )
-#     args = parser.parse_args()
-#     return args
-
-
-# def get_arch_search_args(using_notebook: bool = False):
-
-#     class Args:
-#         # Basic argparse-like object to not interfere with other argparse objects
-#         n_parallel = 10
-#         n_processes = 10
-#         multiprocess = True
-#         n_trials = 500
-#         n_startup_trials = 100 
-#         random_seeds = True    # Different seeds (based on trial number) for each experiment
-
-#         n_repeats = 3          # Cross-validation repeats (number of repeated experiments, given seed, with shuffled train/validation split)
-#         n_test_sims = 20_000
-#         use_independent_test_set = True
-
-#     args = Args()
-
-#     return args

@@ -21,7 +21,6 @@ SINGLE_RUN="${2:-false}"
 RUN_LINEARISED=false
 RUN_NONLINEAR=true
 
-RUN_FROZEN=false
 USE_PLANCK=false
 
 DEFAULT_NDE_TYPE="CNF"
@@ -104,14 +103,6 @@ fi
 # -------------------- Submit ONLY multi-z array jobs --------------------
 for global_seed in $(seq 0 $N_SEEDS_GLOBAL); do
 for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
-    # Skip freezing parameters if not requested
-    if [[ "$RUN_FROZEN" == false && "$FREEZE_FLAG" == "--freeze-parameters" ]]; then
-        continue
-    fi
-    # Skip linearised runs if using Planck prior
-    if [[ "$FREEZE_FLAG" == "--freeze-parameters" && "$USE_PLANCK" == true ]]; then
-        continue
-    fi
 
     for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
         if [[ "$RUN_LINEARISED" == false && "$LINEARISED_FLAG" == "--linearised" ]]; then

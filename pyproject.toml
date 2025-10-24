@@ -1,57 +1,26 @@
 [project]
-name = "sbiax"
-version = "0.0.55"
-description = "Fast, parallel and lightweight simulation-based inference in JAX."
+name = "sbiaxpdf"
+version = "0.1.0"
+description = "Add your description here"
 readme = "README.md"
-requires-python =">=3.10"
-license = {file = "LICENSE"}
-authors = [
-  {name = "Jed Homer", email = "jedhmr@gmail.com"},
-]
-keywords = [
-    "simulation-based-inference",
-    "likelihood-free-inference",
-    "jax", 
-    "machine-learning",
-    "deep-learning", 
-    "bayesian-inference",
-    "generative-models", 
-]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
-    "Natural Language :: English",
-    "Programming Language :: Python :: 3",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
-]
-urls = {repository = "https://github.com/homerjed/sbiax"}
-
+requires-python = ">=3.12"
 dependencies = [
-    'jax==0.4.33',
-    'equinox==0.11.8',
-    'diffrax==0.6.0',
-    'optax==0.2.3',
-    'beartype==0.19.0',
-    'ml_collections==0.1.1',
-    'blackjax==1.2.4',
-    'numpy==1.26.4',
-    'matplotlib==3.9.2',
-    'einops==0.8.0',
-    'cloudpickle==3.1.0',
-    'tqdm==4.66.5',
-    'chainconsumer==1.1.2',
-    'tensorflow_probability==0.24.0',
-    'flowjax==16.0.0',
-    'optuna==4.0.0',
-    'plotly==5.24.1',
-    'scikit-learn',
-    'jax-tqdm'
+    "beartype>=0.22.2",
+    "blackjax>=1.2.5",
+    "chainconsumer>=0.34.0",
+    "cloudpickle>=3.1.1",
+    "diffrax>=0.6.1",
+    "einops>=0.8.1",
+    "equinox>=0.11.10",
+    "flowjax>=9.0.0",
+    "jax==0.4.33",
+    "jax-tqdm>=0.3.1",
+    "matplotlib>=3.9.4",
+    "ml-collections>=0.1.1",
+    "numpy>=2.0.2",
+    "optax>=0.2.4",
+    "optuna>=4.5.0",
+    "plotly>=6.3.1",
+    "scikit-learn>=1.6.1",
+    "tqdm>=4.67.1",
 ]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build]
-include = ["*"]

@@ -4,7 +4,6 @@ from .cumulants_configs import (
     bulk_pdf_config, 
     arch_search_cumulants_config
 )
-from .arch_search_config import arch_search_config
 from .configs import (
     get_results_dir, 
     get_posteriors_dir, 

@@ -36,9 +36,12 @@ NON_GAUSSIAN_TEST=false
 PLOT_FISHER_CLIPPED=true
 FORCE_RECOMPUTE_DATASET=false
 
-COMPRESSION="nn"
+COMPRESSION="ensemble-nn"
+N_ENSEMBLE_NETS=10
+NN_TYPE="NN"
+
 USE_PRECISION_NN=false
-DATA_PROCESS_TYPE_NN="d"
+DATA_PROCESS_TYPE_NN="dp"
 
 USE_SOBOL=true
 FORCE_NOISELESS_DATAVECTOR=false
@@ -49,7 +52,7 @@ DEFAULT_RESOLUTION=1024
 RECALCULATE_DATASETS=false
 DATASETS_DIR="/project/ls-gruen/users/jed.homer/sbiaxpdf/quijote_data/datasets/"
 
-N_DATAVECTORS=10 # Number of independent datavectors to sample posteriors with (with N_SEEDS different posteriors)
+N_DATAVECTORS=1 # Number of independent datavectors to sample posteriors with (with N_SEEDS different posteriors)
 
 # Posterior sampling
 AFFINE_SAMPLE=false
@@ -65,9 +68,9 @@ if [[ "$SINGLE_RUN" == "true" ]]; then
     N_PARALLEL=2
 else
     echo "MULTIPLE SEEDS RUN."
-    N_SEEDS=10 # 100 # Number of independent datavectors to test each SBI with
+    N_SEEDS=20 # 100 # Number of independent datavectors to test each SBI with
     START_SEED=0
-    N_SEEDS_GLOBAL=1 # 9 # Number of repeated trainings for SBI
+    N_SEEDS_GLOBAL=4 # 9 # Number of repeated trainings for SBI
     END_SEED=$(( $START_SEED + $N_SEEDS - 1 ))
     N_PARALLEL=100
 fi
@@ -132,7 +135,6 @@ fi
 data_deps=()
 data_dep_string=""
 
-# if [[ "$USE_QUIJOTE_TAILS" == "true" ] & [ "$USE_SOBOL" == "false"]]; then
 if [[ "$USE_QUIJOTE_TAILS" == "true" && "$USE_SOBOL" == "false" ]]; then
     cumulants_data_log_dir=$(get_log_dir \
         $BASE_LOG_DIR \
@@ -176,10 +178,12 @@ if [[ "$USE_QUIJOTE_TAILS" == "true" && "$USE_SOBOL" == "false" ]]; then
     export USE_SCALERS="$USE_SCALERS"
     export BLACKJAX_SAMPLE="$BLACKJAX_SAMPLE"
     export AFFINE_SAMPLE="$AFFINE_SAMPLE"
+    export N_ENSEMBLE_NETS="$N_ENSEMBLE_NETS"
+    export NN_TYPE="$NN_TYPE"
 
     echo \"Running cumulants data script\"
 
-    python get_cumulants_data.py
+    uv run python get_cumulants_data.py
     "
 
     echo "Running cumulants data scripts"
@@ -236,10 +240,12 @@ if [[ "$USE_SOBOL" == "false" ]]; then
     export USE_SCALERS="$USE_SCALERS"
     export BLACKJAX_SAMPLE="$BLACKJAX_SAMPLE"
     export AFFINE_SAMPLE="$AFFINE_SAMPLE"
+    export N_ENSEMBLE_NETS="$N_ENSEMBLE_NETS"
+    export NN_TYPE="$NN_TYPE"
 
     echo \"Running PDFs data script\"
 
-    python get_pdf_data.py
+    uv run python get_pdf_data.py
     "
 
     echo "Running PDF data scripts"
@@ -273,35 +279,34 @@ for global_seed in $(seq 0 $N_SEEDS_GLOBAL); do
 for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
     for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
         for PRETRAIN_FLAG in "--pre-train" "--no-pre-train"; do
-
-            # Skip pre-train experiments
-            if [[ "$PRETRAIN_FLAG" == "--pre-train" ]]; then
-                continue
-            fi
-
-            # Skip linearised if not requested
-            if [[ "$RUN_LINEARISED" == false && "$LINEARISED_FLAG" == "--linearised" ]]; then
-                echo "Skipping SBI (linearised)"
-                continue
-            fi
-
-            # Skip non-linearised if not requested
-            if [[ "$RUN_NONLINEAR" == false && "$LINEARISED_FLAG" == "--no-linearised" ]]; then
-                echo "Skipping SBI (non-linearised)"
-                continue
-            fi
-
-            # Skip freezing parameters if not requested
-            if [[ "$RUN_FROZEN" == false && "$FREEZE_FLAG" == "--freeze-parameters" ]]; then
-                continue
-            fi
-
-            # Skip linearised runs if using Planck prior
-            if [[ "$FREEZE_FLAG" == "--freeze-parameters" && "$USE_PLANCK" == true ]]; then
-                continue
-            fi
-
             for bt in "bulk" "tails"; do
+
+                # Skip pre-train experiments
+                if [[ "$PRETRAIN_FLAG" == "--pre-train" ]]; then
+                    continue
+                fi
+
+                # Skip linearised if not requested
+                if [[ "$RUN_LINEARISED" == false && "$LINEARISED_FLAG" == "--linearised" ]]; then
+                    echo "Skipping SBI (linearised)"
+                    continue
+                fi
+
+                # Skip non-linearised if not requested
+                if [[ "$RUN_NONLINEAR" == false && "$LINEARISED_FLAG" == "--no-linearised" ]]; then
+                    echo "Skipping SBI (non-linearised)"
+                    continue
+                fi
+
+                # Skip freezing parameters if not requested
+                if [[ "$RUN_FROZEN" == false && "$FREEZE_FLAG" == "--freeze-parameters" ]]; then
+                    continue
+                fi
+
+                # Skip linearised runs if using Planck prior
+                if [[ "$FREEZE_FLAG" == "--freeze-parameters" && "$USE_PLANCK" == true ]]; then
+                    continue
+                fi
 
                 if [ "$bt" == "bulk" ]; then # Label runs
                     bt_flag="b"
@@ -347,7 +352,7 @@ for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
                         )
 
                         sbi_cmd="\
-python cumulants_sbi.py \
+uv run python cumulants_sbi.py \
 --seed $global_seed \
 --compression $COMPRESSION \
 $LINEARISED_FLAG \
@@ -400,6 +405,8 @@ export USE_PRECISION_NN="$USE_PRECISION_NN"
 export USE_SCALERS="$USE_SCALERS"
 export BLACKJAX_SAMPLE="$BLACKJAX_SAMPLE"
 export AFFINE_SAMPLE="$AFFINE_SAMPLE"
+export N_ENSEMBLE_NETS="$N_ENSEMBLE_NETS"
+export NN_TYPE="$NN_TYPE"
 
 echo "Running sbi script with seed $global_seed and redshift $z"
 $sbi_cmd
@@ -419,7 +426,7 @@ END
 
                     # Should place these next to 
                     multi_z_job_ids=()
-                    figure_one_ids=()
+                    figure_one_ids=() # NOTE: this should be outside of bulk / tails since it needs both to run
                     
                     if [[ "$ONLY_RUN_FIGURES" == false ]]; then
 
@@ -439,7 +446,7 @@ END
                         )
 
                         multi_z_cmd="\
-python cumulants_multi_z.py \
+uv run python cumulants_multi_z.py \
 --seed $global_seed \
 --seed_datavector \$SLURM_ARRAY_TASK_ID \
 --n_datavectors $N_DATAVECTORS \
@@ -496,6 +503,8 @@ export USE_PRECISION_NN="$USE_PRECISION_NN"
 export USE_SCALERS="$USE_SCALERS"
 export BLACKJAX_SAMPLE="$BLACKJAX_SAMPLE"
 export AFFINE_SAMPLE="$AFFINE_SAMPLE"
+export N_ENSEMBLE_NETS="$N_ENSEMBLE_NETS"
+export NN_TYPE="$NN_TYPE"
 
 echo "Running final multi-z script"
 $multi_z_cmd
@@ -530,7 +539,7 @@ END
                     )
 
                     figure_cmd="\
-python figure_one.py \
+uv run python figure_one.py \
 --seed $global_seed \
 --seed_datavector \$SLURM_ARRAY_TASK_ID \
 --n_datavectors $N_DATAVECTORS \
@@ -585,6 +594,8 @@ export USE_PRECISION_NN="$USE_PRECISION_NN"
 export USE_SCALERS="$USE_SCALERS"
 export BLACKJAX_SAMPLE="$BLACKJAX_SAMPLE"
 export AFFINE_SAMPLE="$AFFINE_SAMPLE"
+export N_ENSEMBLE_NETS="$N_ENSEMBLE_NETS"
+export NN_TYPE="$NN_TYPE"
 
 echo "Running final figure one script"
 $figure_cmd
@@ -609,6 +620,143 @@ END
     done
 done
 done
+
+##### FIGURE TWO ##### 
+
+# for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
+# for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
+# for PRETRAIN_FLAG in "--pre-train" "--no-pre-train"; do
+# for scale_args in "${scales_sets[@]}"; do
+# for order_idx_args in "${order_idxs[@]}"; do
+
+#     # Skip pre-train experiments
+#     if [[ "$PRETRAIN_FLAG" == "--pre-train" ]]; then
+#         continue
+#     fi
+
+#     # Skip linearised if not requested
+#     if [[ "$RUN_LINEARISED" == false && "$LINEARISED_FLAG" == "--linearised" ]]; then
+#         echo "Skipping Figure 2 (linearised)"
+#         continue
+#     fi
+
+#     # Skip non-linearised if not requested
+#     if [[ "$RUN_NONLINEAR" == false && "$LINEARISED_FLAG" == "--no-linearised" ]]; then
+#         echo "Skipping Figure 2 (non-linearised)"
+#         continue
+#     fi
+
+#     # Skip freezing parameters if not requested
+#     if [[ "$RUN_FROZEN" == false && "$FREEZE_FLAG" == "--freeze-parameters" ]]; then
+#         continue
+#     fi
+
+#     # Skip linearised runs if using Planck prior
+#     if [[ "$FREEZE_FLAG" == "--freeze-parameters" && "$USE_PLANCK" == true ]]; then
+#         continue
+#     fi
+    
+#     # Tag for job name
+#     if [ "$LINEARISED_FLAG" == "--linearised" ]; then # Label runs
+#         l_flag="l"
+#     else
+#         l_flag="nl"
+#     fi
+
+#     # Tag for job name
+#     if [ "$FREEZE_FLAG" == "--freeze-parameters" ]; then # Label runs
+#         f_flag="f"
+#     else
+#         f_flag="nf"
+#     fi
+
+#     order_idx_str=$(echo "$order_idx_args" | tr -d ' ')
+#     scale_str=$(echo "$scale_args" | tr -d ' ')
+ 
+#     echo ">>Running figure two with cumulants=$order_idx_args, pretrain=$PRETRAIN_FLAG, linearised=$LINEARISED_FLAG, freeze=$FREEZE_FLAG"
+
+#     figure_two_log_dir=$(get_log_dir \
+#         $BASE_LOG_DIR \
+#         "figure_two" \
+#         $order_idx_str \
+#         $scale_str
+#     )
+
+#     sbatch <<END
+# #!/bin/bash
+# #SBATCH --job-name=figure_2
+# #SBATCH --output=$OUT_DIR/figure_2/${l_flag}/${f_flag}/figure_two_%j.out
+# #SBATCH --error=$OUT_DIR/figure_2/${l_flag}/${f_flag}/figure_two_%j.err
+# #SBATCH --partition=cluster
+# #SBATCH --time=$JOB_TIME
+# #SBATCH --mem=${N_GB}GB
+# #SBATCH --cpus-per-task=$N_CPU
+# #SBATCH --mail-user=jed.homer@physik.lmu.de
+# #SBATCH --mail-type=$MAIL_TYPE
+# #SBATCH --dependency=afterok:$data_dep_string:$sbi_deps:$multi_z_deps:$figure_one_deps
+
+# cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
+# source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
+
+# mkdir -p "$figure_two_log_dir"
+
+# export N_DATAVECTOR_SEEDS=$N_SEEDS 
+# export N_REPEATED_SBI_SEEDS=$N_SEEDS_GLOBAL 
+# export LOG_DIR="${figure_two_log_dir}/"
+# export LOG_LEVEL="$LOG_LEVEL"
+# export RESULTS_DIR="$RESULTS_DIR"
+# export DEFAULT_NDE_TYPE="$DEFAULT_NDE_TYPE"
+# export DEFAULT_N_NDES="$DEFAULT_N_NDES"
+# export FORCE_NOISELESS_DATAVECTOR="$FORCE_NOISELESS_DATAVECTOR"
+# export USE_QUIJOTE_TAILS="$USE_QUIJOTE_TAILS"
+# export FIDUCIAL_REDUCE="$FIDUCIAL_REDUCE"
+# export DEFAULT_RESOLUTION="$DEFAULT_RESOLUTION"
+# export FORCE_FLAT_PRIOR="$FORCE_FLAT_PRIOR"
+# export FORCE_QUIJOTE_PRIOR="$FORCE_QUIJOTE_PRIOR"
+# export NON_GAUSSIAN_TEST="$NON_GAUSSIAN_TEST"
+# export USE_SOBOL="$USE_SOBOL"
+# export PLOT_FISHER_CLIPPED="$PLOT_FISHER_CLIPPED"
+# export DATA_PROCESS_TYPE_NN="$DATA_PROCESS_TYPE_NN"
+# export USE_PRECISION_NN="$USE_PRECISION_NN"
+# export USE_SCALERS="$USE_SCALERS"
+# export BLACKJAX_SAMPLE="$BLACKJAX_SAMPLE"
+# export AFFINE_SAMPLE="$AFFINE_SAMPLE"
+# export N_ENSEMBLE_NETS="$N_ENSEMBLE_NETS"
+# export NN_TYPE="$NN_TYPE"
+
+# echo "Running final figure two script"
+
+# uv run python figure_two.py \
+# --n_datavectors $N_DATAVECTORS \
+# --compression $COMPRESSION \
+# --n_linear_sims $N_LINEAR_SIMS \
+# --order_idx $order_idx_args \
+# --scales $scale_args \
+# --redshifts $redshifts_str \
+# $LINEARISED_FLAG \
+# $PRETRAIN_FLAG \
+# $USE_PLANCK_FLAG \
+# $FREEZE_FLAG
+# END
+# done
+# done
+# done
+# done
+# done
+
+# # Build colon-separated dependency list for use in: --dependency=afterok:...
+# if [[ ${#FIG2_JOB_IDS[@]} -gt 0 ]]; then
+#     figure_two_deps="$(IFS=:; echo "${FIG2_JOB_IDS[*]}")"
+# else
+#     figure_two_deps=""
+# fi
+# export figure_two_deps
+# echo "figure_two_deps=$figure_two_deps"
+
+# --------------------------------------------
+# Submit Figure 2 jobs and collect dependencies
+# --------------------------------------------
+FIG2_JOB_IDS=()
 
 for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
 for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
@@ -642,14 +790,138 @@ for order_idx_args in "${order_idxs[@]}"; do
     if [[ "$FREEZE_FLAG" == "--freeze-parameters" && "$USE_PLANCK" == true ]]; then
         continue
     fi
-    
-    # Tag for job name
-    if [ "$LINEARISED_FLAG" == "--linearised" ]; then # Label runs
+
+    # Labels for job name
+    if [[ "$LINEARISED_FLAG" == "--linearised" ]]; then
         l_flag="l"
     else
         l_flag="nl"
     fi
 
+    if [[ "$FREEZE_FLAG" == "--freeze-parameters" ]]; then
+        f_flag="f"
+    else
+        f_flag="nf"
+    fi
+
+    order_idx_str=$(echo "$order_idx_args" | tr -d ' ')
+    scale_str=$(echo "$scale_args" | tr -d ' ')
+
+    echo ">>Submitting Figure 2 with cumulants=$order_idx_args, linearised=$LINEARISED_FLAG, freeze=$FREEZE_FLAG"
+
+    figure_two_log_dir=$(get_log_dir \
+        "$BASE_LOG_DIR" \
+        "figure_two" \
+        "$order_idx_str" \
+        "$scale_str" \
+    )
+
+    # Submit the Figure 2 job (adjust the python entrypoint/args to your setup)
+    sbatch_out=$(
+        sbatch <<END
+#!/bin/bash
+#SBATCH --job-name=fig2_${l_flag}_${f_flag}_${order_idx_str}_${scale_str}
+#SBATCH --output=$OUT_DIR/figure_two/fig2_%j.out
+#SBATCH --error=$OUT_DIR/figure_two/fig2_%j.err
+#SBATCH --partition=cluster
+#SBATCH --time=$JOB_TIME
+#SBATCH --mem=${N_GB}GB
+#SBATCH --cpus-per-task=$N_CPU
+#SBATCH --mail-user=jed.homer@physik.lmu.de
+#SBATCH --mail-type=$MAIL_TYPE
+
+cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
+source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
+
+export N_DATAVECTOR_SEEDS=$N_SEEDS
+export N_REPEATED_SBI_SEEDS=$N_SEEDS_GLOBAL
+export LOG_DIR="${figure_two_log_dir}/"
+export LOG_LEVEL="$LOG_LEVEL"
+export RESULTS_DIR="$RESULTS_DIR"
+export DEFAULT_NDE_TYPE="$DEFAULT_NDE_TYPE"
+export DEFAULT_N_NDES="$DEFAULT_N_NDES"
+export FORCE_NOISELESS_DATAVECTOR="$FORCE_NOISELESS_DATAVECTOR"
+export USE_QUIJOTE_TAILS="$USE_QUIJOTE_TAILS"
+export FIDUCIAL_REDUCE="$FIDUCIAL_REDUCE"
+export DEFAULT_RESOLUTION="$DEFAULT_RESOLUTION"
+export FORCE_FLAT_PRIOR="$FORCE_FLAT_PRIOR"
+export FORCE_QUIJOTE_PRIOR="$FORCE_QUIJOTE_PRIOR"
+export NON_GAUSSIAN_TEST="$NON_GAUSSIAN_TEST"
+export USE_SOBOL="$USE_SOBOL"
+export PLOT_FISHER_CLIPPED="$PLOT_FISHER_CLIPPED"
+export DATA_PROCESS_TYPE_NN="$DATA_PROCESS_TYPE_NN"
+export USE_PRECISION_NN="$USE_PRECISION_NN"
+export USE_SCALERS="$USE_SCALERS"
+export BLACKJAX_SAMPLE="$BLACKJAX_SAMPLE"
+export AFFINE_SAMPLE="$AFFINE_SAMPLE"
+export N_ENSEMBLE_NETS="$N_ENSEMBLE_NETS"
+export NN_TYPE="$NN_TYPE"
+
+echo "Running Figure 2 script"
+
+uv run python figure_two.py \
+--n_datavectors $N_DATAVECTORS \
+--compression $COMPRESSION \
+--n_linear_sims $N_LINEAR_SIMS \
+--order_idx $order_idx_args \
+--scales $scale_args \
+--redshifts $redshifts_str \
+$LINEARISED_FLAG \
+$PRETRAIN_FLAG \
+$USE_PLANCK_FLAG \
+$FREEZE_FLAG
+
+END
+    )
+
+    # Parse job ID like: "Submitted batch job 1234567"
+    jid=$(echo "$sbatch_out" | awk '{print $4}')
+    if [[ -n "$jid" ]]; then
+        FIG2_JOB_IDS+=("$jid")
+        echo "   -> Figure 2 job submitted: $jid"
+    else
+        echo "   !! Failed to capture job ID for this submission"
+    fi
+
+done
+done
+done
+done
+done
+
+# Build colon-separated dependency list for use in: --dependency=afterok:...
+if [[ ${#FIG2_JOB_IDS[@]} -gt 0 ]]; then
+    figure_two_deps="$(IFS=:; echo "${FIG2_JOB_IDS[*]}")"
+else
+    figure_two_deps=""
+fi
+export figure_two_deps
+echo "figure_two_deps=$figure_two_deps"
+
+
+
+###### COVERAGES ######
+
+for FREEZE_FLAG in "--freeze-parameters" "--no-freeze-parameters"; do
+for PRETRAIN_FLAG in "--pre-train" "--no-pre-train"; do
+for scale_args in "${scales_sets[@]}"; do
+for order_idx_args in "${order_idxs[@]}"; do
+
+    # Skip pre-train experiments
+    if [[ "$PRETRAIN_FLAG" == "--pre-train" ]]; then
+        continue
+    fi
+
+    # Skip freezing parameters if not requested
+    if [[ "$RUN_FROZEN" == false && "$FREEZE_FLAG" == "--freeze-parameters" ]]; then
+        continue
+    fi
+
+    # Skip linearised runs if using Planck prior
+    if [[ "$FREEZE_FLAG" == "--freeze-parameters" && "$USE_PLANCK" == true ]]; then
+        continue
+    fi
+    
     # Tag for job name
     if [ "$FREEZE_FLAG" == "--freeze-parameters" ]; then # Label runs
         f_flag="f"
@@ -660,7 +932,7 @@ for order_idx_args in "${order_idxs[@]}"; do
     order_idx_str=$(echo "$order_idx_args" | tr -d ' ')
     scale_str=$(echo "$scale_args" | tr -d ' ')
  
-    echo ">>Running figure two with cumulants=$order_idx_args, pretrain=$PRETRAIN_FLAG, linearised=$LINEARISED_FLAG, freeze=$FREEZE_FLAG"
+    echo ">>Running COVERAGES with cumulants=$order_idx_args, pretrain=$PRETRAIN_FLAG, linearised=$LINEARISED_FLAG, freeze=$FREEZE_FLAG"
 
     figure_two_log_dir=$(get_log_dir \
         $BASE_LOG_DIR \
@@ -671,21 +943,20 @@ for order_idx_args in "${order_idxs[@]}"; do
 
     sbatch <<END
 #!/bin/bash
-#SBATCH --job-name=figure_2
-#SBATCH --output=$OUT_DIR/figure_2/${l_flag}/${f_flag}/figure_two_%j.out
-#SBATCH --error=$OUT_DIR/figure_2/${l_flag}/${f_flag}/figure_two_%j.err
+#SBATCH --job-name=coverages
+#SBATCH --output=$OUT_DIR/coverages/coverages_%j.out
+#SBATCH --error=$OUT_DIR/coverages/coverages_%j.err
 #SBATCH --partition=cluster
 #SBATCH --time=$JOB_TIME
 #SBATCH --mem=${N_GB}GB
 #SBATCH --cpus-per-task=$N_CPU
 #SBATCH --mail-user=jed.homer@physik.lmu.de
 #SBATCH --mail-type=$MAIL_TYPE
-#SBATCH --dependency=afterok:$data_dep_string:$sbi_deps:$multi_z_deps:$figure_one_deps
+#SBATCH --dependency=afterok:$figure_two_deps
 
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
 
-mkdir -p "$figure_two_log_dir"
 
 export N_DATAVECTOR_SEEDS=$N_SEEDS 
 export N_REPEATED_SBI_SEEDS=$N_SEEDS_GLOBAL 
@@ -708,22 +979,14 @@ export USE_PRECISION_NN="$USE_PRECISION_NN"
 export USE_SCALERS="$USE_SCALERS"
 export BLACKJAX_SAMPLE="$BLACKJAX_SAMPLE"
 export AFFINE_SAMPLE="$AFFINE_SAMPLE"
+export N_ENSEMBLE_NETS="$N_ENSEMBLE_NETS"
+export NN_TYPE="$NN_TYPE"
 
-echo "Running final figure two script"
+echo "Running final coverages script"
 
-python figure_two.py \
---n_datavectors $N_DATAVECTORS \
---compression $COMPRESSION \
---n_linear_sims $N_LINEAR_SIMS \
---order_idx $order_idx_args \
---scales $scale_args \
---redshifts $redshifts_str \
-$LINEARISED_FLAG \
-$PRETRAIN_FLAG \
-$USE_PLANCK_FLAG \
-$FREEZE_FLAG
+uv run python figure_coverages.py 
+
 END
-done
 done
 done
 done

@@ -12,38 +12,42 @@ from ml_collections import ConfigDict
 import numpy as np 
 import matplotlib.pyplot as plt
 from chainconsumer import Chain, ChainConsumer, Truth
-import tensorflow_probability.substrates.jax.distributions as tfd
 from tqdm.auto import trange
+# import tensorflow_probability.substrates.jax.distributions as tfd
+
+from typing import any 
+Distribution = Any
 
 from configs.log import setup_module_logger, get_log_level
 from data.constants import (
     get_quijote_parameters, 
     get_save_and_load_dirs, 
-    get_target_idx,
-    get_F_planck
+    PARAMETER_STRINGS
 )
 from data.common import (
     Dataset,
     get_prior,
     sample_prior,
-    get_compression_fn,
     get_linearised_data,
     get_non_gaussian_linear_model_data,
     get_datavector,
-    freeze_out_parameters_dataset, 
-    hartlap,
-    get_parameter_strings,
-    add_planck_information_to_Finv
+    hartlap
 )
+from compression import get_compression_fn
 from sbiax.utils import make_df, marker
 from configs.cumulants_configs import bulk_cumulants_config
 
-typecheck = jaxtyped(typechecker=typechecker)
+import os
+TYPECHECK = True if os.environ.get("TYPECHECK", "").lower() in ("1", "true") else False
+if TYPECHECK:
+    typecheck = jaxtyped(typechecker=typechecker)
+else:
+    typecheck = lambda x: x
+
 
 logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
 FORCE_RECOMPUTE_DATASET = True if os.environ.get("FORCE_RECOMPUTE_DATASET", "").lower() in ("1", "true") else False 
-USE_QUIJOTE_TAILS = True if os.environ.get("USE_QUIJOTE_TAILS", "").lower() in ("1", "true") else False
 FIDUCIAL_REDUCE = True if os.environ.get("FIDUCIAL_REDUCE", "").lower() in ("1", "true") else False
 DEFAULT_RESOLUTION = int(os.environ.get("DEFAULT_RESOLUTION", 1024))
 NON_GAUSSIAN_TEST = True if os.environ.get("NON_GAUSSIAN_TEST", "").lower() in ("1", "true") else False
@@ -168,7 +172,6 @@ def get_calculated_cumulants_data(
             "_R" + "".join(map(str, config.scales)),
             "_m" + "".join(map(str, config.order_idx)),
             "_z" + str(config.redshift),
-            "_f" if config.freeze_parameters else "_nf",
             "_linearised" if config.linearised else "_nonlinear",
             "_reduced" if FIDUCIAL_REDUCE else "", # Reduction k_n -> S_n with fiducial variance
             # PDFs dataset
@@ -335,23 +338,6 @@ def get_calculated_cumulants_data(
             return np.asarray(moment_n)
 
         @typecheck
-        def moments_to_cumulants(
-            moments: Float[np.ndarray, "k_n"], 
-            _delta_: Float[np.ndarray, ""]
-        ) -> Float[np.ndarray, "k_n"]:
-            # Bernardeau 2002 Eq. 130
-
-            # NOTE: Are these moments incorrectly the central moments? 'moments' arg to this fn is central moments?
-            # Central moments == cumulants for n < 4
-            cumulant_2 = moments[0] - _delta_ ** 2.
-            cumulant_3 = moments[1] - 3. * cumulant_2 * _delta_ - _delta_ ** 3. 
-            cumulant_4 = moments[2] - 4. * cumulant_3 * _delta_ - 3. * (cumulant_2 ** 2.) - 6. * cumulant_2 * (_delta_ ** 2.) - _delta_ ** 4.
-
-            cumulants = np.asarray([cumulant_2, cumulant_3, cumulant_4]) 
-
-            return cumulants
-
-        @typecheck
         def _pdf_to_cumulants_bulk(
             cut_pdf: Float[np.ndarray, "d"], # Divide by cut-norm
             deltas: Float[np.ndarray, "d"],
@@ -502,24 +488,6 @@ def get_calculated_cumulants_data(
                 # Convert to cumulants (process all orders simultaneously)
                 if cumulants:
 
-                    _delta_ = np.asarray(np.sum(pdf * D_deltas[cut] * deltas[cut]))
-
-                    # if full_shape:
-
-                    #     cumulant = moments_to_cumulants(
-                    #         fiducial_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants], 
-                    #         _delta_=_delta_ if use_means else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(()) 
-                    #     )
-
-                    # else:
-
-                    #     cumulant = _pdf_to_cumulants_bulk(
-                    #         pdf, 
-                    #         deltas=deltas[cut], 
-                    #         ddeltas=D_deltas[cut],
-                    #         cut=cut
-                    #     )
-
                     print("NORMALISATION:", pdf.sum())
 
                     cumulant = _pdf_to_cumulants_bulk(
@@ -574,20 +542,6 @@ def get_calculated_cumulants_data(
                 # Convert to cumulants
                 if cumulants:
 
-                    _delta_ = np.asarray(np.sum(pdf * D_deltas[cut] * deltas[cut]))
-
-                    # if full_shape:
-                    #     cumulant = moments_to_cumulants(
-                    #         latin_moments_z_R[n, R * n_cumulants : (R + 1) * n_cumulants], 
-                    #         _delta_=_delta_ if use_means else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(())
-                    #     )
-                    # else:
-                    #     cumulant = _pdf_to_cumulants_bulk(
-                    #         pdf, 
-                    #         deltas=deltas[cut], 
-                    #         ddeltas=D_deltas[cut],
-                    #         cut=cut
-                    #     )
                     cumulant = _pdf_to_cumulants_bulk(
                         pdf, 
                         deltas=deltas[cut], 
@@ -650,21 +604,6 @@ def get_calculated_cumulants_data(
                         # Including pm axis
                         for p_or_m in [1, 0]:
 
-                            _delta_ = np.asarray(np.sum(pdf[p, p_or_m] * D_deltas[cut] * deltas[cut]))
-
-                            # Converting all moments to cumulants at the same time
-                            # if full_shape:
-                            #     cumulant = moments_to_cumulants(
-                            #         derivative_moments_z_R[n, p, p_or_m, R * n_cumulants : (R + 1) * n_cumulants], 
-                            #         _delta_=_delta_ if use_means else np.zeros(()) # _delta_=_delta_ if central_moments else np.zeros(())
-                            #     )
-                            # else:
-                            #     cumulant = _pdf_to_cumulants_bulk(
-                            #         pdf[p, p_or_m], 
-                            #         deltas=deltas[cut], 
-                            #         ddeltas=D_deltas[cut], # This is the cut from R-th scale
-                            #         cut=cut
-                            #     )
                             cumulant = _pdf_to_cumulants_bulk(
                                 pdf[p, p_or_m], 
                                 deltas=deltas[cut], 
@@ -770,10 +709,6 @@ def get_calculated_cumulants_data(
             derivatives=jnp.asarray(derivative_moments_z_R)  
         )
 
-        # Remove response in signal from parameters that cannot be constrained at fixed z
-        if config.freeze_parameters:
-            dataset = freeze_out_parameters_dataset(dataset)
-
         # If requiring PDFs return dataset for bulk of the PDF (not cumulants of the bulk) NOTE: check this.s... NOTE: check this.s... NOTE: check this.s... NOTE: check this.s...
         return_dataset = dataset
 
@@ -813,9 +748,6 @@ def get_calculated_cumulants_data(
             plt.savefig(filename)
             plt.close()
             logger.debug("Saved correlation matrix (PDFs) figure at: \n\t{}".format(filename))
-
-            if config.freeze_parameters:
-                pdf_dataset = freeze_out_parameters_dataset(pdf_dataset)
 
             return_dataset = pdf_dataset 
 
@@ -903,7 +835,7 @@ class BulkCumulantsDataset:
 
     config: ConfigDict
     data: Dataset
-    prior: tfd.Distribution
+    prior: Distribution
     compression_fn: Optional[Callable[[Array, Array], Array]]
     results_dir: str
 
@@ -926,12 +858,8 @@ class BulkCumulantsDataset:
             results_dir=results_dir
         )
 
-        self.prior = get_prior(config, self.data) # Possibly not equal to Quijote prior
+        self.prior = get_prior() # Possibly not equal to Quijote prior
 
-        # key = jr.key(config.seed)
-        # self.compression_fn = get_compression_fn(
-        #     key, self.config, self.data, results_dir=results_dir
-        # )
         self.compression_fn = None
 
         self.results_dir = results_dir
@@ -949,29 +877,34 @@ class BulkCumulantsDataset:
         )
 
     def get_parameter_strings(self):
-        return get_parameter_strings()
+        return PARAMETER_STRINGS
 
-    def sample_prior(self, key: PRNGKeyArray, n: int, *, hypercube: bool = True) -> Float[Array, "n p"]:
+    def sample_prior(self, key: PRNGKeyArray, n: int) -> Float[Array, "n p"]:
         # Sample Quijote prior which may not be the same as inference prior
         P = sample_prior(
             key, 
             n, 
             alpha=self.data.alpha, 
             lower=self.data.lower, 
-            upper=self.data.upper, 
-            hypercube=hypercube
+            upper=self.data.upper
         )
         return P
 
     def get_compression_fn(self, train: bool = True):
         if self.compression_fn is None:
+
             key = jr.key(self.config.seed)
+
             fn = get_compression_fn(
                 key, self.config, self.data, train=train, results_dir=self.results_dir
             )
+
             assert callable(fn), "Compression function returned is not callable"
+
             self.compression_fn = fn
+
         assert self.compression_fn is not None
+
         return self.compression_fn
 
     def get_datavector(self, key: PRNGKeyArray, n: int = 1) -> Float[Array, "... d"]:
@@ -982,8 +915,6 @@ class BulkCumulantsDataset:
         # Sample datavector from linearised Gaussian model
         mu = jnp.mean(self.data.fiducial_data, axis=0) 
         d = jr.multivariate_normal(key, mu, self.data.C, (n,))
-        if not (n > 1):
-            d = jnp.squeeze(d, axis=0) 
         return d
 
     def get_linearised_data(self):
@@ -1003,7 +934,7 @@ class TailsCumulantsDataset:
 
     config: ConfigDict
     data: Dataset
-    prior: tfd.Distribution
+    prior: Distribution
     compression_fn: Optional[Callable[[Array, Array], Array]]
     results_dir: str
 
@@ -1026,12 +957,8 @@ class TailsCumulantsDataset:
             results_dir=results_dir
         )
 
-        self.prior = get_prior(config, self.data) # Possibly not equal to Quijote prior
+        self.prior = get_prior() # Possibly not equal to Quijote prior
 
-        # key = jr.key(config.seed)
-        # self.compression_fn = get_compression_fn(
-        #     key, self.config, self.data, results_dir=results_dir
-        # )
         self.compression_fn = None
 
         self.results_dir = results_dir
@@ -1049,28 +976,35 @@ class TailsCumulantsDataset:
         )
 
     def get_parameter_strings(self):
-        return get_parameter_strings()
+        return PARAMETER_STRINGS
 
-    def sample_prior(self, key: PRNGKeyArray, n: int, *, hypercube: bool = True) -> Float[Array, "n p"]:
+    def sample_prior(self, key: PRNGKeyArray, n: int) -> Float[Array, "n p"]:
         # Sample Quijote prior which may not be the same as inference prior
         P = sample_prior(
             key, 
             n, 
             alpha=self.data.alpha, 
             lower=self.data.lower, 
-            upper=self.data.upper, 
-            hypercube=hypercube
+            upper=self.data.upper
         )
         return P
 
     def get_compression_fn(self, train: bool = True):
+
         if self.compression_fn is None:
+
             key = jr.key(self.config.seed)
+
             fn = get_compression_fn(
                 key, self.config, self.data, train=train, results_dir=self.results_dir
             )
+
             assert callable(fn), "Compression function returned is not callable"
+
             self.compression_fn = fn
+
+        assert self.compression_fn is not None
+
         return self.compression_fn
 
     def get_datavector(self, key: PRNGKeyArray, n: int = 1) -> Float[Array, "... d"]:
@@ -1081,8 +1015,6 @@ class TailsCumulantsDataset:
         # Sample datavector from linearised Gaussian model
         mu = jnp.mean(self.data.fiducial_data, axis=0) 
         d = jr.multivariate_normal(key, mu, self.data.C, (n,))
-        if not (n > 1):
-            d = jnp.squeeze(d, axis=0) 
         return d
 
     def get_linearised_data(self):
@@ -1108,70 +1040,43 @@ class BulkPDFsDataset(BulkCumulantsDataset):
         super().__init__(config, pdfs=True, results_dir=results_dir)
 
 
-def get_bulk_dataset(args, pdfs=False):
-    # Take non-bulk config, get bulk config, get dataset, extract Finv
-
-    config = bulk_cumulants_config(
-        seed=args.seed, 
-        redshift=args.redshift, 
-        linearised=args.linearised, 
-        compression=args.compression,
-        order_idx=args.order_idx,
-        scales=args.scales,
-        n_linear_sims=args.n_linear_sims,
-        pre_train=args.pre_train,
-        freeze_parameters=args.freeze_parameters
-    )
-
-    if pdfs: 
-        logger.info("Using PDF dataset for bulk dataset.")
-    else:
-        logger.info("Using cumulants dataset for bulk dataset.")
-
-    dataset = BulkCumulantsDataset(config, pdfs=pdfs)
-
-    return dataset.data
-
-
-def get_multi_z_bulk_pdf_fisher_forecast(args):
-    # Get bulk PDF dataset for multiple redshifts
-
-    F = np.zeros(())
-    for redshift in args.redshifts: #[0.0, 0.5, 1.0]:
-
-        config = bulk_cumulants_config(
-            seed=args.seed, 
-            redshift=redshift, # Force redshift!
-            linearised=args.linearised, 
-            compression=args.compression,
-            order_idx=args.order_idx,
-            scales=args.scales,
-            n_linear_sims=args.n_linear_sims,
-            pre_train=args.pre_train,
-            freeze_parameters=args.freeze_parameters
-        )
-
-        logger.info("Using PDF dataset for bulk dataset. z={}".format(redshift))
-
-        dataset = BulkCumulantsDataset(config, pdfs=True)
-
-        F_z = np.linalg.inv(dataset.data.Finv)
-        F = F + F_z
-
-    Finv = np.linalg.inv(F)
-
-    return Finv
-
-
 def load_multi_z_bulk_pdf_fisher_forecast(data_dir, args):
     """
         Load Fisher inverse matrix of PDF dataset, over multiple redshifts, consistently with args
     """
+
+    def get_multi_z_bulk_pdf_fisher_forecast(args):
+        # Get bulk PDF dataset for multiple redshifts
+
+        F = np.zeros(())
+        for redshift in args.redshifts: #[0.0, 0.5, 1.0]:
+
+            config = bulk_cumulants_config(
+                seed=args.seed, 
+                redshift=redshift, # Force redshift!
+                linearised=args.linearised, 
+                compression=args.compression,
+                order_idx=args.order_idx,
+                scales=args.scales,
+                n_linear_sims=args.n_linear_sims,
+                pre_train=args.pre_train
+            )
+
+            logger.info("Using PDF dataset for bulk dataset. z={}".format(redshift))
+
+            dataset = BulkCumulantsDataset(config, pdfs=True)
+
+            F_z = np.linalg.inv(dataset.data.Finv)
+            F = F + F_z
+
+        Finv = np.linalg.inv(F)
+
+        return Finv
+
     identifier_str = "".join(
         [
             "_R" + "".join(map(str, args.scales)),
             "_z" + "".join(map(str, args.redshifts)),
-            "_f" if args.freeze_parameters else "_nf",
             "_pdfs"
         ]
     )
@@ -1189,11 +1094,6 @@ def load_multi_z_bulk_pdf_fisher_forecast(data_dir, args):
             np.save(Finv_file_path, Finv_bulk_pdfs_all_z)
         else:
             Finv_bulk_pdfs_all_z = get_multi_z_bulk_pdf_fisher_forecast(args)
-
-    # Don't save with Fisher information from Planck
-    Finv_bulk_pdfs_all_z = add_planck_information_to_Finv(
-        Finv_bulk_pdfs_all_z, use_planck=args.use_planck
-    )
 
     logger.info("Finv bulk PDFs all z loaded from:\n\t{}".format(Finv_file_path))
 

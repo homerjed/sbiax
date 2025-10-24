@@ -15,7 +15,6 @@ N_CPU=8
 N_LINEAR_SIMS=10_000 
 PARTITION="inter"
 LINEAR_ONLY=true # Test NDE or NN on large linearised independent test set
-FREEZE_FLAG="--no-freeze-parameters"
 NDE_TYPE="MAF"
 USE_PLANCK=false
 
@@ -118,7 +117,6 @@ python arch_search_slurm.py \
 --order_idx 0 1 2 \
 --n_linear_sims $N_LINEAR_SIMS \
 $LINEARISED_FLAG \
-$FREEZE_FLAG \
 $USE_PLANCK_FLAG \
 $PRETRAIN_FLAG
 

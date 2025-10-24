@@ -17,7 +17,7 @@ mkdir -p "logs/"
 export LOG_DIR="logs/"
 export LOG_LEVEL="DEBUG"
 export PRINT_LOGS="True"
-export RESULTS_DIR="results/nn/"
+export RESULTS_DIR="results/dataset/"
 export FORCE_NOISELESS_DATAVECTOR="False"
 export FORCE_RECOMPUTE_DATASET="True"
 export USE_QUIJOTE_TAILS="False"
@@ -26,9 +26,12 @@ export DEFAULT_RESOLUTION="1024"
 export NON_GAUSSIAN_TEST="False"
 export USE_SOBOL="True"
 
+export DATASET_TEST="True"
+
+# NOTE: run no-linearised...
+
 SEED=0
 COMPRESSION="nn"
-PRETRAIN="--no-pre-train"
 
 REDSHIFT="0.0"
 ORDER_IDX="0 1 2" 
@@ -43,17 +46,15 @@ else
 fi
 
 for BULK_TAILS_FLAG in "bulk" "tails"; do
-    python get_datasets_test.py \
+    uv run python test_dataset.py \
     --seed $SEED \
     --compression $COMPRESSION \
     --no-linearised \
-    $PRETRAIN \
+    --no-pre-train \
     --n_linear_sims $N_LINEAR_SIMS \
     --order_idx $ORDER_IDX \
     --scales $SCALES \
     --redshift $REDSHIFT \
     --use-tqdm \
-    --bulk_or_tails $BULK_TAILS_FLAG \
-    --no-use-planck \
-    --no-freeze-parameters 
+    --bulk_or_tails $BULK_TAILS_FLAG 
 done

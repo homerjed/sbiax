@@ -34,12 +34,9 @@ from configs import (
 from configs.args import get_arch_search_args, get_cumulants_sbi_args
 from data.constants import get_base_results_dir
 from data.cumulants import Dataset, get_linearised_data
-from affine import affine_sample
+from sbiax.inference import nuts_sample, affine_sample
 from utils import (
-    get_datasets,
-    plot_fisher_summaries, 
-    replace_scalers,
-    finite_samples_log_prob
+    get_datasets, plot_fisher_summaries, finite_samples_log_prob
 )
 
 """
@@ -290,13 +287,7 @@ def objective(
             Build NDEs
         """
 
-        ndes = get_ndes_from_config(
-            config, 
-            cumulants_dataset,
-            event_dim=dataset.alpha.size, 
-            use_scalers=config.use_scalers, # NOTE: not to be trusted
-            key=model_key
-        )
+        ndes = get_ndes_from_config(config, key=model_key)
 
         print("scaler:", ndes[0].scaler.mu_x if ndes[0].scaler is not None else None) # Check scaler mu, std are not changed by gradient
 
@@ -860,14 +851,12 @@ if __name__ == "__main__":
         order_idx=args.order_idx,
         scales=args.scales,
         n_linear_sims=args.n_linear_sims,
-        freeze_parameters=args.freeze_parameters,
         pre_train=args.pre_train
     )
 
     # Identify this arch search run later on (unique among different dataset/training types)
     identifier_str = "arch_search_{}_{}_{}_{}_m{}".format(
         "l" if args.linearised else "nl", 
-        "f" if args.freeze_parameters else "nf", 
         "pt" if args.pre_train else "npt", 
         args.bulk_or_tails,
         "".join(map(str, args.order_idx))

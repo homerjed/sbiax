@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os 
 import time
 import argparse
@@ -12,8 +13,10 @@ from scipy.stats import chi2
 from ml_collections import ConfigDict
 from chainconsumer import Chain, ChainConsumer, Truth
 
+from dataclasses import dataclass
+from typing import Iterable, Sequence, Tuple
+
 from sbiax.utils import make_df
-from sbiax.ndes import Scaler
 
 from configs.log import setup_module_logger, get_log_level
 from configs.configs import get_results_dir
@@ -26,7 +29,6 @@ logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
 
 FORCE_RECOMPUTE_DATASET = True if os.environ.get("FORCE_RECOMPUTE_DATASET", "").lower() in ("1", "true") else False 
-USE_QUIJOTE_TAILS = True if os.environ.get("USE_QUIJOTE_TAILS", "").lower() in ("1", "true") else False
 USE_SOBOL = True if os.environ.get("USE_SOBOL", "").lower() in ("1", "true") else False 
 
 if USE_SOBOL:
@@ -54,6 +56,82 @@ else:
     ]
 
 
+
+def cut_samples(samples, lower, upper):
+    return samples[np.all((samples >= lower) & (samples <= upper), axis=1)]
+
+
+"""
+    log
+"""
+
+import sys
+import logging
+import os
+
+LOG_DIR = os.getenv("LOG_DIR", "logs/")
+PRINT_LOGS = os.getenv("PRINT_LOGS", False)
+
+
+def get_log_level(default="DEBUG"):
+
+    level_str = os.getenv("LOG_LEVEL", default).upper()
+
+    return getattr(logging, level_str, logging.INFO)
+
+
+def setup_module_logger(
+    module_name: str, 
+    level=logging.INFO, 
+    log_dir=LOG_DIR
+) -> tuple[logging.Logger, str]:
+
+    log_figs_dir = os.path.join(log_dir, "figs/")
+
+    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(log_figs_dir, exist_ok=True)
+
+    log_path = os.path.join(log_dir, f"{module_name}.log")
+
+    print("LOG PATH:\n\t{}".format(os.path.abspath(log_path)))
+
+    try:
+        if os.path.exists(log_path):
+            os.remove(log_path)
+    except Exception as e:
+        print(f"LOGS: Failed to delete {log_path}. Reason: {e}")
+
+    logger = logging.getLogger(module_name)
+    logger.setLevel(level)
+
+    # Avoid duplicate handlers if logger already configured
+    if not logger.handlers:
+        file_handler = logging.FileHandler(log_path)
+
+        file_handler.setFormatter(
+            logging.Formatter(
+                '%(name)s - %(levelname)s \n >> %(message)s' # %(asctime)s - 
+            )
+        )
+
+        logger.addHandler(file_handler)
+
+    if PRINT_LOGS:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(
+            logging.Formatter(
+                '%(name)s - %(levelname)s \n >> %(message)s' # %(asctime)s - 
+            )
+        )
+        logger.addHandler(handler)
+
+    return logger, log_figs_dir
+
+"""
+    Utils
+"""
+
 import matplotlib.patches as patches
 
 def overlay_bounds_on_corner(fig, lower, upper, *, ec="k", lw=1.5, alpha=0.12):
@@ -78,19 +156,65 @@ def overlay_bounds_on_corner(fig, lower, upper, *, ec="k", lw=1.5, alpha=0.12):
     # Off-diagonals (lower triangle): draw rectangles
     for i in range(1, n):          # rows (y = param i)
         for j in range(0, i):      # cols (x = param j)
+
             ax = ax_at.get((i, j))
+
             if ax is None: 
                 continue
+
             rect = patches.Rectangle(
-                (lower[j], upper[i]),                 # (x0, y0)
-                (upper[j] - lower[j]),                  # width  in x (param j)
-                -(upper[i] - lower[i]),                  # height in y (param i)
+                (lower[j], upper[i]),       # (x0, y0)
+                (upper[j] - lower[j]),      # width  in x (param j)
+                -(upper[i] - lower[i]),     # height in y (param i)
                 fill=False, 
                 ec=ec, 
                 lw=lw, 
                 linestyle=":"
             )
             ax.add_patch(rect)
+
+
+def customize_plot(fig, lw=1.5, fs=16):
+    fig.set_size_inches(9., 9.)
+    fig.set_dpi(300)
+
+    # Loop over axes to customize them
+    for ax in fig.axes:
+        # Change axis label font sizes
+        ax.xaxis.label.set_size(fs)
+        ax.yaxis.label.set_size(fs)
+
+        # Change tick label font sizes
+        ax.tick_params(axis='both', labelsize=fs - 5)
+
+        # Change spline (axis spine) linewidths
+        for spine in ax.spines.values():
+            spine.set_linewidth(lw)
+
+        # Change contour line widths (if any exist)
+        for coll in ax.collections:
+            if hasattr(coll, 'get_linewidths'):
+                coll.set_linewidths([lw])  # or another desired width
+
+        # Identify diagonal axes
+        for line in ax.lines:
+            line.set_linewidth(lw)  # set your desired linewidth here
+
+        # Legend fontsize
+        legend = ax.get_legend()
+        if legend is not None:
+            for text in legend.get_texts():
+                text.set_fontsize(fs) 
+
+        # Marker sizes
+        for coll in ax.collections:
+            if hasattr(coll, 'get_sizes'):  # Check if this is a PathCollection (e.g. scatter/marker)
+                sizes = coll.get_sizes()
+                if len(sizes) > 0:
+                    # Set new marker size (squared points); e.g., 50 means ~7 px
+                    coll.set_sizes([50] * len(sizes))
+
+    return fig
 
 
 def get_fisher_chain_df(alpha, Finv, parameter_strings=None, prior_clip=True):
@@ -120,9 +244,13 @@ def get_fisher_chain_df(alpha, Finv, parameter_strings=None, prior_clip=True):
 
 
 def finite_samples_log_prob(samples_log_prob):
-    n_bad = jnp.logical_or(
-        jnp.isnan(samples_log_prob), jnp.isneginf(samples_log_prob)
-    ).sum()
+    """ Replace negative or NaN samples with a very low log-probability """
+    n_bad = jnp.sum(
+        jnp.logical_or(
+            jnp.isnan(samples_log_prob), 
+            jnp.isneginf(samples_log_prob)
+        )
+    )
 
     print("CHAIN HAS {}/{} bad samples:".format(n_bad, samples_log_prob.size))
 
@@ -136,6 +264,11 @@ def finite_samples_log_prob(samples_log_prob):
     )
 
     return samples_log_prob
+
+
+"""
+    Datasets
+"""
 
 
 def get_dataset_and_config(
@@ -165,22 +298,13 @@ def get_dataset_and_config(
         config = bulk_pdf_config 
 
     if bulk_or_tails == "tails":
-        if USE_QUIJOTE_TAILS:
-            logger.info("NOTE:\n\tusing Quijote data for full-shape dataset.")
-            print("NOTE:\n\tusing Quijote data for full-shape dataset.")
+        logger.info("NOTE:\n\tusing calculations for full-shape dataset.")
+        print("NOTE:\n\tusing calculations for full-shape dataset.")
 
-            if USE_SOBOL:
-                raise NotImplementedError()
-
-            dataset_constructor = CumulantsDataset
+        if USE_SOBOL:
+            dataset_constructor = SobolTailsCumulantsDataset
         else:
-            logger.info("NOTE:\n\tusing calculations for full-shape dataset.")
-            print("NOTE:\n\tusing calculations for full-shape dataset.")
-
-            if USE_SOBOL:
-                dataset_constructor = SobolTailsCumulantsDataset
-            else:
-                dataset_constructor = TailsCumulantsDataset 
+            dataset_constructor = TailsCumulantsDataset 
 
         config = cumulants_config 
 
@@ -207,10 +331,8 @@ def get_datasets(args: argparse.Namespace) -> tuple[ConfigDict, Dataset, dict[st
             compression=args.compression,
             order_idx=args.order_idx,
             scales=args.scales,
-            freeze_parameters=args.freeze_parameters,
             n_linear_sims=args.n_linear_sims,
-            pre_train=args.pre_train,
-            use_planck=args.use_planck
+            pre_train=args.pre_train
         )
 
         results_dir = get_results_dir(config, args)
@@ -232,6 +354,113 @@ def get_datasets(args: argparse.Namespace) -> tuple[ConfigDict, Dataset, dict[st
     dataset = datasets[args.bulk_or_tails]
     
     # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+    if args.redshift == 0.:
+
+        linear_str = "linear" if args.linearised else "quijote"
+
+        from chainconsumer import ChainConsumer, Chain
+        import pandas as pd
+
+        bulk_quijote = datasets["bulk"].data.fiducial_data
+        tails_quijote = datasets["tails"].data.fiducial_data
+        bulk_gauss = np.random.multivariate_normal(
+            bulk_quijote.mean(axis=0), 
+            datasets["bulk"].data.C, 
+            size=(bulk_quijote.shape[0],)
+        )
+        tails_gauss = np.random.multivariate_normal(
+            tails_quijote.mean(axis=0), 
+            datasets["tails"].data.C, 
+            size=(tails_quijote.shape[0],)
+        )
+        
+        (
+            bulk_quijote, tails_quijote, bulk_gauss, tails_gauss
+        ) = jax.tree.map(
+            lambda a: a[:, np.r_[2:5, 7:10]], # NOTE: draw {var, skew, kurt} on first 2 scales, ignoring m_0, m_1.
+            (bulk_quijote, tails_quijote, bulk_gauss, tails_gauss)
+        )
+
+        labels = [
+            # r"$\langle \delta_{R_1}^2\rangle_c$",
+            # r"$\langle \delta_{R_1}^3\rangle_c$",
+            # r"$\langle \delta_{R_1}^4\rangle_c$",
+            # r"$\langle \delta_{R_2}^2\rangle_c$",
+            # r"$\langle \delta_{R_2}^3\rangle_c$",
+            # r"$\langle \delta_{R_2}^4\rangle_c$",
+
+            r"$\langle \delta_{R_{5\,\mathrm{Mpc}h^{-1}}}^2\rangle_c$",
+            r"$\langle \delta_{R_{5\,\mathrm{Mpc}h^{-1}}}^3\rangle_c$",
+            r"$\langle \delta_{R_{5\,\mathrm{Mpc}h^{-1}}}^4\rangle_c$",
+            r"$\langle \delta_{R_{10\,\mathrm{Mpc}h^{-1}}}^2\rangle_c$",
+            r"$\langle \delta_{R_{10\,\mathrm{Mpc}h^{-1}}}^3\rangle_c$",
+            r"$\langle \delta_{R_{10\,\mathrm{Mpc}h^{-1}}}^4\rangle_c$",
+        ]
+
+        def df_from_samples(x):
+            return pd.DataFrame(x, columns=labels)
+
+        def shift_and_scale(a):
+            return (a - a.mean(axis=0)) / a.std(axis=0)
+
+        # Shift and scale so everything is same scale / location
+        df_bulk_q  = df_from_samples(shift_and_scale(bulk_quijote))
+        df_tails_q = df_from_samples(shift_and_scale(tails_quijote))
+        df_bulk_g  = df_from_samples(shift_and_scale(bulk_gauss))
+        df_tails_g = df_from_samples(shift_and_scale(tails_gauss))
+
+        c = ChainConsumer()
+
+        # dashed = Gaussian
+        c.add_chain(
+            Chain(
+                samples=df_bulk_g,  
+                name=r"Bulk $k_n$[Gaussian]", 
+                color="blue",
+                linestyle="--", 
+                shade_alpha=0.
+            )
+        )
+        c.add_chain(
+            Chain(
+                samples=df_tails_g, 
+                name=r"Tails $k_n$[Gaussian]", 
+                color="red",
+                linestyle="--", 
+                shade_alpha=0.
+            )
+        )
+        # solid = Quijote-like (non-Gaussian)
+        c.add_chain(
+            Chain(
+                samples=df_bulk_q, 
+                name=r"Bulk $k_n$[Quijote]",  
+                color="blue",
+                shade_alpha=0.
+            )
+        )
+        c.add_chain(
+            Chain(
+                samples=df_tails_q, 
+                name=r"Tails $k_n$[Quijote]", 
+                color="red",
+                shade_alpha=0.
+            )
+        )
+
+        fig = c.plotter.plot()
+
+        customize_plot(fig)
+
+        fig.subplots_adjust(wspace=0.06, hspace=0.06)
+
+        for ax in fig.axes:
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+        fig.savefig("cumulants_z0_corner_{}.pdf".format(linear_str), bbox_inches="tight")
+        plt.close(fig)
 
     fig, axs = plt.subplots(1, 3, figsize=(12., 4.))
 
@@ -322,15 +551,11 @@ def load_multi_z_cumulants_fisher_forecast(data_dir, args):
         - load bulk and tails dataset Finvs
     """
 
-    if USE_QUIJOTE_TAILS:
-        quijote_str = "_quijote"
-    else:
-        quijote_str = ""
+    quijote_str = ""
 
     parts = [
         "_R" + "".join(map(str, args.scales)),
         "_m" + "".join(map(str, args.order_idx)),
-        "_f" if args.freeze_parameters else "_nf"
     ]
     identifier_str = "".join(parts)
 
@@ -362,6 +587,11 @@ def load_multi_z_cumulants_fisher_forecast(data_dir, args):
     logger.info("Finv tails all z loaded from:\n\t{}".format(Finv_tails_file_path))
 
     return Finv_bulk_all_z, Finv_tails_all_z
+
+
+"""
+    Plots
+"""
 
 
 def plot_cumulants(args, config, cumulants, results_dir):
@@ -534,6 +764,9 @@ def plot_summaries(X, P, dataset, results_dir=None):
     # )
     # c.set_plot_config(plot_config)
     fig = c.plotter.plot()
+    overlay_bounds_on_corner(fig, LOWER, UPPER)
+    fig = customize_plot(fig)
+
     if results_dir is not None:
         plt.savefig(os.path.join(results_dir, "params.png")) 
         plt.close()
@@ -545,6 +778,9 @@ def plot_summaries(X, P, dataset, results_dir=None):
     l = np.linspace(-2., 2., 1000)
     for p, ax in enumerate(axs):
         Finv_std = jnp.sqrt(dataset.Finv[p, p])
+
+        # fisher_samples = np.random.multivariate_normal(dataset.alpha, dataset.Finv, size=(800_000,))
+        # Finv_std = jnp.sqrt(jnp.var(fisher_samples))
 
         ax.scatter(dataset.parameters[:, p], X[:, p], s=0.1, color="red" if dataset.name == "tails" else "blue")
         ax.axline((0, 0), slope=1., color="k", linestyle="--")
@@ -643,7 +879,8 @@ def plot_summaries_fiducial(X, X_, alpha, dataset, results_dir=None, Finv=None, 
     # )
     # c.set_plot_config(plot_config)
     fig = c.plotter.plot()
-    overlay_bounds_on_corner(fig, dataset.lower, dataset.upper)
+    overlay_bounds_on_corner(fig, LOWER, UPPER)
+    fig = customize_plot(fig)
 
     if results_dir is not None:
         if filename is not None:
@@ -731,6 +968,9 @@ def plot_fisher_summaries(X, P, dataset, results_dir=None):
         Truth(location=dict(zip(dataset.parameter_strings, dataset.alpha)), name=r"$\pi^0$")
     )
     fig = c.plotter.plot()
+    overlay_bounds_on_corner(fig, LOWER, UPPER)
+    fig = customize_plot(fig)
+
     plt.savefig(os.path.join(results_dir, "fisher_params.png"))
     plt.close()
 
@@ -746,19 +986,3 @@ def plot_fisher_summaries(X, P, dataset, results_dir=None):
         plt.close()
     else:
         plt.show()
-
-
-def replace_scalers(ensemble, *, config, X, P):
-    if config.use_scalers:
-        is_scaler = lambda x: isinstance(x, Scaler)
-        get_scalers = lambda m: [
-            x
-            for x in jax.tree.leaves(m, is_leaf=is_scaler)
-            if is_scaler(x)
-        ]
-        ensemble = eqx.tree_at(
-            get_scalers, 
-            ensemble, 
-            [Scaler(X, P)] * sum(int(nde.use_scaling) for nde in config.ndes) 
-        )
-    return ensemble

@@ -6,9 +6,13 @@ from ml_collections import ConfigDict
 
 from data.constants import ALL_RADII
 
-typecheck = jaxtyped(typechecker=typechecker)
+import os
+TYPECHECK = True if os.environ.get("TYPECHECK", "").lower() in ("1", "true") else False
+if TYPECHECK:
+    typecheck = jaxtyped(typechecker=typechecker)
+else:
+    typecheck = lambda x: x
 
-USE_SCALERS = True if os.environ.get("USE_SCALERS", "").lower() in ("1", "true") else False 
 DEFAULT_NDE_TYPE = os.environ.get("DEFAULT_NDE_TYPE", None)
 DEFAULT_N_NDES = int(os.environ.get("DEFAULT_N_NDES", 1))
 NON_GAUSSIAN_TEST = True if os.environ.get("NON_GAUSSIAN_TEST", "").lower() in ("1", "true") else False
@@ -25,7 +29,6 @@ DEFAULT_MAF_ARCH = dict(
     n_layers         = 2,
     nn_depth         = 2,
     activation       = "tanh",
-    use_scaling      = True
 )
 
 HP_OPT_MAF_ARCH = dict(
@@ -33,7 +36,6 @@ HP_OPT_MAF_ARCH = dict(
     n_layers         = 6,
     nn_depth         = 2,
     activation       = "swish",
-    use_scaling      = True
 )
 
 DEFAULT_CNF_ARCH = dict(
@@ -46,7 +48,6 @@ DEFAULT_CNF_ARCH = dict(
     t1               = 1.,  
     solver           = "Euler", # Heun
     exact_log_prob   = True,
-    use_scaling      = True # Defaults  
 )
 
 HP_OPT_CNF_ARCH = dict(
@@ -58,8 +59,7 @@ HP_OPT_CNF_ARCH = dict(
     dt               = 0.1, #0.12,
     t1               = 1.,
     solver           = "Heun",
-    exact_log_prob   = True,
-    use_scaling      = True # Defaults  
+    exact_log_prob   = True
 )
 
 # Optimisation hyperparameters (default and found with arch search)
@@ -79,7 +79,7 @@ HP_OPT_OPT_MAF = dict(
     n_batch          = 80, #100,
     patience         = 300, #70,
     lr               = 0.000489390761268084, #1e-3,
-    opt              = "adamw",
+    opt              = "adam", # NOTE: no adamw
     opt_kwargs       = {"weight_decay": 1e-4}
 )
 
@@ -134,7 +134,6 @@ def get_config_ndes(config):
     cnf.t1              = DEFAULT_CNF_ARCH["t1"]
     cnf.solver          = DEFAULT_CNF_ARCH["solver"]
     cnf.exact_log_prob  = DEFAULT_CNF_ARCH["exact_log_prob"]
-    cnf.use_scaling     = DEFAULT_CNF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
 
     # MAF
     maf = ConfigDict()
@@ -143,7 +142,12 @@ def get_config_ndes(config):
     maf.n_layers        = DEFAULT_MAF_ARCH["n_layers"]
     maf.nn_depth        = DEFAULT_MAF_ARCH["nn_depth"]
     maf.activation      = DEFAULT_MAF_ARCH["activation"]
-    maf.use_scaling     = DEFAULT_MAF_ARCH["use_scaling"] # Defaults to (mu, std) of (x, y)
+
+    gmm = ConfigDict()
+    gmm.model_type = "gmm"
+    gmm.K = 1
+    gmm.hidden = (128, 128)
+    gmm.cov_type = "full"
 
     # Ensemble
     config.ndes         = [get_default_nde(cnf, maf)] * N_NDES
@@ -175,27 +179,6 @@ def get_config_ndes(config):
     return config
 
 
-def default_posterior_sampling(config, no_config=False):
-
-    # If not supplying config, return just the sampling parameters
-    if no_config:
-        config = ConfigDict()
-        linearised = True
-    else:
-        linearised = config.linearised
-
-    # Posterior sampling
-    if linearised:
-        config.n_steps        = 100
-        config.n_walkers      = 2000
-    else:
-        config.n_steps        = 100
-        config.n_walkers      = 2000
-    config.burn               = int(0.1 * config.n_steps)
-
-    return config
-
-
 def get_config_nn(config: ConfigDict, bulk_or_tails: str) -> ConfigDict:
 
     config.nn = nn = ConfigDict()
@@ -205,39 +188,44 @@ def get_config_nn(config: ConfigDict, bulk_or_tails: str) -> ConfigDict:
 
     if bulk_or_tails == "bulk":
         if config.linearised:
-            nn.width_size        = [None] # No hidden layer
+            nn.width_size        = [32, 16] # [0] # No hidden layer
             nn.depth             = 0 
-            nn.activation        = "" # Use final bias / use bias are the same for this net
-            train.patience       = 2000 # 500
+            nn.activation        = "tanh" # Use final bias / use bias are the same for this net
+            train.patience       = 3000 # 2000 # 500
             nn.use_final_bias    = USE_FINAL_BIAS
+            nn.p                 = 0.
         else:
-            nn.width_size        = [128, 64, 32] #[64, 32, 16, 8] # 64 # 1024 # 64 # 32
-            nn.depth             = 3  # 1 # 3
-            nn.activation        = "tanh" # gelu
-            train.patience       = 4000 # 1000 # 700
+            nn.width_size        = [32, 16]#, 64, 32] 
+            nn.depth             = 3 
+            nn.activation        = "tanh" # tanh 
+            train.patience       = 5000 #6000 #4000 # 4000 
             nn.use_final_bias    = USE_FINAL_BIAS
+            nn.p                 = 0. #1
 
     if bulk_or_tails == "tails":
         if config.linearised:
-            nn.width_size        = [None] # No hidden layer
+            nn.width_size        = [32, 16] # [0] # No hidden layer
             nn.depth             = 0 # 3
-            nn.activation        = ""
-            train.patience       = 2000 # 500
+            nn.activation        = "tanh"
+            train.patience       = 3000 # 2000 # 500
             nn.use_final_bias    = USE_FINAL_BIAS
+            nn.p                 = 0.
         else:
-            nn.width_size        = [128, 64, 32] #[64, 32, 16, 8] # 64 # 1024 # 64
-            nn.depth             = 3 # 1 
-            nn.activation        = "tanh" # gelu
-            train.patience       = 4000 # 1000 # 700
+            nn.width_size        = [32, 16]#, 64, 32] 
+            nn.depth             = 3 
+            nn.activation        = "tanh" # tanh
+            train.patience       = 5000 # 6000 #4000 # 4000 
             nn.use_final_bias    = USE_FINAL_BIAS
+            nn.p                 = 0. #1
 
     # train.patience       = 200
 
-    train.opt            = "adamw"#w"
-    train.lr             = 1e-3
-    train.n_batch        = 20_000 # None # Batch dataset or not
+    train.opt            = "adam" # NOTE: adamw may be weight-decaying layernorm parameters...
+    train.weight_decay   = 1e-4 # 1e-3
+    train.lr             = 5e-5
+    train.n_batch        = 20_000 # 20_000 # None # Batch dataset or not
     train.n_steps        = 10_000_000
-    train.valid_fraction = 0.8
+    train.valid_fraction = 0.2
 
     nn.n_ensemble        = 1 
     nn.use_pca           = False
@@ -249,28 +237,25 @@ def default_cumulants_configuration(
     config,
     redshift: float = 0., 
     linearised: bool = True, 
-    compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
+    compression: Literal["linear", "nn", "nn-lbfgs", "imnn", "ensemble-nn"] = "linear",
     order_idx: list[int] = [0, 1, 2],
     scales: list[float] = ALL_RADII,
-    freeze_parameters: bool = False,
     n_linear_sims: Optional[int] = None,
     pre_train: bool = False,
-    use_planck: bool = False
 ) -> ConfigDict:
 
     config.redshift           = redshift
+    config.linearised         = linearised
     config.scales             = scales
     config.order_idx          = order_idx # Maximum index is 2
-    config.compression        = compression
-    config.linearised         = linearised
     config.covariance_epsilon = None # 1e-6
+    config.use_expectation    = False # Noiseless datavector
+
+    config.compression        = compression
+
     config.pre_train          = pre_train and (not linearised)
     config.n_linear_sims      = n_linear_sims # This is for pre-train or linearised simulations 
-    config.use_expectation    = False # Noiseless datavector
     config.valid_fraction     = 0.1
-    config.freeze_parameters  = freeze_parameters
-
-    config.use_planck         = use_planck
 
     return config
     
@@ -297,22 +282,20 @@ def cumulants_config(
     seed: int = 0, 
     redshift: float = 0., 
     linearised: bool = True, 
-    compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
+    compression: Literal["linear", "nn", "nn-lbfgs", "imnn", "ensemble-nn"] = "linear",
     order_idx: list[int] = [0, 1, 2],
     scales: list[float] = ALL_RADII,
-    freeze_parameters: bool = False,
     n_linear_sims: Optional[int] = None,
     pre_train: bool = False,
-    use_planck: bool = False
 ) -> ConfigDict:
     """ This is the tails config """
 
     config = ConfigDict()
 
-    config.seed               = seed # For argparse script running without args!
+    config.seed = seed # For argparse script running without args!
 
     # Data
-    config.dataset_name       = "cumulants" 
+    config.dataset_name = "cumulants" 
 
     config = default_cumulants_configuration(
         config, 
@@ -321,26 +304,18 @@ def cumulants_config(
         compression=compression,
         order_idx=order_idx,
         scales=scales,
-        freeze_parameters=freeze_parameters,
         n_linear_sims=n_linear_sims,
         pre_train=pre_train
     )
 
-    if compression in ["nn", "nn-lbfgs"]:
-        config = get_config_nn(config, bulk_or_tails="tails")
-
     config = default_cut_configuration(config, bulk_or_tails="tails")
 
-    config.use_planck         = use_planck
-
-    # Miscallaneous
-    config.use_scalers        = USE_SCALERS # Input scalers for (xi, pi) in NDEs (NOTE: checked that scalings aren't optimised!)
+    # Compression
+    if compression in ["nn", "nn-lbfgs", "imnn", "ensemble-nn"]:
+        config = get_config_nn(config, bulk_or_tails="tails")
 
     # SBI
-    config.sbi_type           = "nle"
-
-    # Posterior sampling
-    config = default_posterior_sampling(config)
+    config.sbi_type = "nle"
 
     # NDEs
     config = get_config_ndes(config)
@@ -353,21 +328,19 @@ def arch_search_cumulants_config( # Copy of the above config for architecture se
     seed: int = 0, 
     redshift: float = 0., 
     linearised: bool = True, 
-    compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
+    compression: Literal["linear", "nn", "nn-lbfgs", "imnn", "ensemble-nn"] = "linear",
     order_idx: list[int] = [0, 1, 2],
     scales: list[float] = ALL_RADII,
-    freeze_parameters: bool = False,
     n_linear_sims: Optional[int] = None,
     pre_train: bool = False,
-    use_planck: bool = False
 ) -> ConfigDict:
 
     config = ConfigDict()
 
-    config.seed               = seed # For argparse script running without args!
+    config.seed = seed # For argparse script running without args!
 
     # Data
-    config.dataset_name       = "cumulants"
+    config.dataset_name = "cumulants"
 
     config = default_cumulants_configuration(
         config, 
@@ -376,26 +349,18 @@ def arch_search_cumulants_config( # Copy of the above config for architecture se
         compression=compression,
         order_idx=order_idx,
         scales=scales,
-        freeze_parameters=freeze_parameters,
         n_linear_sims=n_linear_sims,
         pre_train=pre_train
     )
 
-    if compression in ["nn", "nn-lbfgs"]:
-        config = get_config_nn(config, bulk_or_tails="tails")
-
     config = default_cut_configuration(config, bulk_or_tails="tails")
 
-    config.use_planck         = use_planck
-
-    # Miscallaneous
-    config.use_scalers        = USE_SCALERS # Input scalers for (xi, pi) in NDEs (NOTE: checked that scalings aren't optimised!)
+    # Compression
+    if compression in ["nn", "nn-lbfgs", "imnn", "ensemble-nn"]:
+        config = get_config_nn(config, bulk_or_tails="tails")
 
     # SBI
-    config.sbi_type           = "nle" 
-
-    # Posterior sampling
-    config = default_posterior_sampling(config)
+    config.sbi_type = "nle" 
 
     # NDEs
     config = get_config_ndes(config)
@@ -408,13 +373,11 @@ def bulk_cumulants_config(
     seed: int = 0, 
     redshift: float = 0., 
     linearised: bool = True, 
-    compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
+    compression: Literal["linear", "nn", "nn-lbfgs", "imnn", "ensemble-nn"] = "linear",
     order_idx: list[int] = [0, 1, 2],
     scales: list[float] = ALL_RADII,
-    freeze_parameters: bool = False,
     n_linear_sims: Optional[int] = None,
     pre_train: bool = False,
-    use_planck: bool = False
 ) -> ConfigDict:
 
     config = ConfigDict()
@@ -431,26 +394,18 @@ def bulk_cumulants_config(
         compression=compression,
         order_idx=order_idx,
         scales=scales,
-        freeze_parameters=freeze_parameters,
         n_linear_sims=n_linear_sims,
         pre_train=pre_train
     )
 
-    if compression in ["nn", "nn-lbfgs"]:
-        config = get_config_nn(config, bulk_or_tails="bulk")
-
     config = default_cut_configuration(config, bulk_or_tails="bulk")
 
-    config.use_planck         = use_planck
-
-    # Miscallaneous
-    config.use_scalers        = USE_SCALERS 
+    # Compression
+    if compression in ["nn", "nn-lbfgs", "imnn", "ensemble-nn"]:
+        config = get_config_nn(config, bulk_or_tails="bulk")
 
     # SBI
     config.sbi_type           = "nle" 
-
-    # Posterior sampling
-    config = default_posterior_sampling(config)
 
     # NDEs
     config = get_config_ndes(config)
@@ -463,13 +418,11 @@ def bulk_pdf_config(
     seed: int = 0, 
     redshift: float = 0., 
     linearised: bool = True, 
-    compression: Literal["linear", "nn", "nn-lbfgs"] = "linear",
+    compression: Literal["linear", "nn", "nn-lbfgs", "imnn", "ensemble-nn"] = "linear",
     order_idx: list[int] = [0, 1, 2],
     scales: list[float] = ALL_RADII,
-    freeze_parameters: bool = False,
     n_linear_sims: Optional[int] = None,
     pre_train: bool = False,
-    use_planck: bool = False
 ) -> ConfigDict:
 
     config = bulk_cumulants_config(
@@ -479,10 +432,8 @@ def bulk_pdf_config(
         compression=compression,
         order_idx=order_idx,
         scales=scales,
-        freeze_parameters=freeze_parameters,
         n_linear_sims=n_linear_sims,
         pre_train=pre_train,
-        use_planck=use_planck
     )
 
     return config

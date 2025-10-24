@@ -105,12 +105,14 @@ ALPHA = np.array([0.3175, 0.049, 0.6711, 0.9624, 0.834])
 
 
 def get_prior_limits():
+
     if USE_SOBOL:
         lower = np.array([0.10, 0.02, 0.50, 0.80, 0.60])
         upper = np.array([0.50, 0.08, 0.90, 1.20, 1.00])
     else:
         lower = np.array([0.10, 0.03, 0.50, 0.80, 0.60])
         upper = np.array([0.50, 0.07, 0.90, 1.20, 1.00])
+
     return lower, upper
 
 
@@ -197,22 +199,3 @@ def get_F_planck():
 
 def get_Finv_planck():
     return jnp.linalg.inv(get_F_planck())
-
-
-def get_sobol_prior_limits():
-    # Not quite the same as previous hypercube
-    lower = np.array([0.10, 0.02, 0.50, 0.80, 0.60])
-    upper = np.array([0.50, 0.08, 0.90, 1.20, 1.00])
-    return lower, upper
-
-
-def get_sobol_ingredients():
-    parameter_strings = [
-        r"$\Omega_m$", r"$\Omega_b$", r"$h$", r"$n_s$", r"$\sigma_8$"
-    ]
-
-    alpha = np.array([0.3175, 0.049, 0.6711, 0.9624, 0.834])
-
-    lower, upper = get_sobol_prior_limits()
-
-    return parameter_strings, alpha, (lower, upper)

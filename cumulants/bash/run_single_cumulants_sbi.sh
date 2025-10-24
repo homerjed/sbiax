@@ -16,7 +16,7 @@ mkdir -p "logs/"
 
 export LOG_DIR="logs/"
 export LOG_LEVEL="DEBUG"
-export RESULTS_DIR="results_sobol_2/"
+export RESULTS_DIR="results/maf_test/"
 
 export DEFAULT_NDE_TYPE="CNF"
 export DEFAULT_N_NDES=1
@@ -35,13 +35,14 @@ export NON_GAUSSIAN_TEST=false
 export USE_SOBOL=true
 export PLOT_FISHER_CLIPPED=true
 
-export USE_SCALERS=false
-export USE_CONSTRAINER=true
+COMPRESSION="linear" # Linear or neural network
+export N_ENSEMBLE_NETS=10
+export USE_PRECISION_NN=false
+export NN_TYPE="NN"
+export DATA_PROCESS_TYPE_NN="dp"
+export NN_CLIP_NORM=true # Global clipping of weights
+export COVARIANCE_NN=true
 
-export BLACKJAX_SAMPLE="$BLACKJAX_SAMPLE"
-export AFFINE_SAMPLE="$AFFINE_SAMPLE"
-
-COMPRESSION="nn" # Linear or neural network
 PRETRAIN="--no-pre-train"
 
 REDSHIFT="0.0"
@@ -74,8 +75,6 @@ for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
         #     --redshift $REDSHIFT \
         #     --use-tqdm \
         #     --bulk_or_tails "tails" \
-        #     --no-use-planck \
-        #     --no-freeze-parameters 
         
         python cumulants_sbi.py \
             --seed $SEED \
@@ -87,9 +86,7 @@ for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
             --scales $SCALES \
             --redshift $REDSHIFT \
             --use-tqdm \
-            --bulk_or_tails "bulk" \
-            --no-use-planck \
-            --no-freeze-parameters &
+            --bulk_or_tails "bulk"  
 
         python cumulants_sbi.py \
             --seed $SEED \
@@ -101,11 +98,9 @@ for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
             --scales $SCALES \
             --redshift $REDSHIFT \
             --use-tqdm \
-            --bulk_or_tails "tails" \
-            --no-use-planck \
-            --no-freeze-parameters &
+            --bulk_or_tails "tails" 
         
-        wait  # wait for both background jobs for this seed to finish
+        # wait  # wait for both background jobs for this seed to finish
     done
 done
 

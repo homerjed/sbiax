@@ -2,24 +2,28 @@
 #SBATCH --job-name=sbi_single
 #SBATCH --output=sbatch_out/single_nn.out
 #SBATCH --error=sbatch_out/single_nn.err
-#SBATCH --partition=cluster
+# SBATCH --partition=cluster
 #SBATCH --time=08:00:00
 #SBATCH --mem=8GB
 #SBATCH --cpus-per-task=16
 #SBATCH --mail-user=jed.homer@physik.lmu.de
 #SBATCH --mail-type=begin,end,fail
 
-##SBATCH --gres=gpu:1
+## SBATCH --partition=inter
+## SBATCH --gres=gpu:1
+
 
 cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
 source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
 
 mkdir -p "logs/"
 
+export TYPECHECK=false
+
 export LOG_DIR="logs/"
 export LOG_LEVEL="DEBUG"
 export PRINT_LOGS="true"
-# export RESULTS_DIR="results/nn/"
+export RESULTS_DIR="results/nn/"
 export FORCE_NOISELESS_DATAVECTOR="false"
 export FORCE_RECOMPUTE_DATASET="false"
 export USE_QUIJOTE_TAILS="false"
@@ -34,15 +38,20 @@ SEED=0
 USE_PRECISION_NN=false
 
 COMPRESSION="nn"
-export USE_PRECISION_NN="$USE_PRECISION_NN"
-export DATA_PROCESS_TYPE_NN="d"
+export N_ENSEMBLE_NETS=10
+export USE_PRECISION_NN="False"
+export DATA_PROCESS_TYPE_NN="dp"
+export NN_TYPE="NN"
+
+export COVARIANCE_NN="True"
+export NN_CLIP_NORM="True"
 
 PRETRAIN="--no-pre-train"
 
 REDSHIFT="0.0"
 ORDER_IDX="0 1 2" 
 
-NN_OR_IMNN="nn"
+NN_OR_IMNN="nn" # Run IMNN or NN \in [nn, resnet]
 
 if [[ "$USE_PRECISION_NN" == "true" ]]; then
     export RESULTS_DIR="results/$NN_OR_IMNN/precision/"
@@ -78,7 +87,8 @@ for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
     # --no-use-planck \
     # --no-freeze-parameters \
 
-    python $NN_OR_IMNN.py \
+    #$NN_OR_IMNN.py \
+    uv run python cumulants_nn.py \
     --seed $SEED \
     --compression $COMPRESSION \
     $LINEARISED_FLAG \
@@ -88,23 +98,19 @@ for LINEARISED_FLAG in "--linearised" "--no-linearised"; do
     --scales $SCALES \
     --redshift $REDSHIFT \
     --use-tqdm \
-    --bulk_or_tails "bulk" \
-    --no-use-planck \
-    --no-freeze-parameters &
+    --bulk_or_tails "bulk"
 
-    python $NN_OR_IMNN.py \
-    --seed $SEED \
-    --compression $COMPRESSION \
-    $LINEARISED_FLAG \
-    $PRETRAIN \
-    --n_linear_sims $N_LINEAR_SIMS \
-    --order_idx $ORDER_IDX \
-    --scales $SCALES \
-    --redshift $REDSHIFT \
-    --use-tqdm \
-    --bulk_or_tails "tails" \
-    --no-use-planck \
-    --no-freeze-parameters
+    # uv run python $NN_OR_IMNN.py \
+    # --seed $SEED \
+    # --compression $COMPRESSION \
+    # $LINEARISED_FLAG \
+    # $PRETRAIN \
+    # --n_linear_sims $N_LINEAR_SIMS \
+    # --order_idx $ORDER_IDX \
+    # --scales $SCALES \
+    # --redshift $REDSHIFT \
+    # --use-tqdm \
+    # --bulk_or_tails "tails"
 
-    wait  # wait for both background jobs for this seed to finish
+    # wait  # wait for both background jobs for this seed to finish
 done

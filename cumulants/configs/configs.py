@@ -1,5 +1,5 @@
 import os
-from typing import Optional, Union
+from typing import Optional, Union, Type
 import argparse
 import yaml
 import jax.numpy as jnp
@@ -10,11 +10,17 @@ from beartype import beartype as typechecker
 from ml_collections import ConfigDict
 
 from .log import setup_module_logger, get_log_level
-from data.constants import get_base_results_dir, get_base_posteriors_dir, get_scales
+from data.constants import get_base_results_dir, get_base_posteriors_dir, get_scales, ALPHA
 from data.cumulants import CumulantsDataset
-from sbiax.ndes import CNF, MAF, Scaler
+from sbiax.ndes import CNF, MAF, GMM, Ensemble
 
-typecheck = jaxtyped(typechecker=typechecker)
+import os
+TYPECHECK = True if os.environ.get("TYPECHECK", "").lower() in ("1", "true") else False
+if TYPECHECK:
+    typecheck = jaxtyped(typechecker=typechecker)
+else:
+    typecheck = lambda x: x
+
 
 logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 
@@ -25,7 +31,7 @@ if USE_SOBOL:
     from data.get_sobol_cumulants import (
         SobolBulkCumulantsDataset, SobolTailsCumulantsDataset, SobolBulkPDFsDataset
     )
-    DatasetClass = Union[ 
+    DatasetClass: Type = Union[ 
         SobolBulkCumulantsDataset, 
         SobolTailsCumulantsDataset, 
         SobolBulkPDFsDataset
@@ -34,7 +40,7 @@ else:
     from data.pdfs import (
         BulkCumulantsDataset, TailsCumulantsDataset, BulkPDFsDataset
     )
-    DatasetClass = Union[ 
+    DatasetClass: Type = Union[ 
         BulkCumulantsDataset, 
         TailsCumulantsDataset, 
         BulkPDFsDataset, 
@@ -63,12 +69,6 @@ def load_config(filepath: str) -> ConfigDict:
 """
     Save & load directories
 """
-
-
-# def make_dirs(results_dir: str) -> None:
-#     if not os.path.exists(results_dir):
-#         os.makedirs(results_dir, exist_ok=True)
-#     # print("RESULTS_DIR:\n", results_dir)
 
 
 def dump_args_and_config(args: argparse.Namespace, config: ConfigDict, results_dir: str) -> None:
@@ -110,7 +110,6 @@ def get_config_subdir(
         "sobol" if USE_SOBOL else None,
         "arch_search" if arch_search else None,
         "NON_GAUSSIAN_TEST" if NON_GAUSSIAN_TEST else None,
-        "frozen" if args.freeze_parameters else "nonfrozen",
         args.bulk_or_tails,
         "linearised" if args.linearised else "nonlinearised",
         args.compression,
@@ -182,14 +181,16 @@ def get_multi_z_posterior_dir(args: argparse.Namespace) -> str:
         get_config_subdir(args, multi_z=True) 
     )
 
-    # print("MULTI-Z POSTERIOR DIR:\n", multi_z_dir)
-
     logger.info("MULTI-Z POSTERIOR DIR: {}".format(multi_z_dir))
 
     return multi_z_dir
 
 
-def get_multi_z_posterior_filename(args: argparse.Namespace, mcmc: bool = False, blackjax: bool = False) -> str:
+def get_multi_z_posterior_filename(
+    args: argparse.Namespace, 
+    mcmc: bool = False, 
+    blackjax: bool = True
+) -> str:
     # Save posterior, Fisher and summary
 
     posterior_save_dir = get_multi_z_posterior_dir(args)
@@ -221,38 +222,15 @@ def get_multi_z_posterior_filename(args: argparse.Namespace, mcmc: bool = False,
 @typecheck
 def get_ndes_from_config(
     config: ConfigDict, 
-    dataset: DatasetClass,
-    event_dim: int, 
-    context_dim: Optional[int] = None, 
     *, 
-    use_scalers: bool = False,
-    compressed_dataset: Optional[tuple[Float[Array, "n p"], Float[Array, "n p"]]] = None,
+    event_dim: Optional[int] = None, 
+    context_dim: Optional[int] = None, 
     key: PRNGKeyArray 
-) -> list[Module]:
+) -> Ensemble:
 
-    if use_scalers:
-        if compressed_dataset is not None:
-            X, Q = compressed_dataset
-
-            # Pack the single scaler for each NDE
-            scaler = Scaler(
-                X, 
-                Q,
-                # x_mu_std=(jnp.mean(X, axis=0), jnp.std(X, axis=0)),
-                # q_mu_std=(jnp.mean(Y, axis=0), jnp.std(Y, axis=0)),
-                use_scaling=use_scalers
-            )
-        else:
-            fisher_mu_std = (dataset.data.alpha, jnp.sqrt(jnp.diag(dataset.data.Finv)))
-            # X = jax.vmap(dataset.compression_fn)(dataset.data, dataset.parameters)
-
-            # Pack the single scaler for each NDE
-            scaler = Scaler(
-                # X, dataset.parameters,
-                x_mu_std=fisher_mu_std,
-                q_mu_std=fisher_mu_std,
-                use_scaling=use_scalers
-            )
+    # Default is compressed data => parameter-set shaped
+    if event_dim is None:
+        event_dim = ALPHA.size
 
     keys = jr.split(key, len(config.ndes))
 
@@ -269,24 +247,27 @@ def get_ndes_from_config(
             nde_arch = MAF
         if nde.model_type == "cnf":
             nde_arch = CNF
+        if nde.model_type == "gmm":
+            nde_arch = GMM
+
+        context_dim = context_dim if exists(context_dim) else event_dim
 
         # Required to remove / add some arguments to specify NDEs
         nde_dict = dict(
-            event_dim=event_dim, 
-            context_dim=context_dim if exists(context_dim) else event_dim, 
             key=key,
-            scaler=scaler if (nde.use_scaling and use_scalers) else None,
-            **dict(nde),
-            bounds=jnp.stack([dataset.data.lower, dataset.data.upper], axis=1)
+            event_dim=event_dim, 
+            context_dim=context_dim,
+            **dict(nde)
         )
 
         logger.info("NDE DICT: {}".format(nde_dict))
 
         nde_dict.pop("model_type")
-        nde_dict.pop("use_scaling")
 
         ndes.append(nde_arch(**nde_dict))
 
     assert len(config.ndes) == len(ndes)
 
-    return ndes
+    ensemble = Ensemble(ndes)
+
+    return ensemble
