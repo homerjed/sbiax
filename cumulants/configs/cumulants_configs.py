@@ -6,7 +6,6 @@ from ml_collections import ConfigDict
 
 from data.constants import ALL_RADII
 
-import os
 TYPECHECK = True if os.environ.get("TYPECHECK", "").lower() in ("1", "true") else False
 if TYPECHECK:
     typecheck = jaxtyped(typechecker=typechecker)

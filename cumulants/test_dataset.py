@@ -19,6 +19,7 @@ from data.common import Dataset
 from data.constants import ALPHA, LOWER, UPPER, PARAMETER_STRINGS
 from utils import (
     get_datasets,
+    get_dataset_and_config,
     plot_cumulants,
     overlay_bounds_on_corner,
     customize_plot
@@ -49,6 +50,27 @@ args = get_cumulants_sbi_args()
 """
     Config
 """
+# # Run just PDFs
+# if 1:
+#     _dataset, _config = get_dataset_and_config("bulk_pdf") 
+
+#     config = _config(
+#         seed=args.seed, 
+#         redshift=args.redshift, 
+#         linearised=args.linearised, 
+#         compression=args.compression,
+#         order_idx=args.order_idx,
+#         scales=args.scales,
+#         n_linear_sims=args.n_linear_sims,
+#         pre_train=args.pre_train
+#     )
+
+#     results_dir = get_results_dir(config, args)
+
+#     _dataset(config, results_dir=results_dir)
+
+#     import sys
+#     sys.exit()
 
 config, cumulants_dataset, datasets = get_datasets(args) # Config and cumulants_dataset can be bulk ... etc
 
@@ -99,7 +121,7 @@ corr = jnp.corrcoef(dataset.fiducial_data, rowvar=False)
 im = plt.imshow(corr, cmap="coolwarm", vmin=-1., vmax=1.)
 plt.colorbar(im)
 plt.savefig(
-    os.path.join(log_figs_dir, "correlation_matrix_cumulants_{}.png".format(args.bulk_or_tails))
+    os.path.join(log_figs_dir, "correlation_matrix_cumulants_{}_{}.png".format(args.bulk_or_tails, args.redshift))
 )
 plt.close()
 
@@ -107,7 +129,7 @@ plt.figure()
 im = plt.imshow(dataset.C)
 plt.colorbar(im)
 plt.savefig(
-    os.path.join(log_figs_dir, "covariance_matrix_cumulants_{}.png".format(args.bulk_or_tails))
+    os.path.join(log_figs_dir, "covariance_matrix_cumulants_{}_{}.png".format(args.bulk_or_tails, args.redshift))
 )
 plt.close()
 
@@ -115,7 +137,7 @@ plt.figure()
 im = plt.imshow(dataset.Cinv)
 plt.colorbar(im)
 plt.savefig(
-    os.path.join(log_figs_dir, "precision_matrix_cumulants_{}.png".format(args.bulk_or_tails))
+    os.path.join(log_figs_dir, "precision_matrix_cumulants_{}_{}.png".format(args.bulk_or_tails, args.redshift))
 )
 plt.close()
 

@@ -155,7 +155,7 @@ DEBUG_POSTERIOR_SAMPLE=True
 
 DATASET_TEST="False" # Never use this test dataset flag here
 USE_PARALLEL_DATALOADING="True"
-DELTAS_CUT="False"
+DELTAS_CUT="True"
 PER_PDF_CDF_CUT="False"
 
 N_DATAVECTORS=1 # Number of independent datavectors to sample posteriors with (with N_SEEDS different posteriors)
@@ -267,7 +267,140 @@ mkdir -p "$BASE_LOG_DIR"
 #############################################################
 #############################################################
 
-!!HERE!!
+# ----------------------------- NEW: DATASET JOBS -----------------------------
+# Submit one dataset job per redshift; each runs bulk & tails sequentially.
+# These jobs inherit env/config from this parent script and feed their IDs into
+# data_deps so all later stages wait for datasets to finish.
+
+dataset_job_ids=()
+
+# Choose the "primary" order_idx and scales like your standalone script
+primary_order_idx="${order_idxs[0]}"
+primary_scales="${scales_sets[0]}"
+
+# Build a descriptive logs sub-suffix from DELTAS_CUT / PER_PDF_CDF_CUT at runtime
+for Z in "${all_redshifts[@]}"; do
+    dataset_log_dir=$(get_log_dir \
+        "$BASE_LOG_DIR" \
+        "datasets" \
+        "z${Z}" \
+    )
+
+    mkdir -p "$dataset_log_dir"
+    mkdir -p "$OUT_DIR/datasets"
+
+    dataset_block=$(
+        cat <<END
+#!/bin/bash
+#SBATCH --job-name=dataset_z${Z}
+#SBATCH --output=$OUT_DIR/datasets/z${Z}.out
+#SBATCH --error=$OUT_DIR/datasets/z${Z}.err
+#SBATCH --partition=cluster
+#SBATCH --time=$JOB_TIME
+#SBATCH --mem=${N_GB}GB
+#SBATCH --cpus-per-task=$N_CPU
+#SBATCH --mail-user=jed.homer@physik.lmu.de
+#SBATCH --mail-type=$MAIL_TYPE
+#SBATCH --export=ALL
+
+set -euo pipefail
+
+cd /project/ls-gruen/users/jed.homer/sbiaxpdf/cumulants/
+source /project/ls-gruen/users/jed.homer/sbiaxpdf/.venv/bin/activate
+
+# ---------- Inherit flags from parent ----------
+export DELTAS_CUT="${DELTAS_CUT}"
+export PER_PDF_CDF_CUT="${PER_PDF_CDF_CUT}"
+export USE_SOBOL="${USE_SOBOL}"
+export N_JOBS="\${SLURM_CPUS_PER_TASK}"
+
+# ---------- Build a single suffix for subdir ----------
+suffix=""
+if [ "\$DELTAS_CUT" = "True" ]; then
+  suffix="deltas"
+fi
+if [ "\$PER_PDF_CDF_CUT" = "True" ]; then
+  if [ -n "\$suffix" ]; then
+    suffix="\${suffix}_PERPDFCDF"
+  else
+    suffix="PERPDFCDF"
+  fi
+fi
+# If neither flag is set, use a fallback label
+if [ -z "\$suffix" ]; then
+  suffix="fiducial_cut"
+fi
+
+# ---------- Final results + logs directories ----------
+RESULTS_DIR_BASE="$RESULTS_DIR/run_datasets"
+LOGS_DIR_BASE="$BASE_LOG_DIR/run_datasets"
+
+export RESULTS_DIR="\${RESULTS_DIR_BASE}/\${suffix}/"
+export LOG_DIR="\${LOGS_DIR_BASE}/\${suffix}/z${Z}"
+mkdir -p "\$RESULTS_DIR" "\$LOG_DIR"
+
+# ---------- Other env ----------
+export LOG_LEVEL="DEBUG"
+export PRINT_LOGS="True"
+export FORCE_NOISELESS_DATAVECTOR="False"
+export FORCE_RECOMPUTE_DATASET="True"
+export USE_QUIJOTE_TAILS="False"
+export FIDUCIAL_REDUCE="$FIDUCIAL_REDUCE"
+export DEFAULT_RESOLUTION="$DEFAULT_RESOLUTION"
+export NON_GAUSSIAN_TEST="$NON_GAUSSIAN_TEST"
+export USE_PARALLEL_DATALOADING="$USE_PARALLEL_DATALOADING"
+export DATASET_TEST="$DATASET_TEST"
+
+# ---------- Experiment hyperparams (from parent script) ----------
+SEED="$START_SEED"
+COMPRESSION="$COMPRESSION"
+ORDER_IDX="$primary_order_idx"
+SCALES="$primary_scales"
+N_LINEAR_SIMS="$N_LINEAR_SIMS"
+REDSHIFT="${Z}"
+
+# Normalize lists -> arrays and drop any empty tokens to avoid argparse " ' ' " errors
+read -r -a ORDER_IDX_ARR <<< "$ORDER_IDX"
+read -r -a SCALES_ARR    <<< "$SCALES"
+# scrub empties (defensive)
+CLEAN_ORDER_IDX_ARR=()
+for v in "${ORDER_IDX_ARR[@]}"; do [[ -n "$v" ]] && CLEAN_ORDER_IDX_ARR+=("$v"); done
+CLEAN_SCALES_ARR=()
+for v in "${SCALES_ARR[@]}";   do [[ -n "$v" ]] && CLEAN_SCALES_ARR+=("$v");   done
+
+run_once () {
+  local FLAG="$1"
+  echo "[z=${REDSHIFT}] Running ${FLAG}  -> RESULTS_DIR=$RESULTS_DIR  LOG_DIR=$LOG_DIR"
+
+  # Build argv to avoid any stray whitespace tokens
+  args=(uv run python test_dataset.py
+    --seed "$SEED"
+    --compression "$COMPRESSION"
+    --no-linearised
+    --no-pre-train
+    --n_linear_sims "$N_LINEAR_SIMS"
+    --order_idx "${CLEAN_ORDER_IDX_ARR[@]}"
+    --scales    "${CLEAN_SCALES_ARR[@]}"
+    --redshift "$REDSHIFT"
+    --use-tqdm
+    --bulk_or_tails "$FLAG"
+  )
+  "${args[@]}"
+}
+
+for FLAG in bulk tails; do
+  run_once "\${FLAG}"
+done
+END
+    )
+    sbatch_out=$(submit_block_and_get_id "$dataset_block")
+    ds_jid=$(echo "$sbatch_out" | awk '{print $4}')
+    if [[ -n "$ds_jid" ]]; then
+        dataset_job_ids+=("$ds_jid")
+    fi
+done
+
+# ---------------------------------------------------------------------------
 
 #############################################################
 #############################################################
@@ -278,6 +411,11 @@ mkdir -p "$BASE_LOG_DIR"
 # Run cumulants-from-quijote if using high resolution
 data_deps=()
 data_dep_string=""
+
+# Include dataset jobs in the shared data dependencies
+if [[ ${#dataset_job_ids[@]} -gt 0 ]]; then
+    for j in "${dataset_job_ids[@]}"; do data_deps+=("$j"); done
+fi
 
 if [[ "$USE_QUIJOTE_TAILS" == "true" && "$USE_SOBOL" == "false" ]]; then
     cumulants_data_log_dir=$(get_log_dir \

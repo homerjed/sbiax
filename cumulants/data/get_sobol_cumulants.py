@@ -64,7 +64,7 @@ else:
 """
     Load Sobol PDFs for 
     - fiducial
-    - latin
+    - lati
     - derivatives
     and calculate the cumulants as well as the bulk PDF measurements
 """
@@ -271,6 +271,72 @@ def get_cdf_of_pdf(
     return cdf, cut_idx
 
 
+# @typecheck
+# def cut_pdf_to_cumulants(
+#     cut_pdf: Float[np.ndarray, "d"], # Divide by cut-norm
+#     deltas: Float[np.ndarray, "d"],
+#     ddeltas: Float[np.ndarray, "d"],
+#     prob_norm: float, # Max prob - min_prob in CDF cut
+#     *,
+#     dtype: np.typing.DTypeLike = np.float64
+# ) -> Float[np.ndarray, "5"]:
+#     # Bernardeau 2002 Eq. 130
+#     # Numpy default is float64?
+
+#     prob_norm = np.asarray(prob_norm)
+
+#     if (
+#         not np.isfinite(cut_pdf).all() 
+#         or not np.isfinite(deltas).all() 
+#         or not np.isfinite(ddeltas).all()
+#     ):
+#         raise ValueError("Inputs contain NaN/Inf.")
+#     if (ddeltas <= 0).any():
+#         raise ValueError("All bin widths (ddeltas) must be strictly positive.")
+#     if (cut_pdf < 0).any():
+#         raise ValueError("cut_pdf contains negative mass.")
+#     if not np.all(np.diff(deltas) > 0.): # e.g. if bins scrambled
+#         raise ValueError("`deltas` must be strictly increasing (bin ordering).")
+#     if not (0. < prob_norm <= 1.):
+#         raise ValueError(f"prob_norm must be in (0, 1], got {prob_norm}")
+
+#     # ddeltas = drhos ...
+
+#     # Check if stroing heights (densities) or probability-masses per bin
+#     print("PDF TYPE GOING INTO K_N CALC. FN IS: {}".format(infer_pdf_type(cut_pdf, ddeltas)))
+
+#     # Cast objects to high precision
+#     cut_pdf, deltas, ddeltas, prob_norm = map(
+#         lambda a: np.asarray(a, dtype=dtype), (cut_pdf, deltas, ddeltas, prob_norm)
+#     )
+
+#     # cut_pdf = cut_pdf / prob_norm 
+
+#     m_0 = np.sum(cut_pdf * ddeltas, dtype=dtype) # Equals `prob norm`?
+#     m_1 = np.sum(cut_pdf * ddeltas * deltas, dtype=dtype) # NOTE: if this is unnormalised, what does it mean for k_n below?
+
+#     deltamod = deltas - m_1 # Mean in cut is not zero necessarily?
+
+#     # Assuming <delta>=0? see Bernardeau eq (130)
+#     k_2 = np.sum(deltamod ** 2. * cut_pdf * ddeltas, dtype=dtype)
+#     k_3 = np.sum(deltamod ** 3. * cut_pdf * ddeltas, dtype=dtype)
+#     k_4 = np.sum(deltamod ** 4. * cut_pdf * ddeltas, dtype=dtype) - (3. * k_2 ** 2.)
+
+#     # Don't use cumulants from normalised PDF, since we append m_0
+#     m_1, k_2, k_3, k_4 = map(lambda k_n: k_n * m_0, (m_1, k_2, k_3, k_4))
+
+#     if k_2 < -1e-12:
+#         raise ValueError(f"Computed k2 (variance) < 0: {k_2}")
+#     if m_0 <= 0.0:
+#         raise ValueError(f"Computed m0 <= 0: {m_0}")
+
+#     k_n = np.asarray([m_0, m_1, k_2, k_3, k_4], dtype=np.float32) # JAX applications
+
+#     return k_n 
+
+
+
+
 @typecheck
 def cut_pdf_to_cumulants(
     cut_pdf: Float[np.ndarray, "d"], # Divide by cut-norm
@@ -282,8 +348,6 @@ def cut_pdf_to_cumulants(
 ) -> Float[np.ndarray, "5"]:
     # Bernardeau 2002 Eq. 130
     # Numpy default is float64?
-
-    prob_norm = np.asarray(prob_norm)
 
     if (
         not np.isfinite(cut_pdf).all() 
@@ -311,28 +375,36 @@ def cut_pdf_to_cumulants(
     )
 
     # cut_pdf = cut_pdf / prob_norm 
+    
+    dp = cut_pdf * ddeltas
 
-    m_0 = np.sum(cut_pdf * ddeltas, dtype=dtype) # Equals `prob norm`?
-    m_1 = np.sum(cut_pdf * ddeltas * deltas, dtype=dtype) # NOTE: if this is unnormalised, what does it mean for k_n below?
+    m_0 = np.sum(dp, dtype=dtype) # Calculate normalisation
+
+    p = dp / m_0 # Calculate normalised cut PDF, calculate moments using it, then append m_0 and multiply other cumulants by it
+
+    # m_0 = np.sum(p, dtype=dtype) # Equals `prob norm`?
+    m_1 = np.sum(p * deltas, dtype=dtype) # NOTE: if this is unnormalised, what does it mean for k_n below?
 
     deltamod = deltas - m_1 # Mean in cut is not zero necessarily?
 
     # Assuming <delta>=0? see Bernardeau eq (130)
-    k_2 = np.sum(deltamod ** 2. * cut_pdf * ddeltas, dtype=dtype)
-    k_3 = np.sum(deltamod ** 3. * cut_pdf * ddeltas, dtype=dtype)
-    k_4 = np.sum(deltamod ** 4. * cut_pdf * ddeltas, dtype=dtype) - (3. * k_2 ** 2.)
+    k_2 = np.sum(deltamod ** 2. * p, dtype=dtype)
+    k_3 = np.sum(deltamod ** 3. * p, dtype=dtype)
+    k_4 = np.sum(deltamod ** 4. * p, dtype=dtype) - (3. * k_2 ** 2.)
 
     # Don't use cumulants from normalised PDF, since we append m_0
     m_1, k_2, k_3, k_4 = map(lambda k_n: k_n * m_0, (m_1, k_2, k_3, k_4))
 
     if k_2 < -1e-12:
         raise ValueError(f"Computed k2 (variance) < 0: {k_2}")
-    if m_0 <= 0.0:
+    if m_0 <= 0.:
         raise ValueError(f"Computed m0 <= 0: {m_0}")
 
     k_n = np.asarray([m_0, m_1, k_2, k_3, k_4], dtype=np.float32) # JAX applications
 
     return k_n 
+
+
 
 
 def get_fiducial_pdfs_lengths(

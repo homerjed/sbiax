@@ -254,7 +254,7 @@ def get_linearised_data(
     dataset: Dataset,
     *,
     n_linear_sims: Optional[int] = None
-) -> tuple[Float[Array, "n d"], Float[Array, "n p"]]:
+) -> tuple[Float[Array, "nf d"], Float[Array, "n d"], Float[Array, "n p"]]:
     """
         Get linearised PDFs and get their MLEs 
 
@@ -299,9 +299,12 @@ def get_linearised_data(
     keys = jr.split(key_simulations, len(Y))
     D = jax.vmap(_simulator)(keys, Y) 
 
-    logger.info("... linearised data {} {}".format(D.shape, Y.shape))
+    keys = jr.split(key_simulations, dataset.fiducial_data.shape[0])
+    D0 = jax.vmap(_simulator, in_axes=(0, None))(keys, dataset.alpha) 
 
-    return D, Y # NOTE: only replacing latin hypercube
+    logger.info("... linearised data {} {} {}".format(D0.shape, D.shape, Y.shape))
+
+    return D0, D, Y # NOTE: only replacing latin hypercube
 
 
 @typecheck
@@ -392,11 +395,16 @@ def get_datavector(
         datavector = jr.multivariate_normal(key, mean=mu, cov=dataset.C, shape=(n,))
 
     # Choose a non-Gaussian non-linear datavector
-    if not (config.linearised or config.use_expectation or use_expectation or FORCE_NOISELESS_DATAVECTOR):
+    if not (
+        config.linearised 
+        or config.use_expectation 
+        or use_expectation 
+        or FORCE_NOISELESS_DATAVECTOR
+    ):
         logger.info("Using non-linearised datavector...")
 
         # datavector = jr.choice(key, dataset.fiducial_data, shape=(n,))
-        ix = jr.choice(key, jnp.arange(len(dataset.fiducial_data)), shape=(n,))
+        ix = jr.choice(key, len(dataset.fiducial_data), shape=(n,))
         datavector = dataset.fiducial_data[ix]
 
     # (d,) -> (1, d)

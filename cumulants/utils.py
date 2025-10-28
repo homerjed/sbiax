@@ -7,14 +7,10 @@ import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-import equinox as eqx
 import numpy as np
 from scipy.stats import chi2
 from ml_collections import ConfigDict
 from chainconsumer import Chain, ChainConsumer, Truth
-
-from dataclasses import dataclass
-from typing import Iterable, Sequence, Tuple
 
 from sbiax.utils import make_df
 
@@ -31,12 +27,38 @@ logger, log_figs_dir = setup_module_logger(__name__, level=get_log_level())
 FORCE_RECOMPUTE_DATASET = True if os.environ.get("FORCE_RECOMPUTE_DATASET", "").lower() in ("1", "true") else False 
 USE_SOBOL = True if os.environ.get("USE_SOBOL", "").lower() in ("1", "true") else False 
 
+USE_PARALLEL_DATALOADING = True if os.environ.get("USE_PARALLEL_DATALOADING", "").lower() in ("1", "true") else False 
+
+DELTAS_CUT = True if os.environ.get("DELTAS_CUT", "").lower() in ("1", "true") else False
+PER_PDF_CDF_CUT = True if os.environ.get("PER_PDF_CDF_CUT", "").lower() in ("1", "true") else False
+
 if USE_SOBOL:
-    from data.get_sobol_cumulants import (
-        SobolBulkCumulantsDataset, 
-        SobolTailsCumulantsDataset, 
-        SobolBulkPDFsDataset
-    )
+    if USE_PARALLEL_DATALOADING:
+        assert not (DELTAS_CUT and PER_PDF_CDF_CUT), ("DON'T DEFINE BOTH.")
+        if DELTAS_CUT:
+            from data.get_sobol_cumulants_joblib_delta import (
+                SobolBulkCumulantsDataset, 
+                SobolTailsCumulantsDataset, 
+                SobolBulkPDFsDataset
+            )
+        if PER_PDF_CDF_CUT:
+            from data.get_sobol_cumulants_joblib_delta_cdf import (
+                SobolBulkCumulantsDataset, 
+                SobolTailsCumulantsDataset, 
+                SobolBulkPDFsDataset
+            )
+        if not (DELTAS_CUT or PER_PDF_CDF_CUT):
+            from data.get_sobol_cumulants_joblib import (
+                SobolBulkCumulantsDataset, 
+                SobolTailsCumulantsDataset, 
+                SobolBulkPDFsDataset
+            )
+    else:
+        from data.get_sobol_cumulants import (
+            SobolBulkCumulantsDataset, 
+            SobolTailsCumulantsDataset, 
+            SobolBulkPDFsDataset
+        )
     DatasetType = Union[
         SobolBulkCumulantsDataset, 
         SobolBulkPDFsDataset, 
@@ -60,73 +82,6 @@ else:
 def cut_samples(samples, lower, upper):
     return samples[np.all((samples >= lower) & (samples <= upper), axis=1)]
 
-
-"""
-    log
-"""
-
-import sys
-import logging
-import os
-
-LOG_DIR = os.getenv("LOG_DIR", "logs/")
-PRINT_LOGS = os.getenv("PRINT_LOGS", False)
-
-
-def get_log_level(default="DEBUG"):
-
-    level_str = os.getenv("LOG_LEVEL", default).upper()
-
-    return getattr(logging, level_str, logging.INFO)
-
-
-def setup_module_logger(
-    module_name: str, 
-    level=logging.INFO, 
-    log_dir=LOG_DIR
-) -> tuple[logging.Logger, str]:
-
-    log_figs_dir = os.path.join(log_dir, "figs/")
-
-    os.makedirs(log_dir, exist_ok=True)
-    os.makedirs(log_figs_dir, exist_ok=True)
-
-    log_path = os.path.join(log_dir, f"{module_name}.log")
-
-    print("LOG PATH:\n\t{}".format(os.path.abspath(log_path)))
-
-    try:
-        if os.path.exists(log_path):
-            os.remove(log_path)
-    except Exception as e:
-        print(f"LOGS: Failed to delete {log_path}. Reason: {e}")
-
-    logger = logging.getLogger(module_name)
-    logger.setLevel(level)
-
-    # Avoid duplicate handlers if logger already configured
-    if not logger.handlers:
-        file_handler = logging.FileHandler(log_path)
-
-        file_handler.setFormatter(
-            logging.Formatter(
-                '%(name)s - %(levelname)s \n >> %(message)s' # %(asctime)s - 
-            )
-        )
-
-        logger.addHandler(file_handler)
-
-    if PRINT_LOGS:
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setLevel(logging.DEBUG)
-        handler.setFormatter(
-            logging.Formatter(
-                '%(name)s - %(levelname)s \n >> %(message)s' # %(asctime)s - 
-            )
-        )
-        logger.addHandler(handler)
-
-    return logger, log_figs_dir
 
 """
     Utils
@@ -352,6 +307,8 @@ def get_datasets(args: argparse.Namespace) -> tuple[ConfigDict, Dataset, dict[st
     # Config and dataset being used in the experiment
     config = configs[args.bulk_or_tails]
     dataset = datasets[args.bulk_or_tails]
+
+    # print("DATASETS:", jax.tree.map(lambda a: a.shape if isinstance(a, np.ndarray) else (), [dataset.data for dataset in datasets]))
     
     # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
@@ -533,10 +490,10 @@ def get_datasets(args: argparse.Namespace) -> tuple[ConfigDict, Dataset, dict[st
 
     plt.suptitle(r"$\chi^2$ [{}]".format(linearised_str))
     plt.tight_layout()
-    plt.savefig(os.path.join(log_figs_dir, "chi2_tests_{}.png".format(linearised_str)))
+    plt.savefig(os.path.join(log_figs_dir, "chi2_tests_{}.png".format(linearised_str, args.redshift)))
     plt.close()
 
-    print("SAVED Chi2 at:", os.path.join(log_figs_dir, "chi2_tests_{}.png".format(linearised_str)))
+    print("SAVED Chi2 at:", os.path.join(log_figs_dir, "chi2_tests_{}.png".format(linearised_str, args.redshift)))
 
     # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
@@ -603,54 +560,62 @@ def plot_cumulants(args, config, cumulants, results_dir):
         r"$\langle\delta^4\rangle_c$"
     ]
 
-    n_scales = len(config.scales)
-    n_cumulants_plot = 3
-    if 1: #args.bulk_or_tails == "bulk":
-        if config.stack_means:
-            n_cumulants_plot += 1
-        if config.use_normalisations:
-            n_cumulants_plot += 1
+    try:
+        n_scales = len(config.scales)
+        n_cumulants_plot = 3
+        if 1: #args.bulk_or_tails == "bulk":
+            if config.stack_means:
+                n_cumulants_plot += 1
+            if config.use_normalisations:
+                n_cumulants_plot += 1
 
-    fig, axs = plt.subplots(
-        n_scales, 
-        n_cumulants_plot, 
-        figsize=(15., 27.), 
-        dpi=200, 
-        sharex=False, 
-        sharey=False
-    )
-    if axs.ndim == 1:
-        axs = axs[np.newaxis, :]
+        fig, axs = plt.subplots(
+            n_scales, 
+            n_cumulants_plot, 
+            figsize=(15., 27.), 
+            dpi=200, 
+            sharex=False, 
+            sharey=False
+        )
+        if axs.ndim == 1:
+            axs = axs[np.newaxis, :]
 
-    for r in range(n_scales):
-        for c in range(n_cumulants_plot):
-            ax = axs[r, c]
-            _cumulants = cumulants[
-                :, r * n_cumulants_plot + c : (c + 1) + r * n_cumulants_plot
-            ]
-            mu = jnp.mean(_cumulants) 
-            _cumulants = (_cumulants - mu) / jnp.std(_cumulants)
-            ax.hist(
-                _cumulants, 
-                color="firebrick" if args.bulk_or_tails == "tails" else "royalblue",
-                bins=32,
-                density=True
-            )
-            x = np.linspace(-7., 7., 2000)
-            gaussian_pdf = jax.scipy.stats.norm.pdf(x, loc=0., scale=1.)
-            ax.plot(x, gaussian_pdf, color="k")
-            ax.set_title(
-                r"{}, R={}, $\mu$={:.2E}".format(
-                    cumulant_strings[c], config.scales[r], mu
+        for r in range(n_scales):
+            for c in range(n_cumulants_plot):
+                ax = axs[r, c]
+                _cumulants = cumulants[
+                    :, r * n_cumulants_plot + c : (c + 1) + r * n_cumulants_plot
+                ]
+                # mu = jnp.mean(_cumulants) 
+                # _cumulants = (_cumulants - mu) / jnp.std(_cumulants)
+                ax.hist(
+                    _cumulants, 
+                    color="firebrick" if args.bulk_or_tails == "tails" else "royalblue",
+                    bins="auto",
+                    density=True
                 )
-            )
-            ax.set_xlim(-7., 7.)
+                # x = np.linspace(-7., 7., 2000)
+                # gaussian_pdf = jax.scipy.stats.norm.pdf(x, loc=0., scale=1.)
+                # ax.plot(x, gaussian_pdf, color="k")
+                ax.set_title(
+                    r"{}, R={}, $\mu$={:.2E}".format(
+                        cumulant_strings[c], config.scales[r], 0. #mu
+                    )
+                )
+                # ax.set_xlim(-7., 7.)
 
-    plt.savefig(
-        os.path.join(results_dir, "cumulants_test.png"), 
-        bbox_inches="tight"
-    )
-    plt.close()
+        if args.linearised:
+            assert config.linearised
+        if config.linearised:
+            assert args.linearised
+
+        plt.savefig(
+            os.path.join(results_dir, "cumulants_test.png"), 
+            bbox_inches="tight"
+        )
+        plt.close()
+    except Exception as e:
+        print("PLOTTING K_N ERROR", e)
 
 
 def plot_moments(fiducial_moments_z_R, config, results_dir=None):

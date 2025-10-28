@@ -132,7 +132,9 @@ multi_z_args = get_cumulants_multi_z_args(figure_one=True) # Blueprint multi_z_a
 # Plotting properties for bulk / tails
 plotting_dict = dict(
     bulk=dict(color="b", linestyle="-", shade_alpha=0.5),
-    tails=dict(color="r", linestyle="-", shade_alpha=0.5)
+    tails=dict(color="r", linestyle="-", shade_alpha=0.5),
+    linestyle_fisher=":",
+    linestyle_mcmc="--"
 )
 
 # Args that are shared between bulk and tails SBI analyses/posteriors,
@@ -172,6 +174,8 @@ for bulk_or_tails in ["bulk", "tails"]:
     print("MULTI-Z POSTERIOR FILENAME:\n", posterior_filename)
     print("MULTI-Z POSTERIOR FILENAME (MCMC):\n", mcmc_posterior_filename)
     print("POSTERIOR OBJECT", jax.tree.map(lambda x: x.shape, posterior_object))
+
+    assert posterior_filename != mcmc_posterior_filename, "SBI and MCMC filenames are identical!"
 
 # Get the bulk PDF Fisher forecast for all redshifts 
 # (easier to load frozen or not since it autosaves...)
@@ -259,7 +263,7 @@ for marginalised in [False]: # , True]:
                 samples=fisher_df,
                 name=r"$F_{\Sigma^{-1}}$ " + title,
                 color=plotting_dict[bulk_or_tails]["color"],
-                linestyle="-",
+                linestyle=":",
                 shade_alpha=0.
             )
             # Chain.from_covariance(
@@ -352,7 +356,7 @@ for marginalised in [False]: # , True]:
             samples=fisher_df,
             name=r"$F_{\Sigma^{-1}}$ PDF[bulk]",
             color="g",
-            linestyle="-",
+            linestyle=":",
             shade_alpha=0.
         )
         # Chain.from_covariance(

@@ -113,7 +113,7 @@ if 1:
     im = plt.imshow(corr, cmap="coolwarm", vmin=-1., vmax=1.)
     plt.colorbar(im)
     plt.savefig(
-        os.path.join(log_figs_dir, "correlation_matrix_cumulants_{}.png".format(args.bulk_or_tails))
+        os.path.join(log_figs_dir, "correlation_matrix_cumulants_{}_{}.png".format(args.bulk_or_tails, args.redshift))
     )
     plt.close()
 
@@ -121,7 +121,7 @@ if 1:
     im = plt.imshow(dataset.C)
     plt.colorbar(im)
     plt.savefig(
-        os.path.join(log_figs_dir, "covariance_matrix_cumulants_{}.png".format(args.bulk_or_tails))
+        os.path.join(log_figs_dir, "covariance_matrix_cumulants_{}_{}.png".format(args.bulk_or_tails, args.redshift))
     )
     plt.close()
 
@@ -129,7 +129,7 @@ if 1:
     im = plt.imshow(dataset.Cinv)
     plt.colorbar(im)
     plt.savefig(
-        os.path.join(log_figs_dir, "precision_matrix_cumulants_{}.png".format(args.bulk_or_tails))
+        os.path.join(log_figs_dir, "precision_matrix_cumulants_{}_{}.png".format(args.bulk_or_tails, args.redshift))
     )
     plt.close()
 
@@ -165,31 +165,37 @@ except FileNotFoundError as e:
 
     print("Training NN...")
 
+# Compress data
 X = jax.vmap(compression_fn)(dataset.data, dataset.parameters)
-
 X0 = jax.vmap(compression_fn, in_axes=(0, None))(dataset.fiducial_data, dataset.alpha)
-datavectors = cumulants_dataset.get_datavector(key, n=10_000)
+datavectors = cumulants_dataset.get_datavector(key, n=10_000) 
 summaries = jax.vmap(compression_fn, in_axes=(0, None))(datavectors, dataset.alpha)
 
 print("SHAPES OF DATAVECTORS:")
 print(jax.tree.map(lambda a: a.shape, (X, X0, datavectors, summaries)))
 
+# Everything related to the compression
 np.savez(
     os.path.join(results_dir, "all_summaries.npz"), 
     latins=X, 
     parameters=dataset.parameters,
     fiducials=X0, 
     summaries=summaries, # Save a very large number of datavectors, use them in multi-z
-    datavectors=datavectors
+    datavectors=datavectors,
+    datavectors_noiseless=dataset.fiducial_data.mean(axis=0),
+    summaries_noiseless=compression_fn(dataset.fiducial_data.mean(axis=0), dataset.alpha)
 )
 
+# Everything to run the SBI analysis given a compression
 np.savez(
     os.path.join(results_dir, "sbi_dataset.npz"),
     latins=X, 
     parameters=dataset.parameters,
     fiducials=X0,
     datavector=datavectors[-1],
-    summary=summaries[-1] # Choose random last datavector for SBI runs
+    summary=summaries[-1], # Choose random last datavector for SBI runs
+    datavector_noiseless=dataset.fiducial_data.mean(axis=0),
+    summary_noiseless=compression_fn(dataset.fiducial_data.mean(axis=0), dataset.alpha)
 )
 
 # Plot summaries

@@ -201,7 +201,7 @@ def get_multi_z_posterior_filename(
     # Posterior depends on the seed of the SBI experiment and the seed used to generate the datavector
     posterior_filename = os.path.join(
         posterior_save_dir, 
-        "multi_z_posterior_{}{}.npz".format( # NOTE: was just 'posterior_...' before
+        "multi_z_posterior_{}{}{}{}.npz".format( # NOTE: was just 'posterior_...' before
             args.seed, 
             ("_" + str(args.seed_datavector)) if args.seed_datavector is not None else "",
             "_MCMC" if mcmc else "",

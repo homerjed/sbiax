@@ -1,6 +1,7 @@
 from typing import Optional, Literal, Callable, Any
 import time
 import os
+import operator
 
 import jax
 import jax.numpy as jnp
@@ -50,6 +51,9 @@ from utils import (
 
 USE_SOBOL = True if os.environ.get("USE_SOBOL", "").lower() in ("1", "true") else False 
 
+# Plot individual redshift posteriors for individual redshifts
+DEBUG_POSTERIOR_SAMPLE = True if os.environ.get("USE_SOBOL", "").lower() in ("1", "true") else False 
+
 N_ENSEMBLE_NETS = int(os.environ.get("N_ENSEMBLE_NETS", 10))
 
 N_LINEAR_SIMS = 32768 if USE_SOBOL else 2000
@@ -80,8 +84,6 @@ jax.clear_caches()
 target_idx = get_target_idx()
 
 PLOT_SUMMARIES = False
-
-DEBUG_POSTERIOR_SAMPLE = True # Plot individual redshift posteriors for individual redshifts
 
 SUMMARIES_PLOT_COLOURS = dict(
     bulk=["#3b82f6", "#60a5fa", "#bfdbfe"], 
@@ -290,7 +292,7 @@ def get_z_config_and_datavector(
         plt.savefig(get_filename("kurtoses_hist_{}_{}.png".format(redshift, bulk_or_tails)))
         plt.close()
 
-    if DEBUG_POSTERIOR_SAMPLE:
+    if DEBUG_POSTERIOR_SAMPLE and (seed % 2 == 0):
             
         def get_mcmc_log_prob_fn(
             datavectors: Float[Array, "n d"] | Float[Array, "d"], 
@@ -349,7 +351,7 @@ def get_z_config_and_datavector(
             key_sample, 
             log_prob_fn, 
             initial_state=jnp.asarray(ALPHA[jnp.newaxis, :]), 
-            n_samples=N_NUTS_SAMPLES // 2
+            n_samples=N_NUTS_SAMPLES
         )
         samples = jnp.squeeze(samples) # NOTE: if n_chains != 1 ...
         samples_log_prob = jnp.squeeze(samples_log_prob)
@@ -366,7 +368,7 @@ def get_z_config_and_datavector(
             key_sample, 
             get_mcmc_log_prob_fn(datavectors, linear_compressor, Finv, prior), 
             initial_state=jnp.asarray(ALPHA[jnp.newaxis, :]), 
-            n_samples=N_NUTS_SAMPLES // 2
+            n_samples=N_NUTS_SAMPLES
         )
         mcmc_samples = jnp.squeeze(mcmc_samples) # NOTE: if n_chains != 1 ...
         mcmc_samples_log_prob = jnp.squeeze(mcmc_samples_log_prob)
@@ -962,7 +964,7 @@ if __name__ == "__main__":
     print("Sampling posterior (all redshifts, datavectors)")
 
     # Sample the multiple-redshift-ensemble posterior
-    key_sample, key_state = jr.split(jr.key(int(time.time())))
+    key_sample, key_mcmc_sample = jr.split(jr.key(int(time.time())))
 
     # Sample posterior across multiple redshifts (NOTE: prior defined above)
     log_prob_fn = multi_ensemble.get_multi_ensemble_log_prob_fn(summaries)
@@ -1012,82 +1014,49 @@ if __name__ == "__main__":
 
     @typecheck
     @eqx.filter_jit
-    def mcmc_log_prob_fn_compressed(pi: Float[Array, "p"]) -> Scalar: 
-        # Compressed data likelihood, equivalent to multi-ensemble-SBI likelihood
+    def mcmc_log_prob_fn_compressed_linearised(pi: Float[Array, "p"]) -> Scalar: 
+        # Compressed data likelihood, assuming a Gaussian linear model, 
+        # equivalent in function to the multi-ensemble-SBI likelihood.
 
         @typecheck
         def _log_prob_fn_z(
-            pi_: Float[Array, "n d"], Finv: Float[Array, "p p"]
+            d: Float[Array, "n d"], 
+            Finv: Float[Array, "p p"], 
+            compressor: Callable
         ) -> Float[Array, "n"]:
 
             # Assumes all datavectors drawn at alpha
             def _posterior(_pi_, pi):
-                # p = tfd.MultivariateNormalFullCovariance(loc=pi, covariance_matrix=Finv)  
-                # return p.log_prob(_pi_)
                 return jax.scipy.stats.multivariate_normal.logpdf(_pi_, pi, Finv)
+
+            pi_ = jax.vmap(compressor, in_axes=(0, None))(d, pi)
 
             return jax.vmap(_posterior, in_axes=(0, None))(pi_, pi) # Vmap over multiple summaries
 
-        assert (
-            jax.tree.structure(summaries) == jax.tree.structure(Finvs_mcmc)
-        ), (
-            "Structure mismatch: summaries / Finvs_mcmc: {}, {}".format(
-                jax.tree.structure(summaries), jax.tree.structure(Finvs_mcmc)
-            )
-        )
-
         # Tree map over lists of ingredients for each redshift
-        Ls = jax.tree.map(lambda d, Finv: _log_prob_fn_z(d, Finv), summaries, Finvs_mcmc)
+        Ls = jax.tree.map(
+            lambda d, Finv, compressor: _log_prob_fn_z(d, Finv, compressor), 
+            datavectors, 
+            Finvs_mcmc,
+            linear_compression_fns
+        )
 
         prior_log_prob = prior.log_prob(pi)
 
-        # Sum of log-likelihoods and prior probability
-        return jnp.sum(jnp.asarray(Ls)) + prior_log_prob # NOTE: Correct sum? LogSumExp?
-
-
-
-    # @typecheck
-    # @eqx.filter_jit
-    # def mcmc_log_prob_fn_compressed(pi: Float[Array, "p"]) -> Scalar: 
-    #     # Compressed data likelihood, equivalent to multi-ensemble-SBI likelihood
-
-    #     @typecheck
-    #     def _log_prob_fn_z(
-    #         d: Float[Array, "n d"], 
-    #         Finv: Float[Array, "p p"], 
-    #         compressor: Callable
-    #     ) -> Float[Array, "n"]:
-
-    #         # Assumes all datavectors drawn at alpha
-    #         def _posterior(_pi_, pi):
-    #             return jax.scipy.stats.multivariate_normal.logpdf(_pi_, pi, Finv)
-
-    #         pi_ = jax.vmap(compressor, in_axes=(0, None))(d, pi)
-
-    #         return jax.vmap(_posterior, in_axes=(0, None))(pi_, pi) # Vmap over multiple summaries
-
-    #     # Tree map over lists of ingredients for each redshift
-    #     Ls = jax.tree.map(
-    #         lambda d, Finv, compressor: _log_prob_fn_z(d, Finv, compressor), 
-    #         datavectors, 
-    #         Finvs_mcmc,
-    #         linear_compression_fns
-    #     )
-
-    #     prior_log_prob = prior.log_prob(pi)
-
-    #     return jnp.sum(jnp.asarray(Ls)) + prior_log_prob # NOTE: Correct sum? LogSumExp?
+        # return jnp.sum(jnp.asarray(Ls)) + prior_log_prob # NOTE: Correct sum? LogSumExp?
+        # return sum(Ls) + prior_log_prob # NOTE: Correct sum? LogSumExp?
+        return jnp.squeeze(jax.tree.reduce(operator.add, Ls) + prior_log_prob)
 
 
     mcmc_samples, mcmc_samples_log_prob = nuts_sample(
-        key_sample, 
-        log_prob_fn=lambda theta: mcmc_log_prob_fn_compressed(pi=theta), # NOTE: implement with an NN?, 
+        key_mcmc_sample, 
+        log_prob_fn=lambda theta: mcmc_log_prob_fn_compressed_linearised(pi=theta), # NOTE: implement with an NN?, 
         initial_state=jnp.asarray(ALPHA[jnp.newaxis, :]), 
     )
     mcmc_samples = jnp.squeeze(mcmc_samples) # NOTE: if n_chains != 1 ...
     mcmc_samples_log_prob = jnp.squeeze(mcmc_samples_log_prob)
     mcmc_samples_log_prob = finite_samples_log_prob(mcmc_samples_log_prob) # all 
-    mcmc_alpha_log_prob = mcmc_log_prob_fn_compressed(jnp.asarray(ALPHA))
+    mcmc_alpha_log_prob = mcmc_log_prob_fn_compressed_linearised(jnp.asarray(ALPHA))
 
     # Save posterior, Fisher and summary
     mcmc_posterior_filename = get_multi_z_posterior_filename(multi_z_args, mcmc=True)
@@ -1224,8 +1193,6 @@ if __name__ == "__main__":
 
     def test_linearised_mcmc():
 
-        import operator 
-
         try:
             @typecheck
             @eqx.filter_jit
@@ -1311,6 +1278,16 @@ if __name__ == "__main__":
                     color="g",
                     linestyle=":",
                     shade_alpha=0.
+                )
+            )
+            posterior_df = make_df(
+                mcmc_samples, mcmc_samples_log_prob, parameter_strings=PARAMETER_STRINGS
+            )
+            c.add_chain(
+                Chain(
+                    samples=posterior_df, 
+                    name="MCMC[{}]".format(multi_z_args.bulk_or_tails), 
+                    color="r" if multi_z_args.bulk_or_tails == "tails" else "b"
                 )
             )
 
@@ -1924,3 +1901,76 @@ print("Done.")
     #     plt.close()
 
     #     print("MULTI-Z POSTERIOR PLOT FILENAME (MCMC):\n", posterior_plot_filename)
+
+
+
+
+
+    # @typecheck
+    # @eqx.filter_jit
+    # def mcmc_log_prob_fn_compressed(pi: Float[Array, "p"]) -> Scalar: 
+    #     # Compressed data likelihood, equivalent to multi-ensemble-SBI likelihood
+
+    #     @typecheck
+    #     def _log_prob_fn_z(
+    #         pi_: Float[Array, "n d"], Finv: Float[Array, "p p"]
+    #     ) -> Float[Array, "n"]:
+
+    #         # Assumes all datavectors drawn at alpha
+    #         def _posterior(_pi_, pi):
+    #             # p = tfd.MultivariateNormalFullCovariance(loc=pi, covariance_matrix=Finv)  
+    #             # return p.log_prob(_pi_)
+    #             return jax.scipy.stats.multivariate_normal.logpdf(_pi_, pi, Finv)
+
+    #         return jax.vmap(_posterior, in_axes=(0, None))(pi_, pi) # Vmap over multiple summaries
+
+    #     assert (
+    #         jax.tree.structure(summaries) == jax.tree.structure(Finvs_mcmc)
+    #     ), (
+    #         "Structure mismatch: summaries / Finvs_mcmc: {}, {}".format(
+    #             jax.tree.structure(summaries), jax.tree.structure(Finvs_mcmc)
+    #         )
+    #     )
+
+    #     # Tree map over lists of ingredients for each redshift
+    #     Ls = jax.tree.map(lambda d, Finv: _log_prob_fn_z(d, Finv), summaries, Finvs_mcmc)
+
+    #     prior_log_prob = prior.log_prob(pi)
+
+    #     # Sum of log-likelihoods and prior probability
+    #     return jnp.sum(jnp.asarray(Ls)) + prior_log_prob # NOTE: Correct sum? LogSumExp?
+
+
+
+    # @typecheck
+    # @eqx.filter_jit
+    # def mcmc_log_prob_fn_compressed(pi: Float[Array, "p"]) -> Scalar: 
+    #     # Compressed data likelihood, equivalent to multi-ensemble-SBI likelihood
+
+    #     @typecheck
+    #     def _log_prob_fn_z(
+    #         d: Float[Array, "n d"], 
+    #         Finv: Float[Array, "p p"], 
+    #         compressor: Callable
+    #     ) -> Float[Array, "n"]:
+
+    #         # Assumes all datavectors drawn at alpha
+    #         def _posterior(_pi_, pi):
+    #             return jax.scipy.stats.multivariate_normal.logpdf(_pi_, pi, Finv)
+
+    #         pi_ = jax.vmap(compressor, in_axes=(0, None))(d, pi)
+
+    #         return jax.vmap(_posterior, in_axes=(0, None))(pi_, pi) # Vmap over multiple summaries
+
+    #     # Tree map over lists of ingredients for each redshift
+    #     Ls = jax.tree.map(
+    #         lambda d, Finv, compressor: _log_prob_fn_z(d, Finv, compressor), 
+    #         datavectors, 
+    #         Finvs_mcmc,
+    #         linear_compression_fns
+    #     )
+
+    #     prior_log_prob = prior.log_prob(pi)
+
+    #     return jnp.sum(jnp.asarray(Ls)) + prior_log_prob # NOTE: Correct sum? LogSumExp?
+
